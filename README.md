@@ -115,4 +115,4 @@ Fermez le Bloc-notes avant ces tests : s’il est déjà ouvert, il peut ouvrir 
 
 ## Périmètre
 
-Le cœur s’exécute dans le processus Tauri ; le pont utilise le runtime .NET 10 x64 et l’agent Python tourne dans un processus séparé sans accès réseau. Le transport gRPC entre processus séparés, le routage automatique entre modèles, la mémoire, MCP, la voix et les workflows ne sont pas encore implémentés. Voir [la spécification](docs/SPECIFICATION.md), [les contrats](docs/CONTRACTS.md) et [le backlog](docs/BACKLOG.md).
+Le cœur s’exécute dans le processus Tauri ; le pont utilise le runtime .NET 10 x64 et l’agent Python tourne dans un processus séparé sans accès réseau. Le transport gRPC entre processus séparés, le routage automatique entre modèles, la mémoire, MCP, la voix et les workflows ne sont pas encore implémentés. Voir [la feuille de route](docs/ROADMAP.md), [la spécification](docs/SPECIFICATION.md), [les contrats](docs/CONTRACTS.md) et [le backlog](docs/BACKLOG.md).
