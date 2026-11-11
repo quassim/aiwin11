@@ -29,7 +29,8 @@ type ApprovalAction =
   | { kind: "copyFile"; source: string; destination: string; characters: number }
   | { kind: "moveFile"; source: string; destination: string; characters: number }
   | { kind: "trashFile"; name: string; characters: number }
-  | { kind: "inspectWindow"; application: string; title: string };
+  | { kind: "inspectWindow"; application: string; title: string }
+  | { kind: "typeText"; text: string; characters: number };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   | { type: "stage"; stage: string }
@@ -37,7 +38,15 @@ type TaskUpdate =
   | ({ type: "approvalRequired" } & PendingApproval);
 const applicationNames: Record<"notepad", string> = { notepad: "le Bloc-notes" };
 
-function describeApproval(action: ApprovalAction): { title: string; detail: string } {
+function describeApproval(action: ApprovalAction): { title: string; detail: string; quote?: string } {
+  if (action.kind === "typeText") {
+    return {
+      title: "L’agent propose d’écrire dans le Bloc-notes",
+      detail: `Action : écrire ce texte (${action.characters} caractères) dans le Bloc-notes qu’il vient d’ouvrir. `
+        + "Rien n’est écrit si le document contient déjà du texte.",
+      quote: action.text,
+    };
+  }
   if (action.kind === "launch") {
     const name = applicationNames[action.application];
     return {
@@ -126,6 +135,9 @@ const activityNames: Record<string, string> = {
   "file.preview.failed": "Aperçu de fichier indisponible",
   "file.copy.completed": "Fichier copié",
   "file.copy.failed": "Échec de la copie",
+  "input.notepad.completed": "Texte écrit dans le Bloc-notes et vérifié",
+  "input.notepad.partial": "Texte envoyé au Bloc-notes, non vérifié",
+  "input.notepad.failed": "Écriture dans le Bloc-notes impossible",
   "file.move.completed": "Fichier renommé",
   "file.move.failed": "Échec du renommage",
   "file.trash.completed": "Fichier mis à la corbeille d’AiWin11",
@@ -362,6 +374,11 @@ function App() {
                   Ton accord vaut pour cette action uniquement. Sans réponse, la proposition expire
                   dans {Math.round(pendingApproval.expiresInMs / 1000)} secondes.
                 </p>
+                {describeApproval(pendingApproval.action).quote !== undefined && (
+                  <blockquote className="approval-quote" aria-label="Texte qui sera écrit">
+                    {describeApproval(pendingApproval.action).quote}
+                  </blockquote>
+                )}
                 <div className="section-header">
                   <button type="button" disabled={approvalBusy}
                     onClick={() => void resolveApproval(true)}>Autoriser</button>

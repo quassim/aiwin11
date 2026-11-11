@@ -47,7 +47,7 @@ internal static class Notepad
         return windows;
     }
 
-    private static bool IsNotepad(Process process)
+    internal static bool IsNotepad(Process process)
     {
         uint length = 128;
         var family = new StringBuilder((int)length);

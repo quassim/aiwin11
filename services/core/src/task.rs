@@ -93,6 +93,8 @@ pub enum ApprovalAction {
     MoveFile { source: String, destination: String, characters: usize },
     TrashFile { name: String, characters: usize },
     InspectWindow { application: String, title: String },
+    /// The full text is shown to the user before anything is typed.
+    TypeText { text: String, characters: usize },
 }
 
 /// Live progress sent to the requesting window while a task runs.
@@ -130,6 +132,8 @@ enum PlannedAction {
     TrashFile(String),
     /// No argument: the host decides which window (the one used before AiWin11).
     InspectWindow,
+    /// The target is the Notepad this task launched; the model cannot name another one.
+    TypeText(String),
     Reply(String),
 }
 
@@ -146,6 +150,8 @@ const MAX_AGENT_STEPS: usize = 8;
 /// starting the application; the rest absorbs a slow first start of the .NET bridge
 /// (runtime load, antivirus scan of a newly installed binary).
 const LAUNCH_DEADLINE_MS: i64 = 20_000;
+/// Longest text the agent may write into Notepad in one action.
+const MAX_TYPED_CHARS: usize = 2000;
 /// File characters passed back to the model in one observation.
 const MAX_OBSERVATION_CHARS: usize = 16_000;
 const AGENT_PROTOCOL: u32 = 2;
@@ -425,6 +431,53 @@ impl TaskSlot {
                 ("trash_text_file", json!({ "name": name }), observation)
             }
             PlannedAction::InspectWindow => ("inspect_window", json!({}), self.inspect_window(run)?),
+            PlannedAction::TypeText(text) => {
+                let observation = self.type_text(run, &text)?;
+                ("type_in_notepad", json!({ "text": text }), observation)
+            }
+        })
+    }
+
+    /// Writes into the Notepad window this task launched, if the policy allows it. The bridge
+    /// refuses a document that is not empty, so existing text is never replaced.
+    fn type_text<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, text: &str) -> Result<String, &'static str> {
+        let action = AgentAction::TypeText;
+        let characters = text.chars().count();
+        let summary = format!("Écrire {characters} caractères dans le Bloc-notes ouvert par l’agent");
+        let effect = match self.decide(run, action, &summary)? {
+            Err(observation) => return Ok(observation),
+            Ok(effect) => effect,
+        };
+        // A dry run needs no target; a real write needs this task's verified Notepad.
+        let target = run.launched_notepad;
+        if effect != Effect::Simulate && target.is_none() {
+            run.report(action, &summary, ActionStatus::Failed, Some("NO_NOTEPAD_LAUNCHED"));
+            return Ok("Aucun Bloc-notes n’a été ouvert et vérifié dans cette demande : ouvre-le d’abord avec \
+                launch_application. Rien n’a été écrit.".into());
+        }
+        let approval = ApprovalAction::TypeText { text: text.to_owned(), characters };
+        let grant = match self.authorize(run, effect, action, &summary, Capability::TypeText, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let process_id = target.ok_or("NO_NOTEPAD_LAUNCHED")?;
+        let result = self.dispatching(|| -> Result<bool, &'static str> {
+            lock(run.core)?.agent_type_in_notepad(run.task, grant, process_id, text)
+        })?;
+        Ok(match result {
+            Ok(true) => {
+                run.report(action, &summary, ActionStatus::Done, None);
+                "Texte écrit dans le Bloc-notes et relu à l’identique.".into()
+            }
+            Ok(false) => {
+                run.report(action, &summary, ActionStatus::Partial, Some("text_unverified"));
+                "Texte envoyé au Bloc-notes, mais il n’a pas pu être relu à l’identique.".into()
+            }
+            Err(code) => {
+                let status = if code == "INPUT_ACCESS_DENIED" { ActionStatus::Denied } else { ActionStatus::Failed };
+                run.report(action, &summary, status, Some(code));
+                format!("Écriture impossible : {code}. Rien n’a été écrit.")
+            }
         })
     }
 
@@ -973,6 +1026,14 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
                 _ => Err("AGENT_REJECTED"),
             }
         }
+        ("tool", Some("type_in_notepad"), Some(arguments), None) if arguments.len() == 1 => {
+            match arguments.get("text").and_then(Value::as_str) {
+                Some(text) if !text.is_empty() && text.chars().count() <= MAX_TYPED_CHARS && !text.contains('\0') => {
+                    Ok(PlannedAction::TypeText(text.to_owned()))
+                }
+                _ => Err("AGENT_REJECTED"),
+            }
+        }
         ("tool", Some("trash_text_file"), Some(arguments), None) if arguments.len() == 1 => {
             file_argument(&arguments, "name").map(PlannedAction::TrashFile).ok_or("AGENT_REJECTED")
         }
@@ -1100,7 +1161,14 @@ mod tests {
             accept(json!({"version":2,"action":"tool","tool":"trash_text_file","arguments":{"name":"a.txt"}})),
             Ok(PlannedAction::TrashFile("a.txt".into()))
         );
+        assert_eq!(
+            accept(json!({"version":2,"action":"tool","tool":"type_in_notepad","arguments":{"text":"Pain\nLait"}})),
+            Ok(PlannedAction::TypeText("Pain\nLait".into()))
+        );
         for invalid in [
+            json!({"version":2,"action":"tool","tool":"type_in_notepad","arguments":{"text":""}}),
+            json!({"version":2,"action":"tool","tool":"type_in_notepad","arguments":{"text":"a".repeat(MAX_TYPED_CHARS + 1)}}),
+            json!({"version":2,"action":"tool","tool":"type_in_notepad","arguments":{"text":"ok","process_id":4}}),
             json!({"version":2,"action":"tool","tool":"move_text_file","arguments":{"source":"a.txt","destination":"A.TXT"}}),
             json!({"version":2,"action":"tool","tool":"trash_text_file","arguments":{"name":"a.txt","permanent":true}}),
             json!({"version":2,"action":"tool","tool":"delete_text_file","arguments":{"name":"a.txt"}}),
@@ -1275,6 +1343,8 @@ mod tests {
         let inspect = ApprovalAction::InspectWindow { application: "charmap".into(), title: "Table".into() };
         assert_eq!(serde_json::to_value(inspect).unwrap(),
             json!({"kind":"inspectWindow","application":"charmap","title":"Table"}));
+        let typing = ApprovalAction::TypeText { text: "Pain".into(), characters: 4 };
+        assert_eq!(serde_json::to_value(typing).unwrap(), json!({"kind":"typeText","text":"Pain","characters":4}));
     }
 
     fn step(tool: &'static str, arguments: Value, call_id: &str) -> StepRecord {
@@ -1360,6 +1430,29 @@ mod tests {
         for expected in ["tool.execution.completed", "policy.allowed", "policy.approval.granted", "policy.evaluated"] {
             assert!(kinds.contains(&expected.to_owned()), "{expected} in {kinds:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "requires Ollama, the installed companions, an interactive desktop and no open Notepad"]
+    fn opens_notepad_then_writes_into_it_after_two_approvals() {
+        let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
+        let task = TaskSlot::default();
+        let approvals = Mutex::new(Vec::new());
+        let outcome = task.run(&core, None,
+            &live_request("Ouvre le Bloc-notes puis écris-y exactement : Liste de courses : pain, lait."),
+            |update| {
+                if let TaskUpdate::ApprovalRequired { approval_id, action, .. } = update {
+                    approvals.lock().unwrap().push(action);
+                    task.resolve_approval(&approval_id, true).unwrap();
+                }
+            }).unwrap();
+        assert_eq!(statuses(&outcome, AgentAction::LaunchApplication), [ActionStatus::Done], "{outcome:?}");
+        assert_eq!(statuses(&outcome, AgentAction::TypeText), [ActionStatus::Done], "{outcome:?}");
+        let approvals = approvals.lock().unwrap();
+        assert!(matches!(approvals[0], ApprovalAction::Launch { .. }));
+        assert!(matches!(&approvals[1], ApprovalAction::TypeText { text, .. } if text.contains("pain")));
+        let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert!(kinds.contains(&"input.notepad.completed".to_owned()), "{kinds:?}");
     }
 
     #[test]

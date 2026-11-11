@@ -106,6 +106,17 @@ pas de suppression définitive). L’utilisateur doit toujours l’approuver.",
 juste avant AiWin11. Sans capture d’écran. L’utilisateur doit l’approuver.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
+        functions.push(json!({
+            "name": "type_in_notepad",
+            "description": "Écrit un texte dans le Bloc-notes que tu as ouvert avec launch_application dans cette même \
+demande. Le document doit être vide ; aucun texte existant n’est jamais remplacé. 2000 caractères au plus.",
+            "parameters": {
+                "type": "object",
+                "properties": { "text": { "type": "string", "description": "Texte à écrire" } },
+                "required": ["text"],
+                "additionalProperties": false
+            }
+        }));
     }
     Value::Array(functions.into_iter().map(|mut function| {
         if strict {
@@ -644,9 +655,9 @@ mod tests {
         assert_eq!(
             names(tool_catalog(false, true, true)),
             ["launch_application", "list_text_files", "read_text_file", "copy_text_file", "move_text_file",
-             "trash_text_file", "inspect_window"]
+             "trash_text_file", "inspect_window", "type_in_notepad"]
         );
-        assert_eq!(names(tool_catalog(false, false, true)), ["launch_application", "inspect_window"]);
+        assert_eq!(names(tool_catalog(false, false, true)), ["launch_application", "inspect_window", "type_in_notepad"]);
         let catalog = tool_catalog(true, false, false);
         assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));
         assert_eq!(catalog[0]["function"]["strict"], true);

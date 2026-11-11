@@ -77,6 +77,15 @@ class AgentProtocolTest(unittest.TestCase):
             with self.subTest(proposal=proposal):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [proposal]}})
 
+    def test_typed_text_is_bounded_and_has_no_target_argument(self):
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("type_in_notepad", {"text": "Pain\nLait"})]}})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["arguments"], {"text": "Pain\nLait"})
+        for arguments in [{"text": ""}, {"text": "a" * 2001}, {"text": "a\x00b"}, {"text": 3},
+                          {"text": "ok", "process_id": 1234}, {"text": "ok", "window": 1}]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("type_in_notepad", arguments)]}})
+
     def test_window_inspection_takes_no_target_from_the_model(self):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("inspect_window", {})]}})
         self.assertEqual(result.returncode, 0)

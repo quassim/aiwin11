@@ -9,7 +9,7 @@ use std::{
 use aiwin11_contracts::{
     v1::{
         command::Operation, result::Status, AnalyzeCapture, CharacterMapDigit, CaptureForeground, Command,
-        InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, UiTree,
+        InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, TypeInNotepad, UiTree,
     },
     Message, SCHEMA_VERSION,
 };
@@ -30,6 +30,8 @@ const REPLY_GRACE: Duration = Duration::from_secs(2);
 const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(25);
 const MAX_MESSAGE_BYTES: usize = 1024;
 const MAX_JPEG_BYTES: usize = 256 * 1024;
+/// Largest command sent to the bridge: room for 2000 characters of Notepad text.
+const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_TREE_REPLY_BYTES: usize = 32 * 1024;
 const MAX_AGENT_NODES: usize = 80;
 
@@ -183,6 +185,40 @@ impl Core {
             }
             named_tree(reply.ui_tree?)
         })
+    }
+
+    /// Agent tool: writes `text` into the empty editor of the Notepad process `process_id`,
+    /// which the same task launched. Returns whether the text was read back identical.
+    pub(crate) fn agent_type_in_notepad(
+        &mut self, task: &str, policy: Policy, process_id: u32, text: &str,
+    ) -> Result<bool, &'static str> {
+        let operation = Operation::TypeInNotepad(TypeInNotepad { process_id, text: text.to_owned() });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "INPUT_ACCESS_DENIED",
+            _ => "INPUT_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match dispatch(&command) {
+            Some(reply) if reply.ui_tree.is_none() && reply.window_capture.is_none()
+                && reply.window_info.is_none() && reply.process_id.is_none() =>
+            {
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Ok(true),
+                    (Status::Partial, Some("text_unverified")) => Ok(false),
+                    (Status::Denied, Some("document_not_empty")) => Err("NOTEPAD_NOT_EMPTY"),
+                    (Status::Denied, Some("notepad_unavailable")) => Err("NOTEPAD_UNAVAILABLE"),
+                    _ => Err("BRIDGE_FAILED"),
+                }
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(true) => ("input.notepad.completed", "text_verified"),
+            Ok(false) => ("input.notepad.partial", "text_unverified"),
+            Err(code) => ("input.notepad.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "INPUT_AUDIT_UNAVAILABLE")?;
+        outcome
     }
 
     fn agent_bridge_call<T>(
@@ -358,7 +394,7 @@ fn take_bridge() -> Option<std::process::Child> {
 
 fn dispatch(command: &Command) -> Option<BridgeReply> {
     let bytes = command.encode_to_vec();
-    if bytes.len() > MAX_MESSAGE_BYTES {
+    if bytes.len() > MAX_COMMAND_BYTES {
         return None;
     }
     // The bridge stops working at the command deadline, then reports. Wait for that report
@@ -366,7 +402,8 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     let deadline = Instant::now() + bridge_wait(command.deadline_ms, unix_millis()?);
     let mut child = take_bridge()?;
 
-    // The command fits in the anonymous pipe buffer. Close the writer to delimit the frame.
+    // The bridge reads its whole stdin before writing anything, so this write cannot deadlock.
+    // Close the writer to delimit the frame.
     let wrote = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(&bytes).is_ok());
     let limit = match command.operation {
         Some(Operation::CaptureForeground(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,

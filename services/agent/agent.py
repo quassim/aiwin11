@@ -34,6 +34,14 @@ def is_text_file_name(value):
     )
 
 
+MAX_TYPED_CHARS = 2000
+
+
+def is_typed_text(value):
+    """Text for Notepad: 1 to 2000 characters, no NUL."""
+    return isinstance(value, str) and 0 < len(value) <= MAX_TYPED_CHARS and "\x00" not in value
+
+
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
 TOOLS = {
@@ -44,6 +52,7 @@ TOOLS = {
     "move_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
     "trash_text_file": {"name": is_text_file_name},
     "inspect_window": {},
+    "type_in_notepad": {"text": is_typed_text},
 }
 
 # Tools whose two file names must differ (ignoring case).

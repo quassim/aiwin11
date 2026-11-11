@@ -4,7 +4,8 @@ using System.IO;
 using Google.Protobuf;
 using Protocol = Aiwin11.V1;
 
-const int maxMessageBytes = 1024;
+// Large enough for 2000 characters of Notepad text (UTF-8) plus the envelope.
+const int maxMessageBytes = 16 * 1024;
 using var input = Console.OpenStandardInput();
 using var output = Console.OpenStandardOutput();
 var bytes = new byte[maxMessageBytes + 1];
@@ -33,7 +34,8 @@ var result = new Protocol.Result { SchemaVersion = 1, RequestId = command.Reques
 var elapsed = Stopwatch.StartNew();
 if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", out _)
     || (command.InspectForeground is null && command.CaptureForeground is null && command.CharacterMapDigit is null
-        && command.LocateWindow is null && command.InspectWindow is null
+        && command.LocateWindow is null && command.InspectWindow is null && command.TypeInNotepad is null
+        && command.CaptureWindow is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -52,6 +54,13 @@ else if (command.CharacterMapDigit is { } entry)
         Reject(Protocol.Result.Types.Status.Denied, "invalid_digit", "A decimal digit is required.");
     else
         CharacterMapInput.Apply(entry.Digit, command.DeadlineMs, result);
+}
+else if (command.TypeInNotepad is { } typing)
+{
+    if (typing.Text.Length == 0 || typing.Text.Length > NotepadInput.MaxText * 2 || typing.Text.Contains('\0'))
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_text", "The text is empty, too long or invalid.");
+    else
+        NotepadInput.Apply(typing.ProcessId, typing.Text, command.DeadlineMs, result);
 }
 else if (command.LocateWindow is { } locate)
 {
@@ -123,7 +132,8 @@ else if (command.InspectForeground is not null)
         Reject(Protocol.Result.Types.Status.Failed, "inspection_failed", "Windows could not inspect the foreground window.");
     }
 }
-else
+// Explicit: a command without a dedicated branch above must never fall into the launch.
+else if (command.LaunchApplication?.Application == Protocol.LaunchApplication.Types.Application.Notepad)
 {
     try
     {
@@ -156,6 +166,10 @@ else
     {
         Reject(Protocol.Result.Types.Status.Failed, "bridge_failure", "Windows could not complete the Notepad operation.");
     }
+}
+else
+{
+    Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
 }
 
 result.DurationMs = (ulong)elapsed.ElapsedMilliseconds;
