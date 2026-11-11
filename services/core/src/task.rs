@@ -1,7 +1,7 @@
 use std::{
     io::{Read, Write},
     os::windows::process::CommandExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command as Process, Stdio},
     sync::{atomic::{AtomicU8, Ordering}, Mutex},
     thread,
@@ -13,11 +13,15 @@ use aiwin11_contracts::{
     SCHEMA_VERSION,
 };
 use rusqlite::params;
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::{broker::{ExecutionError, Peer, Policy}, model_gateway::Ollama, openai, Core};
+use crate::{
+    broker::{ExecutionError, Peer, Policy},
+    model_gateway::{Ollama, Proposal, MAX_REPLY_CHARS},
+    openai, Core,
+};
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,15 +36,36 @@ pub struct TaskRequest {
     pub provider: Provider,
     pub prompt: String,
     pub model: String,
+    /// Scoped approval: lets the broker allow a Notepad launch proposed for this request.
     pub approved: bool,
+    /// Scoped approval: lets this request's prompt be sent to the cloud provider.
     pub cloud_approved: bool,
+}
+
+/// What a finished request produced.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TaskOutcome {
+    #[serde(rename_all = "camelCase")]
+    Launched { application: &'static str, process_id: u32 },
+    Reply { text: String },
+}
+
+/// A decision accepted by both the Python agent and the host.
+#[derive(Debug, PartialEq, Eq)]
+enum PlannedAction {
+    Launch(Application),
+    Reply(String),
 }
 
 const IDLE: u8 = 0;
 const PLANNING: u8 = 1;
 const CANCELLED: u8 = 2;
 const DISPATCHING: u8 = 3;
-const MAX_AGENT_INPUT: usize = 4096;
+pub const MAX_PROMPT_CHARS: usize = 2000;
+const AGENT_PROTOCOL: u32 = 2;
+const MAX_AGENT_INPUT: usize = 32 * 1024;
+const MAX_AGENT_OUTPUT: usize = 32 * 1024;
 
 #[derive(Default)]
 pub struct TaskSlot {
@@ -57,12 +82,8 @@ impl TaskSlot {
         core: &Mutex<Core>,
         request: &TaskRequest,
         progress: impl Fn(&'static str),
-    ) -> Result<u32, &'static str> {
-        let prompt = &request.prompt;
-        let normalized = prompt.trim().trim_end_matches(['.', '!', '?']).trim();
-        if prompt.len() > 256 || !normalized.eq_ignore_ascii_case("Ouvre le Bloc-notes") {
-            return Err("UNSUPPORTED_REQUEST");
-        }
+    ) -> Result<TaskOutcome, &'static str> {
+        let prompt = validate_prompt(&request.prompt)?;
         if request.model.is_empty() || request.model.len() > 256 {
             return Err("MODEL_REQUIRED");
         }
@@ -73,7 +94,7 @@ impl TaskSlot {
         let task = Uuid::new_v4().to_string();
         record(core, &task, "task.created")?;
         progress("task.created");
-        let outcome = self.plan_and_execute(core, &task, request, &progress);
+        let outcome = self.plan_and_execute(core, &task, prompt, request, &progress);
         // Arbitrate cancellation even when the provider or agent returns an error.
         let outcome = match self.phase.compare_exchange(
             PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire,
@@ -94,14 +115,15 @@ impl TaskSlot {
         &self,
         core: &Mutex<Core>,
         task: &str,
+        prompt: &str,
         request: &TaskRequest,
         progress: &impl Fn(&'static str),
-    ) -> Result<u32, &'static str> {
+    ) -> Result<TaskOutcome, &'static str> {
         record(core, task, "task.planning")?;
         progress("task.planning");
-        let calls = match request.provider {
+        let proposal = match request.provider {
             Provider::Ollama => Ollama::connect()
-                .and_then(|provider| provider.propose_notepad(&request.model))
+                .and_then(|provider| provider.propose(&request.model, prompt))
                 .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?,
             Provider::OpenAi => {
                 if !request.cloud_approved {
@@ -112,13 +134,21 @@ impl TaskSlot {
                 if self.phase.load(Ordering::Acquire) == CANCELLED {
                     return Err("TASK_CANCELLED");
                 }
-                openai::propose_notepad(&request.model)?
+                openai::propose(&request.model, prompt)?
             }
         };
         if self.phase.load(Ordering::Acquire) == CANCELLED {
             return Err("TASK_CANCELLED");
         }
-        run_agent(calls)?;
+        let application = match run_agent(&proposal)? {
+            PlannedAction::Reply(text) => {
+                // The reply text stays out of the journal, like prompts.
+                record(core, task, "agent.reply")?;
+                progress("agent.reply");
+                return Ok(TaskOutcome::Reply { text });
+            }
+            PlannedAction::Launch(application) => application,
+        };
         record(core, task, "agent.tool.requested")?;
         progress("agent.tool.requested");
         let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
@@ -134,12 +164,13 @@ impl TaskSlot {
             deadline_ms,
             idempotency_key: task.into(),
             operation: Some(Operation::LaunchApplication(LaunchApplication {
-                application: Application::Notepad as i32,
+                application: application as i32,
             })),
         };
         self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "TASK_CANCELLED")?;
         core.execute_windows(Policy { allow_agent_to_launch_notepad: request.approved }, Peer::Agent, &command)
+            .map(|process_id| TaskOutcome::Launched { application: "notepad", process_id })
             .map_err(|error| match error {
                 ExecutionError::Denied(_) => "ACTION_DENIED",
                 ExecutionError::WindowUnverified => "WINDOW_UNVERIFIED",
@@ -148,6 +179,14 @@ impl TaskSlot {
                 ExecutionError::ExecutionFailed => "BRIDGE_FAILED",
             })
     }
+}
+
+fn validate_prompt(prompt: &str) -> Result<&str, &'static str> {
+    let prompt = prompt.trim();
+    if prompt.is_empty() || prompt.chars().count() > MAX_PROMPT_CHARS || prompt.contains('\0') {
+        return Err("PROMPT_INVALID");
+    }
+    Ok(prompt)
 }
 
 struct ResetSlot<'a>(&'a TaskSlot);
@@ -171,10 +210,35 @@ fn record(core: &Mutex<Core>, task: &str, kind: &str) -> Result<(), &'static str
 #[serde(deny_unknown_fields)]
 struct AgentReply {
     version: u32,
-    operation: String,
+    action: String,
+    tool: Option<String>,
+    arguments: Option<Map<String, Value>>,
+    text: Option<String>,
 }
 
-fn run_agent(calls: Value) -> Result<(), &'static str> {
+/// Validates the agent decision again on the trusted side.
+fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
+    let reply: AgentReply = serde_json::from_slice(bytes).map_err(|_| "AGENT_REJECTED")?;
+    if reply.version != AGENT_PROTOCOL {
+        return Err("AGENT_REJECTED");
+    }
+    match (reply.action.as_str(), reply.tool.as_deref(), reply.arguments, reply.text) {
+        ("tool", Some("launch_application"), Some(arguments), None)
+            if arguments.len() == 1
+                && arguments.get("application").and_then(Value::as_str) == Some("notepad") =>
+        {
+            Ok(PlannedAction::Launch(Application::Notepad))
+        }
+        ("reply", None, None, Some(text))
+            if !text.trim().is_empty() && text.chars().count() <= MAX_REPLY_CHARS =>
+        {
+            Ok(PlannedAction::Reply(text))
+        }
+        _ => Err("AGENT_REJECTED"),
+    }
+}
+
+fn run_agent(proposal: &Proposal) -> Result<PlannedAction, &'static str> {
     let python = std::env::var_os("AIWIN11_PYTHON").map(PathBuf::from)
         .filter(|path| path.is_absolute() && path.is_file())
         .ok_or("AGENT_UNAVAILABLE")?;
@@ -184,7 +248,14 @@ fn run_agent(calls: Value) -> Result<(), &'static str> {
     if !script.is_file() {
         return Err("AGENT_UNAVAILABLE");
     }
-    let bytes = json!({ "version": 1, "calls": calls }).to_string().into_bytes();
+    invoke_agent(python.as_path(), &script, directory, proposal)
+}
+
+fn invoke_agent(
+    python: &Path, script: &Path, directory: &Path, proposal: &Proposal,
+) -> Result<PlannedAction, &'static str> {
+    let bytes = json!({ "version": AGENT_PROTOCOL, "proposal": proposal.to_agent_message() })
+        .to_string().into_bytes();
     if bytes.len() > MAX_AGENT_INPUT {
         return Err("AGENT_REJECTED");
     }
@@ -201,6 +272,11 @@ fn run_agent(calls: Value) -> Result<(), &'static str> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn().map_err(|_| "AGENT_UNAVAILABLE")?;
+    // Drain stdout concurrently so a reply larger than the pipe buffer cannot stall the child.
+    let reader = child.stdout.take().map(|stdout| thread::spawn(move || {
+        let mut output = Vec::new();
+        stdout.take(MAX_AGENT_OUTPUT as u64 + 1).read_to_end(&mut output).map(|_| output)
+    }));
     let wrote = child.stdin.take().is_some_and(|mut input| input.write_all(&bytes).is_ok());
     let deadline = Instant::now() + Duration::from_secs(4);
     let success = loop {
@@ -215,20 +291,14 @@ fn run_agent(calls: Value) -> Result<(), &'static str> {
     };
     if !success {
         let _ = child.kill();
-        let _ = child.wait();
+    }
+    let _ = child.wait();
+    let output = reader.ok_or("AGENT_REJECTED")?.join()
+        .map_err(|_| "AGENT_REJECTED")?.map_err(|_| "AGENT_REJECTED")?;
+    if !success || output.len() > MAX_AGENT_OUTPUT {
         return Err("AGENT_REJECTED");
     }
-    let mut output = Vec::new();
-    child.stdout.take().ok_or("AGENT_REJECTED")?.take(257)
-        .read_to_end(&mut output).map_err(|_| "AGENT_REJECTED")?;
-    if output.len() > 256 {
-        return Err("AGENT_REJECTED");
-    }
-    let reply: AgentReply = serde_json::from_slice(&output).map_err(|_| "AGENT_REJECTED")?;
-    if reply.version != 1 || reply.operation != "launch_notepad" {
-        return Err("AGENT_REJECTED");
-    }
-    Ok(())
+    accept_agent_reply(&output)
 }
 
 #[cfg(test)]
@@ -237,27 +307,96 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
+    fn prompts_are_trimmed_and_bounded() {
+        assert_eq!(validate_prompt("  Ouvre le Bloc-notes \n"), Ok("Ouvre le Bloc-notes"));
+        assert_eq!(validate_prompt(&"é".repeat(MAX_PROMPT_CHARS)).map(str::len), Ok(MAX_PROMPT_CHARS * 2));
+        for invalid in ["", "   ", "a\0b"] {
+            assert_eq!(validate_prompt(invalid), Err("PROMPT_INVALID"));
+        }
+        assert_eq!(validate_prompt(&"a".repeat(MAX_PROMPT_CHARS + 1)), Err("PROMPT_INVALID"));
+    }
+
+    #[test]
+    fn host_accepts_only_registered_agent_decisions() {
+        let accept = |value: Value| accept_agent_reply(value.to_string().as_bytes());
+        assert_eq!(
+            accept(json!({"version":2,"action":"tool","tool":"launch_application","arguments":{"application":"notepad"}})),
+            Ok(PlannedAction::Launch(Application::Notepad))
+        );
+        assert_eq!(
+            accept(json!({"version":2,"action":"reply","text":"Bonjour"})),
+            Ok(PlannedAction::Reply("Bonjour".into()))
+        );
+        for invalid in [
+            json!({"version":1,"action":"reply","text":"Bonjour"}),
+            json!({"version":2,"action":"reply","text":"  "}),
+            json!({"version":2,"action":"reply","text":"a".repeat(MAX_REPLY_CHARS + 1)}),
+            json!({"version":2,"action":"reply","text":"x","tool":"launch_application"}),
+            json!({"version":2,"action":"tool","tool":"launch_application","arguments":{"application":"cmd"}}),
+            json!({"version":2,"action":"tool","tool":"launch_application","arguments":{"application":"notepad","path":"x"}}),
+            json!({"version":2,"action":"tool","tool":"shell","arguments":{"application":"notepad"}}),
+            json!({"version":2,"action":"tool","tool":"launch_application","arguments":{"application":"notepad"},"extra":1}),
+            json!({"version":2,"action":"execute"}),
+        ] {
+            assert_eq!(accept(invalid.clone()), Err("AGENT_REJECTED"), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn outcomes_serialize_for_the_desktop() {
+        assert_eq!(
+            serde_json::to_value(TaskOutcome::Launched { application: "notepad", process_id: 7 }).unwrap(),
+            json!({"kind":"launched","application":"notepad","processId":7})
+        );
+        assert_eq!(
+            serde_json::to_value(TaskOutcome::Reply { text: "ok".into() }).unwrap(),
+            json!({"kind":"reply","text":"ok"})
+        );
+    }
+
+    #[test]
+    fn real_agent_process_returns_large_replies_and_rejects_unknown_tools() {
+        // Requires `python` on PATH, as in the Windows CI job.
+        let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../agent");
+        let script = agent.join("agent.py");
+        let invoke = |proposal| invoke_agent(Path::new("python"), &script, &agent, &proposal);
+        let long = "é".repeat(MAX_REPLY_CHARS);
+        assert_eq!(invoke(Proposal::Text(long.clone())), Ok(PlannedAction::Reply(long)));
+        assert_eq!(
+            invoke(Proposal::Calls(json!([{"function":{"name":"launch_application","arguments":{"application":"notepad"}}}]))),
+            Ok(PlannedAction::Launch(Application::Notepad))
+        );
+        assert_eq!(
+            invoke(Proposal::Calls(json!([{"function":{"name":"run_shell","arguments":{"command":"dir"}}}]))),
+            Err("AGENT_REJECTED")
+        );
+    }
+
+    fn live_request(prompt: &str, approved: bool) -> TaskRequest {
+        TaskRequest {
+            provider: Provider::Ollama,
+            prompt: prompt.into(),
+            model: std::env::var("AIWIN11_TEST_MODEL").expect("set AIWIN11_TEST_MODEL"),
+            approved,
+            cloud_approved: false,
+        }
+    }
+
+    #[test]
     #[ignore = "requires Ollama, the installed companions and an interactive Windows desktop"]
     fn opens_notepad_only_after_broker_authorization() {
-        let model = std::env::var("AIWIN11_TEST_MODEL").expect("set AIWIN11_TEST_MODEL");
         let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
         let task = TaskSlot::default();
-        let mut request = TaskRequest {
-            provider: Provider::Ollama,
-            prompt: "Ouvre le Bloc-notes".into(),
-            model,
-            approved: false,
-            cloud_approved: false,
-        };
-        assert_eq!(task.run(&core, &request, |_| {}), Err("ACTION_DENIED"));
+        assert_eq!(task.run(&core, &live_request("Ouvre le Bloc-notes", false), |_| {}), Err("ACTION_DENIED"));
         let denied = core.lock().unwrap().activity().unwrap();
         assert!(denied.iter().any(|event| event.kind == "policy.denied"));
         assert!(!denied.iter().any(|event| event.kind.starts_with("tool.execution.")));
 
-        request.approved = true;
         let stages = Mutex::new(Vec::new());
-        let pid = task.run(&core, &request, |stage| stages.lock().unwrap().push(stage)).unwrap();
-        assert!(pid > 0);
+        let outcome = task.run(&core, &live_request("Peux-tu ouvrir le Bloc-notes ?", true), |stage| {
+            stages.lock().unwrap().push(stage)
+        }).unwrap();
+        assert!(matches!(outcome, TaskOutcome::Launched { application: "notepad", process_id } if process_id > 0));
         assert_eq!(
             *stages.lock().unwrap(),
             ["task.created", "task.planning", "agent.tool.requested"]
@@ -266,5 +405,18 @@ mod tests {
         assert_eq!(activity[0].kind, "task.completed");
         assert_eq!(activity[1].kind, "tool.execution.completed");
         assert_eq!(activity[2].kind, "policy.allowed");
+    }
+
+    #[test]
+    #[ignore = "requires Ollama and the installed agent companion"]
+    fn answers_without_side_effects_when_no_tool_applies() {
+        let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
+        let task = TaskSlot::default();
+        let outcome = task.run(&core, &live_request("Combien font deux plus trois ?", true), |_| {}).unwrap();
+        assert!(matches!(outcome, TaskOutcome::Reply { ref text } if !text.is_empty()));
+        let activity = core.lock().unwrap().activity().unwrap();
+        assert_eq!(activity[0].kind, "task.completed");
+        assert_eq!(activity[1].kind, "agent.reply");
+        assert!(!activity.iter().any(|event| event.kind.starts_with("policy.") || event.kind.starts_with("tool.")));
     }
 }

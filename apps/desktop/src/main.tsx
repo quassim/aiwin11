@@ -9,6 +9,10 @@ type Page = "Accueil" | "Modèles" | "Inspecteur" | "Fichiers" | "Activité";
 type Provider = "ollama" | "openai";
 type Activity = { sequence: number; kind: string; timestamp: string };
 type Snapshot = { sessionId: string; events: Activity[] };
+type TaskOutcome =
+  | { kind: "launched"; application: "notepad"; processId: number }
+  | { kind: "reply"; text: string };
+const MAX_PROMPT_CHARS = 2000;
 
 const pages: Page[] = ["Accueil", "Modèles", "Inspecteur", "Fichiers", "Activité"];
 const activityNames: Record<string, string> = {
@@ -17,7 +21,8 @@ const activityNames: Record<string, string> = {
   "task.planning": "Consultation du modèle",
   "model.cloud.authorized": "Requête OpenAI autorisée",
   "model.cloud.denied": "Requête OpenAI refusée",
-  "agent.tool.requested": "Ouverture demandée par l’agent",
+  "agent.tool.requested": "Action demandée par l’agent",
+  "agent.reply": "Réponse de l’agent",
   "policy.allowed": "Action autorisée",
   "policy.denied": "Action refusée",
   "tool.execution.completed": "Nouvelle fenêtre vérifiée",
@@ -43,18 +48,18 @@ const activityNames: Record<string, string> = {
 };
 
 const taskErrors: Record<string, string> = {
-  UNSUPPORTED_REQUEST: "Cette version prend en charge « Ouvre le Bloc-notes ».",
+  PROMPT_INVALID: `Saisis une demande de ${MAX_PROMPT_CHARS} caractères au maximum.`,
   MODEL_REQUIRED: "Choisis un identifiant de modèle valide dans Modèles.",
   CLOUD_APPROVAL_REQUIRED: "Autorise la requête OpenAI pour cette demande.",
   CLOUD_KEY_REQUIRED: "Enregistre une clé API OpenAI dans Modèles.",
   CLOUD_REQUEST_FAILED: "La requête OpenAI a échoué. Vérifie la clé, l’accès au modèle et la connexion.",
-  CLOUD_PROPOSAL_INVALID: "Le modèle OpenAI n’a pas proposé un appel d’outil valide.",
+  CLOUD_PROPOSAL_INVALID: "Le modèle OpenAI n’a renvoyé ni réponse complète ni appel d’outil valide.",
   CREDENTIAL_STORE_UNAVAILABLE: "Le Gestionnaire d’identifiants Windows est indisponible.",
   INVALID_API_KEY: "Le format de la clé API est invalide.",
-  MODEL_UNAVAILABLE_OR_INVALID: "Ollama ou le modèle est indisponible, ou le modèle n’a pas proposé l’outil attendu.",
+  MODEL_UNAVAILABLE_OR_INVALID: "Ollama ou le modèle est indisponible, ou le modèle ne prend pas en charge les appels d’outils.",
   AGENT_UNAVAILABLE: "L’agent Python est indisponible. Vérifie son installation.",
-  AGENT_REJECTED: "L’agent a rejeté la proposition du modèle.",
-  ACTION_DENIED: "Le broker a refusé l’ouverture.",
+  AGENT_REJECTED: "L’agent a rejeté la proposition du modèle : outil inconnu ou arguments invalides.",
+  ACTION_DENIED: "L’agent a proposé d’ouvrir le Bloc-notes, mais tu ne l’as pas autorisé pour cette demande.",
   TASK_BUSY: "Une demande est déjà en cours.",
   TASK_CANCELLED: "Demande annulée avant l’ouverture.",
   WINDOW_UNVERIFIED: "Windows a reçu la demande. Aucune nouvelle fenêtre du Bloc-notes n’a pu être confirmée.",
@@ -83,8 +88,9 @@ function App() {
   const [lastPrompt, setLastPrompt] = useState("");
   const [taskStatus, setTaskStatus] = useState("");
   const [taskProgress, setTaskProgress] = useState("");
+  const [agentReply, setAgentReply] = useState("");
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
-  const canSend = !running && !!selectedModel && !!prompt.trim() && approved
+  const canSend = !running && !!selectedModel && !!prompt.trim()
     && (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
 
   function resetApproval() {
@@ -146,16 +152,22 @@ function App() {
     setLastPrompt(prompt);
     setTaskStatus("Demande en cours…");
     setTaskProgress("");
+    setAgentReply("");
     const progress = new Channel<string>((stage) => {
       setTaskProgress(activityNames[stage] ?? "");
       refresh();
     });
     try {
-      await invoke<number>("run_task", {
+      const outcome = await invoke<TaskOutcome>("run_task", {
         request: { prompt, model: selectedModel, provider, approved, cloudApproved },
         progress,
       });
-      setTaskStatus("Le Bloc-notes est ouvert. Une nouvelle fenêtre a été vérifiée.");
+      if (outcome.kind === "reply") {
+        setAgentReply(outcome.text);
+        setTaskStatus("");
+      } else {
+        setTaskStatus("Le Bloc-notes est ouvert. Une nouvelle fenêtre a été vérifiée.");
+      }
       setPrompt("");
     } catch (failure) {
       setTaskStatus(taskErrors[String(failure)] ?? "Le cœur local n’a pas pu terminer la demande.");
@@ -198,6 +210,7 @@ function App() {
               <button className="link-button" onClick={() => setPage("Modèles")}>{selectedModel || "Choisir un modèle"}</button>
             </div>
             {lastPrompt && <p className="user-message">{lastPrompt}</p>}
+            {agentReply && <p className="agent-message" aria-label="Réponse de l’agent">{agentReply}</p>}
             {taskStatus && <p role="status">
               {running && taskStatus === "Demande en cours…" && taskProgress ? taskProgress : taskStatus}
             </p>}
@@ -206,17 +219,17 @@ function App() {
               if (canSend) void runTask();
             }}>
               <label htmlFor="prompt">Ta demande</label>
-              <textarea id="prompt" rows={2} maxLength={256} placeholder="Ouvre le Bloc-notes"
+              <textarea id="prompt" rows={3} maxLength={MAX_PROMPT_CHARS} placeholder="Ouvre le Bloc-notes"
                 value={prompt} disabled={running} onChange={(event) => { setPrompt(event.target.value); resetApproval(); }} />
               <label className="approval">
                 <input type="checkbox" checked={approved} disabled={running}
                   onChange={(event) => setApproved(event.target.checked)} />
-                Autoriser l’ouverture du Bloc-notes pour cette demande
+                Si l’agent le propose, autoriser l’ouverture du Bloc-notes pour cette demande
               </label>
               {provider === "openai" && <label className="approval">
                 <input type="checkbox" checked={cloudApproved} disabled={running}
                   onChange={(event) => setCloudApproved(event.target.checked)} />
-                Envoyer à OpenAI la consigne d’ouverture du Bloc-notes pour cette demande
+                Envoyer le texte de cette demande à OpenAI
               </label>}
               <div className="section-header">
                 <button type="submit" disabled={!canSend}>Envoyer</button>

@@ -1,5 +1,5 @@
 # AiWin11 Technical Specification v1.0
-Date: 2026-11-11. Status: approved architectural baseline; software not yet implemented.
+Date: 2026-11-11. Status: approved architectural baseline; M1 vertical slice in progress (see README "Périmètre" and docs/CONTRACTS.md for what is implemented).
 
 ## Product vision
 An AI-native layer over Windows 11, for personal use on NVIDIA/AMD dedicated-GPU systems. A model-agnostic assistant selects local or authorized cloud models for text, vision, voice, image and video; understands user intent; plans multi-step tasks; safely interacts with OS and applications; verifies execution and reports observable results.

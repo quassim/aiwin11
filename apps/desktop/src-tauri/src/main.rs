@@ -6,7 +6,7 @@ use aiwin11_core::{
     local_files::LocalFiles,
     model_gateway::{LocalModelProvider, Ollama},
     openai,
-    task::{TaskRequest, TaskSlot},
+    task::{TaskOutcome, TaskRequest, TaskSlot},
     windows_bridge::{Capture, Inspection},
     Core,
 };
@@ -146,7 +146,7 @@ async fn run_task(
     state: State<'_, Arc<AppState>>,
     request: TaskRequest,
     progress: Channel<&'static str>,
-) -> Result<u32, &'static str> {
+) -> Result<TaskOutcome, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
         state.task.run(&state.core, &request, |stage| {

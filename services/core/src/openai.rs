@@ -10,7 +10,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::model_gateway::{Ollama, NOTEPAD_INSTRUCTION};
+use crate::model_gateway::{tool_catalog, Ollama, Proposal, AGENT_INSTRUCTIONS};
 
 const TARGET: &str = "AiWin11/OpenAI";
 const ENDPOINT: &str = "https://api.openai.com/v1/chat/completions";
@@ -76,7 +76,8 @@ fn read_entry() -> Result<Option<Credential>, &'static str> {
     Ok(Some(Credential(entry)))
 }
 
-pub(crate) fn propose_notepad(model: &str) -> Result<Value, &'static str> {
+/// Sends the user's request with the tool catalog. Callers must hold a cloud approval.
+pub(crate) fn propose(model: &str, prompt: &str) -> Result<Proposal, &'static str> {
     if !model.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte)) {
         return Err("MODEL_REQUIRED");
     }
@@ -99,27 +100,31 @@ pub(crate) fn propose_notepad(model: &str) -> Result<Value, &'static str> {
         "model": model,
         "store": false,
         "stream": false,
-        "max_completion_tokens": 512,
+        "max_completion_tokens": 1024,
         "parallel_tool_calls": false,
-        "messages": [{ "role": "user", "content": NOTEPAD_INSTRUCTION }],
-        "tools": [{ "type": "function", "function": {
-            "name": "launch_notepad",
-            "description": "Request opening Windows Notepad",
-            "strict": true,
-            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
-        }}]
+        "messages": [
+            { "role": "system", "content": AGENT_INSTRUCTIONS },
+            { "role": "user", "content": prompt }
+        ],
+        "tools": tool_catalog(true)
     }));
     drop(credential);
     let reply: Value = Ollama::receive(request).map_err(|_| "CLOUD_REQUEST_FAILED")?;
-    normalize_calls(&reply)
+    normalize(&reply)
 }
 
-fn normalize_calls(reply: &Value) -> Result<Value, &'static str> {
+fn normalize(reply: &Value) -> Result<Proposal, &'static str> {
     let invalid = "CLOUD_PROPOSAL_INVALID";
-    if reply.pointer("/choices/0/finish_reason").and_then(Value::as_str) != Some("tool_calls")
-        || reply.pointer("/choices/0/message/role").and_then(Value::as_str) != Some("assistant")
-    {
+    if reply.pointer("/choices/0/message/role").and_then(Value::as_str) != Some("assistant") {
         return Err(invalid);
+    }
+    match reply.pointer("/choices/0/finish_reason").and_then(Value::as_str) {
+        Some("tool_calls") => {}
+        Some("stop") => {
+            let text = reply.pointer("/choices/0/message/content").and_then(Value::as_str);
+            return Proposal::from_parts(None, text).ok_or(invalid);
+        }
+        _ => return Err(invalid),
     }
     let calls = reply.pointer("/choices/0/message/tool_calls")
         .and_then(Value::as_array).ok_or(invalid)?;
@@ -130,7 +135,7 @@ fn normalize_calls(reply: &Value) -> Result<Value, &'static str> {
     let name = call.pointer("/function/name").and_then(Value::as_str).ok_or(invalid)?;
     let args = call.pointer("/function/arguments").and_then(Value::as_str).ok_or(invalid)?;
     let arguments: Value = serde_json::from_str(args).map_err(|_| invalid)?;
-    Ok(json!([{ "function": { "name": name, "arguments": arguments } }]))
+    Ok(Proposal::Calls(json!([{ "function": { "name": name, "arguments": arguments } }])))
 }
 
 #[cfg(test)]
@@ -139,13 +144,28 @@ mod tests {
 
     #[test]
     fn decodes_only_one_finished_function_proposal() {
-        let call = json!({"type":"function", "function":{"name":"launch_notepad","arguments":"{}"}});
+        let call = json!({"type":"function", "function":{
+            "name":"launch_application","arguments":"{\"application\":\"notepad\"}"
+        }});
         let mut reply = json!({"choices":[{"finish_reason":"tool_calls","message":{
             "role":"assistant","tool_calls":[call.clone()]
         }}]});
-        assert_eq!(normalize_calls(&reply).unwrap(),
-            json!([{"function":{"name":"launch_notepad","arguments":{}}}]));
+        assert_eq!(normalize(&reply).unwrap(), Proposal::Calls(
+            json!([{"function":{"name":"launch_application","arguments":{"application":"notepad"}}}])));
         reply["choices"][0]["message"]["tool_calls"] = json!([call.clone(), call]);
-        assert_eq!(normalize_calls(&reply), Err("CLOUD_PROPOSAL_INVALID"));
+        assert_eq!(normalize(&reply), Err("CLOUD_PROPOSAL_INVALID"));
+    }
+
+    #[test]
+    fn decodes_a_finished_text_answer_and_rejects_truncation() {
+        let mut reply = json!({"choices":[{"finish_reason":"stop","message":{
+            "role":"assistant","content":" Bonjour "
+        }}]});
+        assert_eq!(normalize(&reply), Ok(Proposal::Text("Bonjour".into())));
+        reply["choices"][0]["finish_reason"] = json!("length");
+        assert_eq!(normalize(&reply), Err("CLOUD_PROPOSAL_INVALID"));
+        reply["choices"][0]["finish_reason"] = json!("stop");
+        reply["choices"][0]["message"]["content"] = json!("");
+        assert_eq!(normalize(&reply), Err("CLOUD_PROPOSAL_INVALID"));
     }
 }

@@ -8,8 +8,62 @@ use serde_json::{json, Value};
 const MAX_CATALOG_BYTES: usize = 2 * 1024 * 1024;
 const OLLAMA: &str = "http://127.0.0.1:11434";
 const LOCAL_INFERENCE_TIMEOUT: Duration = Duration::from_secs(90);
-pub(crate) const NOTEPAD_INSTRUCTION: &str =
-    "Ouvre le Bloc-notes en appelant launch_notepad une fois, sans argument.";
+/// Longest model reply forwarded to the agent, in characters.
+pub(crate) const MAX_REPLY_CHARS: usize = 4000;
+pub(crate) const AGENT_INSTRUCTIONS: &str = "Tu es l’agent d’AiWin11 sous Windows 11. \
+Tu disposes uniquement des outils fournis. Si la demande de l’utilisateur correspond à un outil, \
+appelle cet outil une seule fois avec des arguments valides. Sinon, réponds brièvement en français \
+sans appeler d’outil. Si la demande exige une action qu’aucun outil ne permet, dis-le clairement. \
+N’affirme jamais qu’une action a été réalisée.";
+
+/// Tool schemas offered to every provider. The Python agent holds the matching registry.
+pub(crate) fn tool_catalog(strict: bool) -> Value {
+    let mut function = json!({
+        "name": "launch_application",
+        "description": "Ouvre une nouvelle fenêtre d’une application Windows autorisée.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "application": {
+                    "type": "string",
+                    "enum": ["notepad"],
+                    "description": "notepad = Bloc-notes"
+                }
+            },
+            "required": ["application"],
+            "additionalProperties": false
+        }
+    });
+    if strict {
+        function["strict"] = Value::Bool(true);
+    }
+    json!([{ "type": "function", "function": function }])
+}
+
+/// A provider-neutral proposal: one or more tool calls, or a text answer.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Proposal {
+    Calls(Value),
+    Text(String),
+}
+
+impl Proposal {
+    pub(crate) fn from_parts(calls: Option<&Value>, text: Option<&str>) -> Option<Self> {
+        if let Some(calls) = calls.filter(|calls| calls.as_array().is_some_and(|list| !list.is_empty())) {
+            return Some(Self::Calls(calls.clone()));
+        }
+        text.map(str::trim)
+            .filter(|text| !text.is_empty() && text.chars().count() <= MAX_REPLY_CHARS)
+            .map(|text| Self::Text(text.to_owned()))
+    }
+
+    pub(crate) fn to_agent_message(&self) -> Value {
+        match self {
+            Self::Calls(calls) => json!({ "calls": calls }),
+            Self::Text(text) => json!({ "text": text }),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Model {
@@ -184,7 +238,8 @@ impl Ollama {
         Ok(Self { client })
     }
 
-    pub fn propose_notepad(&self, model: &str) -> Result<Value, GatewayError> {
+    /// Sends the user's request with the tool catalog to a local model.
+    pub(crate) fn propose(&self, model: &str, prompt: &str) -> Result<Proposal, GatewayError> {
         if !self.describe(model)?.tool_calling_advertised {
             return Err(GatewayError::InvalidResponse);
         }
@@ -196,27 +251,15 @@ impl Ollama {
                     "model": model,
                     "stream": false,
                     "think": false,
-                    "options": { "temperature": 0, "num_predict": 128 },
-                    "messages": [{ "role": "user", "content": NOTEPAD_INSTRUCTION }],
-                    "tools": [{ "type": "function", "function": {
-                        "name": "launch_notepad",
-                        "description": "Request opening Windows Notepad",
-                        "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
-                    }}]
+                    "options": { "temperature": 0, "num_predict": 512 },
+                    "messages": [
+                        { "role": "system", "content": AGENT_INSTRUCTIONS },
+                        { "role": "user", "content": prompt }
+                    ],
+                    "tools": tool_catalog(false)
                 })),
         )?;
-        let location: Location = serde_json::from_value(reply.clone())
-            .map_err(|_| GatewayError::InvalidResponse)?;
-        if !location.is_local(model) {
-            return Err(GatewayError::NonLocalModel);
-        }
-        let calls = reply.pointer("/message/tool_calls").ok_or(GatewayError::InvalidResponse)?;
-        if reply.get("done") != Some(&Value::Bool(true))
-            || reply.pointer("/message/role").and_then(Value::as_str) != Some("assistant")
-        {
-            return Err(GatewayError::InvalidResponse);
-        }
-        Ok(calls.clone())
+        ollama_proposal(model, &reply)
     }
 
     pub(crate) fn receive<T: DeserializeOwned>(
@@ -281,6 +324,23 @@ impl LocalModelProvider for Ollama {
         )?;
         verify_probe(model, reply)
     }
+}
+
+fn ollama_proposal(model: &str, reply: &Value) -> Result<Proposal, GatewayError> {
+    let location: Location = serde_json::from_value(reply.clone())
+        .map_err(|_| GatewayError::InvalidResponse)?;
+    if !location.is_local(model) {
+        return Err(GatewayError::NonLocalModel);
+    }
+    if reply.get("done") != Some(&Value::Bool(true))
+        || reply.pointer("/message/role").and_then(Value::as_str) != Some("assistant")
+    {
+        return Err(GatewayError::InvalidResponse);
+    }
+    Proposal::from_parts(
+        reply.pointer("/message/tool_calls"),
+        reply.pointer("/message/content").and_then(Value::as_str),
+    ).ok_or(GatewayError::InvalidResponse)
 }
 
 fn verify_probe(model: &str, reply: ProbeReply) -> Result<bool, GatewayError> {
@@ -365,6 +425,44 @@ mod tests {
         let model = describe("local:latest", details).unwrap();
         assert!(model.tool_calling_advertised);
         assert!(!model.vision_advertised);
+    }
+
+    #[test]
+    fn ollama_proposals_prefer_tool_calls_and_bound_text() {
+        let call = json!([{ "function": { "name": "launch_application", "arguments": { "application": "notepad" } } }]);
+        let reply = |calls: Value, content: Value| json!({
+            "done": true,
+            "message": { "role": "assistant", "tool_calls": calls, "content": content }
+        });
+        assert_eq!(
+            ollama_proposal("local:latest", &reply(call.clone(), json!(""))),
+            Ok(Proposal::Calls(call.clone()))
+        );
+        assert_eq!(
+            ollama_proposal("local:latest", &reply(json!([]), json!("  Bonjour  "))),
+            Ok(Proposal::Text("Bonjour".into()))
+        );
+        for invalid in [
+            reply(json!([]), json!("   ")),
+            reply(json!(null), json!("é".repeat(MAX_REPLY_CHARS + 1))),
+            json!({ "done": false, "message": { "role": "assistant", "content": "x" } }),
+            json!({ "done": true, "message": { "role": "user", "content": "x" } }),
+        ] {
+            assert_eq!(ollama_proposal("local:latest", &invalid), Err(GatewayError::InvalidResponse));
+        }
+        let mut remote = reply(call, json!(""));
+        remote["remote_host"] = json!("https://example.test");
+        assert_eq!(ollama_proposal("local:latest", &remote), Err(GatewayError::NonLocalModel));
+    }
+
+    #[test]
+    fn tool_catalog_offers_only_the_registered_application() {
+        let catalog = tool_catalog(true);
+        assert_eq!(catalog.as_array().unwrap().len(), 1);
+        assert_eq!(catalog[0]["function"]["name"], "launch_application");
+        assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));
+        assert_eq!(catalog[0]["function"]["strict"], true);
+        assert!(tool_catalog(false)[0]["function"].get("strict").is_none());
     }
 
     #[test]

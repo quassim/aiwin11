@@ -52,7 +52,7 @@ The bridge accepts the Notepad enum, checks the deadline, starts the Windows sys
 
 ## Local provider discovery
 
-The Ollama adapter calls the fixed loopback endpoint without system proxies or redirects. It filters remote aliases from the catalog and checks model details again. Tool calling and vision in discovery are advertised metadata. The tool-calling probe sends a fixed synthetic prompt and checks the returned structured call without dispatching it. The Notepad task sends a fixed instruction for its one supported action. The adapter receives no free-form user text.
+The Ollama adapter calls the fixed loopback endpoint without system proxies or redirects. It filters remote aliases from the catalog and checks model details again. Tool calling and vision in discovery are advertised metadata. The tool-calling probe sends a fixed synthetic prompt and checks the returned structured call without dispatching it. Chat tasks send fixed agent instructions, the user's request and the tool catalog (see "Agent planning").
 
 ## UI Automation inspector
 
@@ -80,12 +80,21 @@ The Files page submits `preview_local_text` with one file name. The broker autho
 
 ## First chat task
 
-The desktop exposes `discover_models`, `run_task` and `cancel_task` to its main window. The host recognizes the supported request and routes it to the chosen local Ollama model. The Python child receives the model's proposed calls as a single bounded JSON v1 message and returns a bounded JSON v1 operation. This private handoff uses inherited process pipes and a small JSON format to keep the Python child dependency-free. The host accepts only the fixed `launch_notepad` operation and constructs the Protobuf command itself. The child has no broker endpoint.
+The desktop exposes `discover_models`, `run_task` and `cancel_task` to its main window. `run_task` accepts a free-form request of 1 to 2000 characters after trimming (`PROMPT_INVALID` otherwise) and resolves to a `TaskOutcome`: `{ kind: "launched", application: "notepad", processId }` or `{ kind: "reply", text }`.
 
 The host accepts one task at a time. Cancellation wins only before dispatch. A scoped approval applies to the current request, and the broker evaluates it at execution time. Task and execution events share a task ID. Prompts and model replies are excluded from SQLite events.
 
+## Agent planning (AW-010, protocol v2)
+
+1. The gateway sends fixed French agent instructions (system message), the user's request (user message) and the tool catalog to the selected provider. The catalog holds one tool, `launch_application`, whose only argument `application` is an enum limited to `notepad`. OpenAI receives the schema with `strict: true`.
+2. The provider reply is normalized into a proposal: `{ "calls": [...] }` when the model returned tool calls, otherwise `{ "text": "..." }` with 1 to 4000 characters. Truncated, empty or malformed replies fail with `MODEL_UNAVAILABLE_OR_INVALID` or `CLOUD_PROPOSAL_INVALID`.
+3. The Python child receives `{ "version": 2, "proposal": ... }` (at most 32 KiB) on stdin. It validates the proposal against its tool registry: exactly one call, a registered tool name, exactly the declared arguments, each within its allowed values. It returns `{ "version": 2, "action": "tool", "tool", "arguments" }` or `{ "version": 2, "action": "reply", "text" }` (at most 32 KiB), or exits with code 2. The host drains stdout concurrently and kills the child after four seconds.
+4. The host parses the decision with unknown fields denied and validates it again. A reply ends the task with the `agent.reply` event and no broker call. A tool request is mapped by the host to the Protobuf `LaunchApplication` operation and submitted to the broker under the agent peer identity.
+
+Model output is untrusted data. The registry bounds what the agent may request; the broker still decides what runs. Adding a tool requires a catalog entry, an agent registry entry, a host mapping, a Protobuf operation, a broker rule and bridge support.
+
 ## Optional OpenAI provider
 
-`run_task` takes a `request` with an explicit `provider` selector and separate `cloudApproved` and `approved` flags. Its `progress` channel delivers the persisted request, planning and agent proposal events to the calling window as they occur. The host records the cloud authorization decision before inference. Each provider failure ends the request. OpenAI receives the selected model ID, fixed action instruction and tool schema over HTTPS with `store: false`. Its response is converted to the same proposal format as Ollama and validated by the Python agent before broker authorization.
+`run_task` takes a `request` with an explicit `provider` selector and separate `cloudApproved` and `approved` flags. Its `progress` channel delivers the persisted request, planning and agent proposal events to the calling window as they occur. The host records the cloud authorization decision before inference. Each provider failure ends the request. OpenAI receives the selected model ID, the fixed agent instructions, the user's request and the tool catalog over HTTPS with `store: false`, only when `cloudApproved` is set for that request. Its response is converted to the same proposal format as Ollama and validated by the Python agent before broker authorization.
 
 The main window can save, remove and check the presence of the `AiWin11/OpenAI` credential. Rust stores it as a generic entry in Windows Credential Manager for the current user on the local machine. The presence command returns a boolean. The key is read in the native gateway for the OpenAI request and excluded from SQLite, agent input and error messages.
