@@ -1,12 +1,12 @@
 # AiWin11
 
-Application personnelle pour Windows 11 x64. Le premier scénario relie une interface Tauri/React, un modèle Ollama, un agent Python et un pont .NET. Le broker Rust applique la politique d’exécution et écrit dans le journal SQLite.
+Application personnelle pour Windows 11 x64. Une interface Tauri/React dialogue avec un modèle (Ollama en local, ou OpenAI en option), un agent Python valide chaque action proposée, un moteur de politiques et un broker Rust décident de ce qui s’exécute, et un pont .NET agit sur Windows. Tout est journalisé dans SQLite.
 
 ## Démarrer sous Windows 11
 
 Installez Node.js 24 avec npm, Rustup avec la cible MSVC x64, les outils Visual Studio C++ (charge de travail « Développement Desktop en C++ »), WebView2 et le SDK .NET 10 pour le pont Windows. Rustup lit la version de Rust dans `rust-toolchain.toml`. Cargo et NuGet fournissent le compilateur Protobuf. [Prérequis Tauri](https://v2.tauri.app/start/prerequisites/)
 
-Installez aussi Python 3.13 et Ollama, puis préparez un modèle local qui annonce la prise en charge des appels d’outils. Depuis la racine du projet, dans PowerShell :
+Installez aussi Python 3.13 et Ollama, puis préparez un modèle local qui gère les appels d’outils (validé avec `qwen3:8b`) et, si vous voulez que l’agent puisse décrire une fenêtre, un modèle de vision local (par exemple `gemma3:4b`). Depuis la racine du projet, dans PowerShell :
 
 ```powershell
 npm --prefix apps/desktop ci
@@ -16,9 +16,7 @@ Copy-Item -LiteralPath services/agent/agent.py -Destination target/debug/aiwin11
 npm --prefix apps/desktop run tauri -- dev
 ```
 
-Dans **Modèles**, détectez les modèles Ollama et sélectionnez-en un. Dans **Accueil**, saisissez une demande en langage naturel (2 000 caractères au maximum), par exemple « Peux-tu ouvrir le Bloc-notes ? ». Quand l’agent propose d’ouvrir le Bloc-notes, un encadré présente l’action exacte : choisissez **Autoriser** ou **Refuser** (le focus clavier commence sur Refuser). Sans réponse sous 60 secondes, la proposition expire ; un refus ou une expiration est journalisé et rien n’est exécuté. Si la demande ne correspond à aucun outil disponible, l’agent répond en texte, sans aucune action sur Windows. Avec un modèle local, l’agent peut aussi lister et lire les fichiers `.txt` du dossier affiché dans **Fichiers** pour répondre, par exemple « Résume le fichier notes.txt » ; ces lectures sont journalisées et aucun contenu de fichier n’est envoyé à OpenAI. Il peut aussi proposer de copier un fichier vers un nouveau nom (« Copie notes.txt vers notes-sauvegarde.txt ») : la copie est vérifiée à blanc, puis soumise à ton approbation, et ne remplace jamais un fichier existant. Enfin, l’agent peut demander à lire la fenêtre que tu utilisais juste avant AiWin11 (« Que montre la fenêtre que j’utilisais ? ») : l’encadré affiche son titre et son application, et l’agent ne reçoit, après ton accord, que les types et noms des contrôles, sans capture d’écran ni champ de mot de passe. Le résultat apparaît dans le chat, avec les événements de la session dans **Activité**. Le journal est enregistré dans `%LOCALAPPDATA%\app.aiwin11.desktop\aiwin11.sqlite3`. Si Ollama est indisponible, vérifiez que son API répond sur `127.0.0.1:11434`. Si une fenêtre n’est pas vérifiée, vérifiez si le Bloc-notes a réutilisé un onglet ou une fenêtre existante.
-
-Si vous utilisez Ollama portable depuis `.tools/ollama`, ouvrez un terminal PowerShell dans le projet et lancez-le avec le dossier de modèles du projet. Gardez ce terminal ouvert pendant l’utilisation d’AiWin11.
+Si vous utilisez Ollama portable depuis `.tools/ollama`, lancez-le dans un terminal séparé, en mode local strict, et gardez ce terminal ouvert :
 
 ```powershell
 $env:OLLAMA_HOST = '127.0.0.1:11434'
@@ -27,21 +25,57 @@ $env:OLLAMA_MODELS = Join-Path $PWD '.tools/ollama-models'
 .\.tools\ollama\ollama.exe serve
 ```
 
-Pour utiliser le fournisseur cloud optionnel, sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, autorisez séparément l’envoi du texte de votre demande à OpenAI et l’ouverture du Bloc-notes. Ollama est sélectionné au démarrage et les deux fournisseurs sont sélectionnés manuellement. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)
+La description de fenêtre et l’analyse d’image exigent qu’Ollama confirme que ses fonctions cloud sont désactivées ; le lancement ci-dessus le fait. [Documentation Ollama](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
+
+## Utiliser l’assistant
+
+1. Dans **Modèles**, détectez les modèles Ollama et choisissez le modèle de l’agent. Facultatif : détectez les modèles de vision et choisissez-en un.
+2. Dans **Sécurité**, choisissez le profil d’autonomie (voir plus bas). **Assisté** est le profil par défaut.
+3. Dans **Accueil**, écrivez une demande en langage naturel (2 000 caractères au maximum).
+
+La réponse s’affiche au fil de sa génération. L’agent peut enchaîner plusieurs actions, jusqu’à 8 étapes. À la fin, AiWin11 affiche sa réponse et, en dessous, **les actions réellement effectuées** : ce rapport est écrit par AiWin11 à partir de ce qui s’est vraiment passé, pas par le modèle.
+
+Ce que l’agent peut faire :
+
+| Exemple de demande | Action |
+|---|---|
+| « Ouvre le Bloc-notes » | Ouvre une nouvelle fenêtre du Bloc-notes et la vérifie |
+| « Ouvre le Bloc-notes et écris-y ma liste de courses : pain, lait » | Écrit dans le Bloc-notes qu’il vient d’ouvrir, seulement si le document est vide, puis relit le texte |
+| « Résume notes.txt », « Quels fichiers ai-je ? » | Liste et lit les fichiers `.txt` du dossier affiché dans **Fichiers** |
+| « Copie notes.txt vers sauvegarde.txt », « Renomme brouillon.txt en idees.txt » | Copie ou renomme dans ce dossier, sans jamais remplacer un fichier existant |
+| « Mets ancien.txt à la corbeille » | Déplace le fichier dans la corbeille d’AiWin11 (`%LOCALAPPDATA%\app.aiwin11.desktop\trash`) : rien n’est supprimé, il reste récupérable |
+| « Que montre la fenêtre que j’utilisais ? » | Lit la structure (types et noms des contrôles, jamais les champs de mot de passe) de la fenêtre utilisée juste avant AiWin11 |
+| « Décris la fenêtre que j’utilisais » | Fait décrire cette fenêtre par le modèle de vision **local** ; l’agent ne reçoit que la description |
+
+Quand une action demande ton accord, un encadré la décrit exactement (fichiers, nombre de caractères, texte complet à écrire, titre de la fenêtre…). Choisis **Autoriser** ou **Refuser** ; le focus clavier commence sur **Refuser**. Sans réponse sous 60 secondes, la proposition expire. **Annuler** arrête la génération en cours ou une demande en attente d’accord ; une action déjà en cours d’exécution n’est plus annulable.
+
+### Profils de sécurité
+
+| Action | Observation | Assisté | Autonome limité | Avancé |
+|---|---|---|---|---|
+| Lister, lire des fichiers | Autorisé | Autorisé | Autorisé | Autorisé |
+| Lire ou décrire une fenêtre | Demande | Demande | Demande | Demande |
+| Ouvrir le Bloc-notes, copier, écrire dans le Bloc-notes | Refusé | Demande | Autorisé | Autorisé |
+| Renommer | Refusé | Demande | Demande | Autorisé |
+| Mettre à la corbeille | Refusé | Demande | Demande | Demande |
+
+Le **mode simulation** remplace toute action avec effet par une simulation : l’agent te dit ce qu’il aurait fait, rien n’est modifié. Le profil s’applique à la demande suivante. Avec OpenAI, seuls l’ouverture du Bloc-notes et les réponses texte sont possibles : aucun contenu de fichier, de fenêtre ou d’image n’est envoyé au cloud.
+
+### Fournisseur cloud optionnel
+
+Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, cochez l’envoi du texte de la demande à OpenAI, pour cette demande seulement. Ollama est sélectionné au démarrage. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)
+
+### Journal et reprise
+
+**Activité** liste les demandes récentes avec leur état, et le journal de la session avec le code de chaque événement (décision de la politique, règle appliquée, résultat). Si AiWin11 s’arrête pendant une demande, celle-ci apparaît au démarrage suivant comme **interrompue** ; rien n’est relancé automatiquement. Si elle était en train d’exécuter une action, vérifie son résultat. Le journal est enregistré dans `%LOCALAPPDATA%\app.aiwin11.desktop\aiwin11.sqlite3`.
+
+### Pages Inspecteur et Fichiers
+
+Dans **Fichiers**, place un fichier `.txt` UTF-8 de 64 Kio maximum dans le dossier affiché, saisis son nom et clique sur **Afficher l’aperçu**, ou copie-le avec **Copier le fichier**.
+
+Dans **Inspecteur**, **Inspecter une fenêtre** et **Capturer la fenêtre** lisent la fenêtre au premier plan après un compte à rebours de trois secondes. L’aperçu de capture reste en mémoire et peut être analysé avec un modèle de vision local. Pour tester la saisie contrôlée, ouvre la Table des caractères, choisis un chiffre, clique sur **Autoriser et saisir le chiffre** et remets la Table des caractères au premier plan dans les trois secondes.
 
 ## Vérifier le projet
-
-Dans **Fichiers**, place un fichier `.txt` UTF-8 de 64 Kio maximum dans le dossier affiché. Saisis son nom et clique sur **Afficher l’aperçu**. AiWin11 lit le fichier localement et journalise le résultat de la lecture. L’aperçu disparaît quand tu changes de page ou cliques sur **Effacer l’aperçu**.
-
-Pour le dupliquer dans ce dossier, renseigne **Nom de la copie** et clique sur **Copier le fichier**. Si ce nom existe déjà, choisis-en un autre. L’activité affiche le résultat de l’opération.
-
-Dans **Inspecteur**, clique sur **Inspecter une fenêtre**, puis passe à la fenêtre à examiner dans les trois secondes. Reviens dans AiWin11 pour lire l’arborescence des contrôles, leur état et le focus. Le parcours s’arrête après 40 contrôles ou six niveaux sous la racine. Le journal indique si l’inspection a abouti. Le pont utilise le runtime **.NET Desktop 10 x64**.
-
-**Capturer la fenêtre** utilise le même compte à rebours. L’aperçu reste en mémoire dans AiWin11. Tu peux l’effacer avec **Effacer l’aperçu** ou en quittant la page. Le journal enregistre l’issue de la capture. Certaines fenêtres protégées ou incompatibles avec la capture Windows peuvent renvoyer une erreur.
-
-Pour obtenir une description, détecte les modèles de vision depuis l’aperçu, choisis un modèle installé, puis clique sur **Analyser avec Ollama**. Cette fonction exige une version d’Ollama qui confirme son mode sans cloud. Le lancement portable ci-dessus configure ce mode. [Documentation Ollama](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
-
-Pour tester la saisie contrôlée, ouvre la Table des caractères Windows. Dans **Inspecteur**, choisis un chiffre et clique sur **Autoriser et saisir le chiffre**, puis remets la Table des caractères au premier plan dans les trois secondes. Le chiffre remplace le contenu du champ **Caractères à copier**. AiWin11 relit la valeur pour confirmer le résultat.
 
 ```powershell
 npm --prefix apps/desktop run build
@@ -52,26 +86,33 @@ dotnet build services/windows/AiWin11.Windows.csproj --configuration Release
 npm --prefix apps/desktop run tauri -- build --no-bundle
 ```
 
-Le workflow GitHub Actions utilise Windows Server 2025 pour compiler et tester. La validation du bureau et des actions Windows exige une session interactive sur Windows 11 x64.
+`cargo test` lance aussi le vrai agent Python : `python` doit être accessible dans le `PATH`. Le workflow GitHub Actions utilise Windows Server 2025 pour compiler et tester ; la validation du bureau et des actions Windows exige une session interactive sur Windows 11 x64.
 
-`cargo test` lance aussi le vrai agent Python : `python` doit être accessible dans le `PATH`.
+### Tests avec un modèle réel
 
-Pour exécuter les tests d’intégration avec un modèle réel, démarrez Ollama et choisissez un modèle local compatible avec les appels d’outils. Le premier test refuse d’abord l’action proposée (refus audité par le broker), puis l’approuve et vérifie l’ouverture journalisée. Le second vérifie qu’une question sans outil applicable reçoit une réponse texte sans aucune action. Deux autres tests font lire à l’agent des fichiers d’un dossier temporaire : l’un vérifie qu’il s’en sert pour répondre, l’autre qu’une consigne cachée dans un fichier ne peut rien lancer sans approbation. Publiez les composants à côté de l’exécutable de test dans `target/debug/deps`.
+Les tests marqués `ignored` utilisent Ollama, le pont et l’agent publiés à côté de l’exécutable de test. Ils couvrent : refus puis ouverture approuvée du Bloc-notes ; ouverture puis écriture dans le Bloc-notes ; réponse texte sans action ; lecture de fichiers ; consigne piégée dans un fichier ; copie refusée puis approuvée ; renommage puis mise à la corbeille ; lecture et description de la Table des caractères ouverte par le test ; démarrage du pont de réserve.
 
 ```powershell
-$env:AIWIN11_TEST_MODEL = Read-Host 'Identifiant du modèle local'
+$env:AIWIN11_TEST_MODEL = 'qwen3:8b'
+$env:AIWIN11_TEST_VISION_MODEL = 'gemma3:4b'
 $env:AIWIN11_PYTHON = (Get-Command python.exe -CommandType Application | Select-Object -First 1).Source
 dotnet publish services/windows/AiWin11.Windows.csproj --configuration Debug --runtime win-x64 --self-contained false --output target/debug/deps
 Copy-Item -LiteralPath services/agent/agent.py -Destination target/debug/deps/aiwin11_agent.py
-cargo test --locked -p aiwin11-core task::tests -- --ignored
+cargo test --locked -p aiwin11-core -- --ignored --test-threads=1
 ```
 
-Ces tests ont été validés le 11 novembre 2026 sur Windows 11 (RTX 3090) avec `qwen3:8b` via Ollama 0.40 portable. Les très petits modèles peuvent appeler l’outil avec des arguments mal formés : `qwen3:0.6b` envoie par exemple `{"application":{"type":"notepad"}}`. L’agent rejette alors la proposition (`AGENT_REJECTED`) et rien n’est exécuté ; choisissez un modèle plus capable. Fermez le Bloc-notes avant le test : s’il est déjà ouvert, il peut ouvrir la demande dans un nouvel onglet et la nouvelle fenêtre ne peut pas être vérifiée.
+Fermez le Bloc-notes avant ces tests : s’il est déjà ouvert, il peut ouvrir la demande dans un onglet existant et la nouvelle fenêtre ne peut pas être vérifiée. Les très petits modèles peuvent appeler un outil avec des arguments mal formés (`qwen3:0.6b` envoie par exemple `{"application":{"type":"notepad"}}`) : l’agent rejette la proposition (`AGENT_REJECTED`) et rien n’est exécuté.
 
-Au démarrage, AiWin11 lance en arrière-plan un processus `AiWin11.Windows.exe` de réserve, qui attend sans rien faire la prochaine commande autorisée : le premier démarrage du pont après une installation peut prendre une vingtaine de secondes (chargement de .NET, analyse antivirus) et ne retarde ainsi aucune action. Ce processus n’écoute aucun port et se termine avec l’application.
+## Dépannage
 
-Si le port 1420 est occupé, arrêtez le serveur de développement qui l’utilise avant de relancer. Si l’édition de liens échoue, vérifiez les outils C++ x64 et le SDK Windows dans Visual Studio Installer. Si la fenêtre ne se rend pas, vérifiez que WebView2 est installé. Une base créée par une version plus récente de l’application nécessite cette version de l’application pour s’ouvrir.
+- **Ollama indisponible** : vérifiez que son API répond sur `127.0.0.1:11434`.
+- **Fenêtre du Bloc-notes non confirmée** : le Bloc-notes a probablement réutilisé une fenêtre ou un onglet existant.
+- **Écriture refusée (`NOTEPAD_NOT_EMPTY`)** : le Bloc-notes a restauré un onglet qui contient déjà du texte ; AiWin11 n’écrit jamais par-dessus.
+- **Premier démarrage lent** : au lancement, AiWin11 démarre en arrière-plan un processus `AiWin11.Windows.exe` de réserve, qui attend sans rien faire la prochaine commande autorisée. Le premier démarrage du pont après une installation peut prendre une vingtaine de secondes (chargement de .NET, analyse antivirus) sans retarder les actions. Ce processus n’écoute aucun port et se termine avec l’application.
+- **Port 1420 occupé** : arrêtez le serveur de développement qui l’utilise.
+- **Édition de liens en échec** : vérifiez les outils C++ x64 et le SDK Windows dans Visual Studio Installer. **Fenêtre blanche** : vérifiez que WebView2 est installé.
+- Une base créée par une version plus récente de l’application nécessite cette version pour s’ouvrir.
 
 ## Périmètre
 
-Le cœur s’exécute dans Tauri. Le pont utilise le runtime .NET 10 x64. Le chat accepte des demandes libres : l’agent choisit entre une réponse texte et un outil de son registre, qui ne contient pour l’instant que l’ouverture du Bloc-notes. Chaque action proposée attend ton approbation explicite, valable pour cette seule action. La réponse du modèle s’affiche au fil de sa génération, sous forme de brouillon ; seule la réponse validée par l’agent reste affichée à la fin. L’annulation interrompt la génération en cours et empêche l’exécution tant que le broker n’a pas commencé à traiter l’action. Les événements sont actualisés pendant la demande. Voir [la spécification](docs/SPECIFICATION.md), [les contrats](docs/CONTRACTS.md) et [le backlog](docs/BACKLOG.md).
+Le cœur s’exécute dans le processus Tauri ; le pont utilise le runtime .NET 10 x64 et l’agent Python tourne dans un processus séparé sans accès réseau. Le transport gRPC entre processus séparés, le routage automatique entre modèles, la mémoire, MCP, la voix et les workflows ne sont pas encore implémentés. Voir [la spécification](docs/SPECIFICATION.md), [les contrats](docs/CONTRACTS.md) et [le backlog](docs/BACKLOG.md).

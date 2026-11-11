@@ -41,12 +41,12 @@ SQLite tables: providers, models, model_profiles, agents, sessions, tasks, tool_
 
 - The Tauri command `get_snapshot` reads the current session ID and up to 100 session events, newest first. Errors use fixed codes and contain no database diagnostics.
 - Cargo generates the Rust types from `contracts/v1/aiwin11.proto`. The command contains a typed operation and an absolute Unix deadline in milliseconds. The core uses the peer identity supplied by the trusted host for authorization. The envelope's actor string has no authority. Cross-process transport and peer authentication are pending.
-- Migration 001 uses SQLite `user_version` and creates sessions, events and the tool dispatch reservations. Migration and initial session creation run in one transaction. The core refuses schemas newer than it supports.
+- Migration 001 uses SQLite `user_version` and creates sessions, events and the tool dispatch reservations. Migration 002 adds `settings` (policy profile) and `tasks` (one row per chat task, see "Tasks and recovery"); a version 1 database migrates in place. Migrations, task recovery and initial session creation run in one transaction. The core refuses schemas newer than it supports.
 - Before dispatch, the broker commits an authorization event and a reservation keyed by session and idempotency key. It checks authorization again before invoking the trusted executor and records the outcome. If a process crashes after reservation or the outcome cannot be written, the reservation prevents repeat dispatch with the same key in that session.
 
 ## Windows child process
 
-`Core::execute_windows` invokes the fixed `AiWin11.Windows.exe` installed beside the host executable after broker authorization (using the spare bridge described below when one is waiting). It sends one raw v1 `Command` on the child's private stdin and closes the writer. The child returns one raw v1 `Result` on stdout and exits. Each message is limited to 1 KiB. The host checks the schema, request ID and result fields. There is no listening service. The host derives the actor from its trusted context.
+`Core::execute_windows` invokes the fixed `AiWin11.Windows.exe` installed beside the host executable after broker authorization (using the spare bridge described below when one is waiting). It sends one raw v1 `Command` on the child's private stdin and closes the writer. The child returns one raw v1 `Result` on stdout and exits. A command is limited to 16 KiB (room for 2000 characters of Notepad text); a reply to 1 KiB, except window trees (32 KiB) and captures (257 KiB). A command without a dedicated handler in the bridge is denied (`unsupported_command`); the Notepad launch branch is explicit. The host checks the schema, request ID and result fields. There is no listening service. The host derives the actor from its trusted context.
 
 The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The bridge stops verifying at the command deadline and then reports. The host waits until that deadline plus two seconds (25 seconds at most) before killing the bridge, so a slow .NET cold start still produces a reported outcome. An approved launch carries a 20-second deadline: window verification still stops 4 seconds after the start, and the margin covers the first start of a newly installed bridge, measured at 17.9 seconds (then 60 ms) right after republishing it on the reference machine.
 
@@ -54,7 +54,7 @@ The bridge accepts the Notepad enum, checks the deadline, starts the Windows sys
 
 ## Local provider discovery
 
-The Ollama adapter calls the fixed loopback endpoint without system proxies or redirects. It filters remote aliases from the catalog and checks model details again. Tool calling and vision in discovery are advertised metadata. The tool-calling probe sends a fixed synthetic prompt and checks the returned structured call without dispatching it. Chat tasks send fixed agent instructions, the user's request and the tool catalog (see "Agent planning").
+The Ollama adapter calls the fixed loopback endpoint without system proxies or redirects. It filters remote aliases from the catalog and checks model details again. Tool calling and vision in discovery are advertised metadata. The tool-calling probe sends a fixed synthetic prompt and checks the returned structured call without dispatching it. Chat tasks send fixed agent instructions, the conversation so far and the tool catalog (see "Agent loop").
 
 ## UI Automation inspector
 
@@ -80,85 +80,130 @@ The Files page submits `preview_local_text` with one file name. The broker autho
 
 `copy_local_text` takes the source and destination names and requires the separate v1 `CopyLocalText` permission. Both names follow the preview rules. The core validates the source and opens the destination directory by handle. It writes and flushes a staging file before publishing it by a same-directory rename with replacement disabled. The copied bytes preserve the source BOM and line endings. A failed write or rename triggers cleanup by file handle. An abrupt process termination can leave a staging file. SQLite records the operation and outcome codes without the names or contents.
 
-## First chat task
+## Chat task
 
-The desktop exposes `discover_models`, `run_task` and `cancel_task` to its main window. `run_task` accepts a free-form request of 1 to 2000 characters after trimming (`PROMPT_INVALID` otherwise) and resolves to a `TaskOutcome`: `{ kind: "launched", application: "notepad", processId }` or `{ kind: "reply", text }`.
+The desktop exposes `discover_models`, `run_task`, `cancel_task` and `resolve_approval` to its main window. `run_task` takes a `request { provider, prompt, model, cloudApproved, visionModel? }` and a `progress` channel. The prompt is 1 to 2000 characters after trimming (`PROMPT_INVALID` otherwise). The host accepts one task at a time (`TASK_BUSY`).
 
-The host accepts one task at a time. Cancellation wins only before dispatch. Tool actions require an approval given after the action is proposed (see "Action approval"); the broker evaluates the decision at execution time. Task and execution events share a task ID. Prompts and model replies are excluded from SQLite events.
+The task resolves to `TaskOutcome { reply, actions }`:
+
+- `reply` is the model's final answer, validated by the agent (1 to 4000 characters);
+- `actions` is the factual report written by the host, one entry per action the agent asked for: `{ action, summary, status, code }`, where `status` is `done`, `partial`, `simulated`, `declined`, `expired`, `denied` or `failed`, and `code` gives the policy rule or error code for anything other than `done`. The model never writes this report.
+
+Prompts, replies, file names, file contents, window titles and typed text are excluded from SQLite events, which hold kinds and stable codes only.
+
+## Agent loop
+
+A task runs at most 8 model proposals; after that it fails with `AGENT_STEP_LIMIT`.
+
+1. The gateway sends the fixed French agent instructions, the user's request and the previous tool steps, in the provider's own format (Ollama: `tool_calls` + `tool_name`; OpenAI Chat Completions: call IDs + `tool_call_id`), with the tool catalog. Local requests use `num_ctx` 16384 and `num_predict` 1024.
+2. The streamed reply is folded into a proposal: tool calls or a text answer (see "Streaming and progress").
+3. The Python child (protocol v2, at most 32 KiB in and out, four seconds) validates the proposal against its registry: exactly one call, a registered tool, exactly the declared arguments, each within its allowed values or validator. It returns a typed tool request or a reply, or exits with code 2.
+4. The host parses the decision with unknown fields denied and validates it again.
+5. A reply ends the task. A tool request goes through the policy gate, runs if allowed, and its observation is appended to the conversation for the next proposal (`agent.tool.requested`, then `agent.observation`).
+
+Observations are untrusted data: file contents, window trees and descriptions are framed as `<<<DEBUT … FIN>>>` with an instruction not to follow them; failures return stable codes. Instructions found in a file or a window can at most make the model propose an action, which still goes through the policy engine, the user's approval when required, and the broker.
+
+### Tools
+
+| Tool | Arguments | Policy action | Capability | Local only |
+|---|---|---|---|---|
+| `launch_application` | `application: "notepad"` | launchApplication | LaunchNotepad | no |
+| `list_text_files` | — | listFiles | FileRead | yes |
+| `read_text_file` | `name` | readFile | FileRead | yes |
+| `copy_text_file` | `source`, `destination` | copyFile | FileCopy | yes |
+| `move_text_file` | `source`, `destination` | moveFile | FileMove | yes |
+| `trash_text_file` | `name` | trashFile | FileTrash | yes |
+| `inspect_window` | — | inspectWindow | WindowLookup, then WindowInspect | yes |
+| `describe_window` | — | describeWindow | WindowLookup, then WindowCapture | yes, and only with a chosen vision model |
+| `type_in_notepad` | `text` (1–2000 chars) | typeText | TypeText | yes |
+
+File names are flat ASCII `.txt` names (letters, digits, space, `-`, `_`; no reserved device names; at most 128 bytes); source and destination must differ ignoring case. No tool takes a path, a window handle, a process ID or a command line: the host decides every target. Local-only tools are not offered to cloud models and are denied by the policy engine if proposed anyway.
+
+## Policy engine
+
+`policy::evaluate(settings, action, context)` returns `Allow`, `Ask`, `Deny` or `Simulate`, with the rule that produced it. It starts from a matrix (action × profile) and applies invariants that no profile can relax:
+
+| Action | Observation | Assisted (default) | Limited | Advanced |
+|---|---|---|---|---|
+| list / read files | Allow | Allow | Allow | Allow |
+| inspect / describe a window | Ask | Ask | Ask | Ask |
+| launch Notepad, copy, type in Notepad | Deny | Ask | Allow | Allow |
+| rename | Deny | Ask | Ask | Allow |
+| trash | Deny | Ask | Ask | Ask |
+
+Invariants, in order: local-only tools are denied to cloud models (`local_only`); a profile denial stays a denial; with **simulation mode** every remaining side effect becomes a dry run (`simulation_mode`); screen reading always asks (`screen_data`); trash always asks (`critical_action`). Unknown or unreadable settings resolve to Observation.
+
+Settings live in the `settings` table (`policy.autonomy`, `policy.simulate`), are changed through `set_policy_settings` (main window only, journaled as `settings.policy.changed`) and are read once per task (`policy.profile` event): a running task keeps the settings it started with. `get_policy_overview` returns the settings and the decision table computed by the core.
+
+### Gate for one action
+
+1. **Decide.** The engine's decision is journaled as `policy.evaluated` with code `effect:action:rule`. A denial is reported (`denied`) and returned to the model as an observation.
+2. **Prepare, read-only.** Copy, rename and trash dry-run first (readable source, free destination); window tools locate the window. A failed preparation is reported (`failed`) and asks nothing.
+3. **Authorize.** `Simulate`: `policy.simulated`, reported `simulated`, the model learns what would have happened. `Ask`: approval flow below. `Allow` or approved: the host requests exactly one capability.
+4. **Execute.** Side effects run in the DISPATCHING phase (task state `dispatching`); the broker checks the capability, identity, scope, identifiers and deadline again at execution time, and audits the decision and outcome. Each command has its own request ID and idempotency key.
+
+### Broker capabilities
+
+`broker::Policy` is a set of `Capability` grants, empty by default. Agent rules: launch the Notepad enum (`LaunchNotepad`); list and preview text (`FileRead`); copy (`FileCopy`); rename (`FileMove`); trash (`TrashLocalText`, `FileTrash`); locate (`WindowLookup`), inspect (`WindowInspect`) and capture (`WindowCapture`) a window; type into Notepad (`TypeText`, text 1–2000 characters). Desktop-inspector rules (Inspector and Files pages) are unchanged. Anything else is `default_deny`.
 
 ## Action approval (AWAITING_APPROVAL)
 
-`run_task`'s request carries `provider`, `prompt`, `model` and `cloudApproved` only. When the agent's decision is a validated tool request, the host:
+When the decision is `Ask`, the host:
 
-1. records `policy.approval.required` and moves the task to AWAITING_APPROVAL;
-2. sends `{ "type": "approvalRequired", "approvalId", "tool", "application", "expiresInMs" }` on the progress channel. The approval ID is a random UUID generated by the host and known only to the requesting window;
-3. waits up to 60 seconds for `resolve_approval({ approvalId, approved })`, a command granted to the main window only. Any other ID returns `APPROVAL_NOT_PENDING`; an ID is consumed by its first decision or by expiry;
-4. records `policy.approval.granted`, `policy.approval.declined` or `policy.approval.expired` and emits it as a stage;
-5. builds the command and its deadline, then submits it to the broker with the decision as policy. Declined and expired approvals therefore reach the broker and are audited as `policy.denied`; they end with `ACTION_DECLINED` or `APPROVAL_EXPIRED`.
+1. records `policy.approval.required` and moves the task to AWAITING_APPROVAL (task state `awaiting_approval`);
+2. sends `{ "type": "approvalRequired", "approvalId", "action", "expiresInMs" }` on the progress channel. `action` describes the exact action: `launch`, `listFiles`, `readFile`, `copyFile` / `moveFile` (source, destination, characters), `trashFile` (name, characters), `inspectWindow` (application, title), `describeWindow` (application, title, model) or `typeText` (full text, characters). The approval ID is a random UUID generated by the host and known only to the requesting window;
+3. waits up to 60 seconds for `resolve_approval({ approvalId, approved })`, main window only. Any other ID returns `APPROVAL_NOT_PENDING`; an ID is consumed by its first decision or by expiry;
+4. records `policy.approval.granted`, `policy.approval.declined` or `policy.approval.expired`. A refusal or expiry is also journaled as `policy.denied` (`user_declined` / `approval_expired`), reported in the outcome, returned to the model as an observation, and requests no capability.
 
-`cancel_task` succeeds while planning or while an approval is pending, and wakes the waiting task, which ends as `TASK_CANCELLED` without dispatch. The model and the agent cannot answer an approval: they never see its ID and have no access to the command.
+`cancel_task` succeeds while planning or while an approval is pending, and wakes the waiting task, which ends as `TASK_CANCELLED`. Once an action is dispatching it is no longer cancellable. The model and the agent cannot answer an approval: they never see its ID and have no access to the command.
 
-## Agent planning (AW-010, protocol v2)
+## Agent file tools
 
-1. The gateway sends fixed French agent instructions (system message), the user's request (user message) and the tool catalog to the selected provider. The catalog holds one tool, `launch_application`, whose only argument `application` is an enum limited to `notepad`. OpenAI receives the schema with `strict: true`.
-2. The provider reply is normalized into a proposal: `{ "calls": [...] }` when the model returned tool calls, otherwise `{ "text": "..." }` with 1 to 4000 characters. Truncated, empty or malformed replies fail with `MODEL_UNAVAILABLE_OR_INVALID` or `CLOUD_PROPOSAL_INVALID`.
-3. The Python child receives `{ "version": 2, "proposal": ... }` (at most 32 KiB) on stdin. It validates the proposal against its tool registry: exactly one call, a registered tool name, exactly the declared arguments, each within its allowed values. It returns `{ "version": 2, "action": "tool", "tool", "arguments" }` or `{ "version": 2, "action": "reply", "text" }` (at most 32 KiB), or exits with code 2. The host drains stdout concurrently and kills the child after four seconds.
-4. The host parses the decision with unknown fields denied and validates it again. A reply ends the task with the `agent.reply` event and no broker call. A tool request is mapped by the host to the Protobuf `LaunchApplication` operation and submitted to the broker under the agent peer identity.
+All file tools cover the dedicated `files` folder under the app's local data directory, with the rules of the Files page: handle-verified paths, no links (hard links refused when read), 64 KiB maximum, UTF-8. Audit events hold codes only (`file.list.*`, `file.preview.*`, `file.copy.*`, `file.move.*`, `file.trash.*`).
 
-Model output is untrusted data. The registry bounds what the agent may request; the broker still decides what runs.
+- `list_text_files`: at most 100 sorted names of regular `.txt` files. `read_text_file`: the text without BOM, at most 16 000 characters passed to the model.
+- `copy_text_file`: staging file, flush, same-folder rename with replacement disabled, cleanup on failure.
+- `move_text_file`: rename of the handle-opened file inside the folder, replacement disabled.
+- `trash_text_file`: the file is moved, by handle-anchored rename, into a new subfolder of AiWin11's own `trash` folder (next to `files`), keeping its name. Nothing is deleted; it can be restored by moving it back. A failed trash leaves no empty folder.
 
-## Agent loop and read-only file tools (AW-016, first step)
+## Agent window tools
 
-A task runs at most 5 model proposals. Each proposal is validated by the Python agent and the host as above, then:
+`inspect_window` and `describe_window` take no argument: the model cannot choose the window.
 
-- a text reply ends the task (`agent.reply`);
-- `launch_application` ends the task through the approval flow below;
-- `list_text_files` or `read_text_file` runs a read-only observation, records `agent.tool.requested` then `agent.observation`, and appends the call and its result to the conversation sent to the model for the next proposal.
+1. **Locate.** v1 `LocateWindow { exclude_process_id: <host pid> }`: the bridge walks the top-level z-order and returns the first window that is visible, not minimized, unowned, not cloaked, not tool/topmost/no-activate, not a shell window, with a title, and not owned by the host or the bridge: `WindowInfo { window, process_id, title ≤ 120 chars, process_name ≤ 64 chars }`. The title is shown to the user in the approval; the model sees it only after approval.
+2. **Inspect.** v1 `InspectWindow { window, process_id }`: the bridge checks before and after the walk that the handle still exists and belongs to that process, then returns up to 80 nodes, 8 levels deep: control type, enabled, focus and accessible name (single line, ≤ 80 chars, always empty for password fields). No pixels. Audit `window.inspect.*`.
+3. **Describe.** v1 `CaptureWindow { window, process_id }`: the bridge renders exactly that window with PrintWindow (it need not be in the foreground), checks the process before and after, refuses display-affinity windows, and returns a JPEG of at most 1024 px per side and 256 KiB. The host passes it to the chosen local Ollama vision model, after checking again that the model is local and that Ollama's cloud features are disabled. Only the text description reaches the agent; the image is kept in memory for the call and never stored or sent elsewhere. Audit `window.capture.*`, `vision.describe.*`.
 
-After 5 proposals without a final answer the task fails with `AGENT_STEP_LIMIT`.
+The desktop Inspector page is unchanged: it still reads the foreground window's structure only, without names, after its countdown.
 
-File tools cover the dedicated `files` folder under the app's local data directory, with the same rules as the Files page: flat ASCII `.txt` names, handle-verified paths, no links, 64 KiB maximum, UTF-8. `list_text_files` returns at most 100 sorted names of regular `.txt` files; `read_text_file` returns the text without BOM.
+## Agent text input in Notepad
 
-- **Local only.** The host offers file tools, and grants `Policy.allow_agent_file_reads`, only when the provider is Ollama and the folder is available. File contents never reach a cloud provider. A file tool returned in any other case is rejected (`AGENT_REJECTED`).
-- **Broker.** Each call is a v1 `ListLocalText` or `PreviewLocalText` command under the agent identity, with its own request ID and idempotency key and the chat task ID. The broker allows these reads for the agent only with `allow_agent_file_reads`; it never extends to copy, move, delete or launch. Each call is audited (`policy.allowed`, then `file.list.*` or `file.preview.*`), without names or contents.
-- **No approval for reads.** Reading the dedicated folder is a low-risk observation, as in the specification's policy table. Actions with side effects keep their approval.
-- **Untrusted data.** Observations reach the model framed as untrusted data (`<<<DEBUT … FIN>>>`), with at most 16 000 characters per file. Tool failures return only a stable error code. Instructions inside a file cannot do more than the user's own request: any side effect still requires the user's approval and the broker.
-- **Context.** Local requests use `num_ctx` 16384 and `num_predict` 1024 so that observations fit.
+`type_in_notepad(text)` writes into the Notepad window **this task launched and verified**: the host keeps that process ID from the launch result; without one, nothing is asked or written and the model is told to launch Notepad first. v1 `TypeInNotepad { process_id, text }`: the bridge checks the process is Notepad (package family or system path), finds its visible editor (`RichEditD2DPT` or `Edit`), refuses a non-empty document (`document_not_empty`, so restored tabs or user text are never replaced), writes with `WM_SETTEXT` (no simulated keystrokes) and reads the text back. Outcomes: verified (`done`), sent but not verified (`partial`, `text_unverified`), or refused. The approval shows the full text. Audit `input.notepad.*`.
 
-### Agent file copy
+## Tasks and recovery
 
-`copy_text_file(source, destination)` is offered with the file tools (local models only). Both names follow the file rules and must differ, ignoring case.
+Each chat task has a row in `tasks` (`id`, `session_id`, `state`, `outcome`, timestamps), updated at each step: `created`, `planning`, `awaiting_approval`, `dispatching`, then `completed` (outcome `ok`), `failed` (error code) or `cancelled`. Final states never change.
 
-1. **Dry run.** Under the read grant, the host reads the source and checks that no entry named `destination` exists (`file.preview.*` audit). If that fails (`FILE_UNAVAILABLE`, `FILE_DESTINATION_EXISTS`, `FILE_SAME_NAME`…), no approval is requested: the failure code goes back to the model as an observation and the loop continues.
-2. **Approval.** `approvalRequired.action` is `{ "kind": "copyFile", "source", "destination", "characters" }`, shown to the user as is. Launch approvals use `{ "kind": "launch", "application": "notepad" }`.
-3. **Broker.** The host submits a v1 `CopyLocalText` command under the agent identity with `Policy.allow_agent_file_copy` set only if the user approved. That grant covers copy only. A refusal is audited as `policy.denied` and ends with `ACTION_DECLINED` or `APPROVAL_EXPIRED`.
-4. **Copy.** The existing copy runs: staging file, flush, same-folder rename with replacement disabled, cleanup on failure. The task ends with `TaskOutcome { "kind": "copied", "source", "destination" }` or the file error code; the model does not narrate the result.
+At startup, tasks still in a non-final state were interrupted by a crash or a forced exit. They are closed as `interrupted`, keeping their last state as outcome, and journaled as `task.recovered` in the new session. Nothing is re-run, so an action that may have happened is never repeated; a task interrupted while `dispatching` is flagged in the Activity page so the user can check its result. Within a session, the broker's idempotency reservations already prevent repeated dispatch.
 
-## Agent window inspection (AW-013, agent side)
-
-`inspect_window` takes no argument: the model cannot choose which window is read. It is offered to local models only and runs as an observation inside the agent loop.
-
-1. **Locate.** The host sends v1 `LocateWindow { exclude_process_id: <host pid> }` under the agent identity with `Policy.allow_agent_window_lookup` (granted for local tasks). The bridge walks the top-level z-order and returns the first window that is visible, not minimized, unowned, not cloaked, not tool/topmost/no-activate, not a shell window, with a non-empty title, and not owned by the host or the bridge: `WindowInfo { window, process_id, title ≤ 120 chars, process_name ≤ 64 chars }`. Audit: `window.locate.*`. The title and application are shown to the user only; the model does not see them before approval.
-2. **Approval.** `approvalRequired.action` is `{ "kind": "inspectWindow", "application", "title" }`.
-3. **Inspect.** The host sends v1 `InspectWindow { window, process_id }` with `Policy.allow_agent_window_inspection` set only if the user approved; a refusal is audited as `policy.denied`. The bridge checks before and after the walk that the handle still exists and belongs to that process, then returns up to 80 nodes, 8 levels deep, with control type, enabled, focus and accessible name (single line, ≤ 80 chars, always empty for password fields). No pixels are captured. The reply is limited to 32 KiB. Audit: `window.inspect.*`, without titles or names.
-4. **Observation.** The host renders the tree as indented `Type « name »` lines framed as untrusted data and appends it to the conversation. A refusal, expiry or failure is also an observation (nothing read), so the model can still answer.
-
-The desktop Inspector page is unchanged: it still reads the foreground window's structure only, without names.
+`get_tasks` (main window only) returns the 30 most recent tasks across sessions. `get_snapshot` returns up to 100 events of the current session with their task ID and code.
 
 ## Streaming and progress (AW-011)
 
-Both providers are called with `stream: true`. The gateway folds Ollama's NDJSON chunks or OpenAI's SSE `data:` events into the same proposal as above, with the same bounds (2 MiB body, 4000 reply characters, one tool call). Every Ollama chunk is checked for remote metadata. Tool-call fragments are assembled silently and never forwarded.
+Both providers are called with `stream: true`. The gateway folds Ollama's NDJSON chunks or OpenAI's SSE `data:` events into one proposal, with the same bounds (2 MiB body, 4000 reply characters, one tool call). Every Ollama chunk is checked for remote metadata. Tool-call fragments are assembled silently and never forwarded; OpenAI call IDs are kept for the next turn.
 
 `run_task`'s `progress` channel carries `TaskUpdate` messages:
 
-- `{ "type": "stage", "stage": "<event kind>" }` after each persisted lifecycle event (`task.created`, `task.planning`, `agent.reply`, `agent.tool.requested`, `policy.approval.granted|declined|expired`);
-- `{ "type": "approvalRequired", ... }` when an action awaits the user's decision (see "Action approval");
+- `{ "type": "stage", "stage": "<event kind>" }` after persisted lifecycle events (`task.created`, `task.planning`, `agent.tool.requested`, `agent.observation`, `policy.simulated`, `policy.approval.granted|declined|expired`, `agent.reply`);
+- `{ "type": "approvalRequired", ... }` when an action awaits the user's decision;
 - `{ "type": "delta", "text": "..." }` for each streamed text fragment.
 
-Deltas are unvalidated model output, shown as a draft and never journaled. The window discards the draft when the task ends and displays only the agent-validated reply from `TaskOutcome`. After each chunk the host checks the task phase: a cancellation requested while the model streams stops reading, which closes the provider connection, and the task ends as `TASK_CANCELLED` without dispatch. A provider that sends no chunk at all can still hold the task until its timeout (90 s local, 45 s OpenAI). Adding a tool requires a catalog entry, an agent registry entry, a host mapping, a Protobuf operation, a broker rule and bridge support.
+Deltas are unvalidated model output, shown as a draft and never journaled; the window clears the draft at each tool step and when the task ends. After each chunk the host checks the task phase: a cancellation requested while the model streams stops reading, which closes the provider connection. A provider that sends no chunk at all can still hold the task until its timeout (90 s local, 45 s OpenAI).
+
+Adding a tool requires a catalog entry, an agent registry entry, a host mapping, a policy action and matrix row, a Protobuf operation, a broker capability and rule, and bridge or core support.
 
 ## Optional OpenAI provider
 
-`run_task` takes a `request` with an explicit `provider` selector and a `cloudApproved` flag (tool actions are approved separately, see "Action approval"). Its `progress` channel delivers the persisted request, planning and agent proposal events to the calling window as they occur. The host records the cloud authorization decision before inference. Each provider failure ends the request. OpenAI receives the selected model ID, the fixed agent instructions, the user's request and the tool catalog over HTTPS with `store: false`, only when `cloudApproved` is set for that request. Its response is converted to the same proposal format as Ollama and validated by the Python agent before broker authorization.
+The host records the cloud authorization decision (`model.cloud.authorized` / `model.cloud.denied`) before inference. OpenAI receives the selected model ID, the fixed agent instructions, the user's request, the previous steps and a catalog limited to `launch_application`, over HTTPS with `store: false`, only when `cloudApproved` is set for that request. No file content, window data or image is ever sent to it. Its response is converted to the same proposal format as Ollama and validated by the Python agent.
 
 The main window can save, remove and check the presence of the `AiWin11/OpenAI` credential. Rust stores it as a generic entry in Windows Credential Manager for the current user on the local machine. The presence command returns a boolean. The key is read in the native gateway for the OpenAI request and excluded from SQLite, agent input and error messages.

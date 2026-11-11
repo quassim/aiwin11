@@ -26,5 +26,11 @@ AW-025 multi-agent (8–12); AW-026 visual workflow editor (10–15); AW-027 ima
 ## Lot sequence
 A: AW-001–005; B: AW-006–012; C: AW-013–017; D: AW-018–024; E: AW-025–032.
 
+## Status (2026-11-12)
+- Lot A (AW-001–005): done; the broker is completed by a data-driven policy engine with autonomy profiles and simulation mode. Cross-process gRPC transport is still pending (the core runs inside Tauri).
+- Lot B (AW-006–012): done and validated live with Ollama `qwen3:8b`.
+- Lot C (AW-013–017): done for the agent — window inspection, local vision description, Notepad text input, file read/copy/rename/trash, persistent tasks with crash recovery. Live validation of the latest steps is part of the final verification.
+- Lots D and E: not started.
+
 ## Definition of done
 Working code, typed contracts, documented setup, relevant tests green, verified broker enforcement and audit of all side effects. Do not represent mocks as complete Windows integration.
