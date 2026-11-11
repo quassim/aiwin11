@@ -15,6 +15,8 @@ while (length < bytes.Length)
     if (count == 0) break;
     length += count;
 }
+// A spare bridge whose host exited sees an empty stdin: leave without writing anything.
+if (length == 0) return 3;
 if (length > maxMessageBytes) return 2;
 
 Protocol.Command command;

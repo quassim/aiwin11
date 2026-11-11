@@ -306,24 +306,65 @@ fn valid_jpeg(jpeg: &[u8]) -> bool {
         && jpeg.ends_with(&[0xff, 0xd9])
 }
 
-fn dispatch(command: &Command) -> Option<BridgeReply> {
-    let bytes = command.encode_to_vec();
-    if bytes.len() > MAX_MESSAGE_BYTES {
-        return None;
-    }
+/// One bridge process started ahead of time. It blocks on its private stdin and does
+/// nothing until it receives a broker-authorized command, so its startup cost (.NET load,
+/// antivirus scan of a newly installed binary: 17.9 s measured once) is not spent within a
+/// command's deadline. It has no listener; when the host exits, its stdin closes and it exits.
+static SPARE_BRIDGE: Mutex<Option<std::process::Child>> = Mutex::new(None);
+
+fn spawn_bridge() -> Option<std::process::Child> {
     let executable = std::env::current_exe().ok()?;
     let directory = executable.parent()?;
-    // The bridge stops working at the command deadline, then reports. Wait for that report
-    // instead of a fixed delay, so a slow .NET cold start yields a result rather than a kill.
-    let deadline = Instant::now() + bridge_wait(command.deadline_ms, unix_millis()?);
-    let mut child = Process::new(directory.join("AiWin11.Windows.exe"))
+    Process::new(directory.join("AiWin11.Windows.exe"))
         .current_dir(directory)
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+        .ok()
+}
+
+/// Starts the spare bridge if none is waiting. Called at application start and after each
+/// dispatch. Failures are ignored: `dispatch` then starts a bridge on demand.
+pub fn prewarm_bridge() {
+    if let Ok(mut spare) = SPARE_BRIDGE.lock() {
+        if spare.is_none() {
+            *spare = spawn_bridge();
+        }
+    }
+}
+
+/// Takes the waiting spare if it is still alive, otherwise starts a bridge now.
+/// Either way, a new spare is started for the next command.
+fn take_bridge() -> Option<std::process::Child> {
+    let spare = SPARE_BRIDGE.lock().ok().and_then(|mut spare| spare.take());
+    let child = match spare {
+        Some(mut child) => {
+            if matches!(child.try_wait(), Ok(None)) {
+                Some(child)
+            } else {
+                // The spare exited or cannot be queried: reap it and start a fresh bridge.
+                let _ = child.kill();
+                let _ = child.wait();
+                spawn_bridge()
+            }
+        }
+        None => spawn_bridge(),
+    };
+    prewarm_bridge();
+    child
+}
+
+fn dispatch(command: &Command) -> Option<BridgeReply> {
+    let bytes = command.encode_to_vec();
+    if bytes.len() > MAX_MESSAGE_BYTES {
+        return None;
+    }
+    // The bridge stops working at the command deadline, then reports. Wait for that report
+    // instead of a fixed delay, so a slow .NET cold start yields a result rather than a kill.
+    let deadline = Instant::now() + bridge_wait(command.deadline_ms, unix_millis()?);
+    let mut child = take_bridge()?;
 
     // The command fits in the anonymous pipe buffer. Close the writer to delimit the frame.
     let wrote = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(&bytes).is_ok());
@@ -426,6 +467,33 @@ mod tests {
         ] {
             assert!(named_tree(tree(invalid, false)).is_none());
         }
+    }
+
+    /// An expired command makes the bridge answer TIMEOUT without touching the desktop.
+    fn expired_command() -> Command {
+        let id = Uuid::new_v4().to_string();
+        Command {
+            schema_version: SCHEMA_VERSION, request_id: id.clone(), session_id: id.clone(), task_id: id.clone(),
+            correlation_id: id.clone(), authenticated_actor_id: "test".into(), idempotency_key: id,
+            deadline_ms: unix_millis().unwrap() - 1_000,
+            operation: Some(Operation::LaunchApplication(aiwin11_contracts::v1::LaunchApplication {
+                application: aiwin11_contracts::v1::launch_application::Application::Notepad as i32,
+            })),
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the published bridge beside the test binary"]
+    fn a_prewarmed_bridge_answers_without_startup_cost() {
+        prewarm_bridge();
+        // Let the spare finish starting, however slow its first start is.
+        thread::sleep(Duration::from_secs(25));
+        let started = Instant::now();
+        let reply = dispatch(&expired_command()).expect("bridge reply");
+        let elapsed = started.elapsed();
+        assert_eq!(reply.status(), Status::Timeout);
+        assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+        assert!(SPARE_BRIDGE.lock().unwrap().is_some(), "a new spare is waiting for the next command");
     }
 
     #[test]

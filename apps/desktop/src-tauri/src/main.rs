@@ -195,6 +195,9 @@ fn main() {
                 task: TaskSlot::default(),
                 vision: Mutex::new(()),
             }));
+            // Pay the bridge's first start (runtime load, antivirus scan) now, not within a
+            // command's deadline. The spare process waits idle for an authorized command.
+            std::thread::spawn(aiwin11_core::windows_bridge::prewarm_bridge);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
