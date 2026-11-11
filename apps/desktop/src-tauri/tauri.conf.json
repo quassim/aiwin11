@@ -1,0 +1,30 @@
+{
+  "productName": "AiWin11",
+  "version": "0.1.0",
+  "identifier": "app.aiwin11.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "AiWin11",
+      "width": 1060,
+      "height": 700,
+      "minWidth": 420,
+      "minHeight": 360
+    }],
+    "security": {
+      "capabilities": ["main-window"],
+      "csp": "default-src 'self'; img-src 'self' blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'",
+      "devCsp": "default-src 'self'; img-src 'self' blob:; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico"]
+  }
+}

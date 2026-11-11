@@ -1,0 +1,15 @@
+[package]
+name = "aiwin11-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "=2.5.3", features = [] }
+
+[dependencies]
+aiwin11-core = { path = "../../../services/core" }
+serde = { version = "=1.0.228", features = ["derive"] }
+tauri = { version = "=2.9.5", features = [] }

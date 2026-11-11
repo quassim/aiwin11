@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-inspect-foreground"
+description = "Enables the inspect_foreground command without any pre-configured scope."
+commands.allow = ["inspect_foreground"]
+
+[[permission]]
+identifier = "deny-inspect-foreground"
+description = "Denies the inspect_foreground command without any pre-configured scope."
+commands.deny = ["inspect_foreground"]

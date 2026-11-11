@@ -1,0 +1,115 @@
+syntax = "proto3";
+package aiwin11.v1;
+
+message Command {
+  uint32 schema_version = 1;
+  string request_id = 2;
+  string session_id = 3;
+  string task_id = 4;
+  string correlation_id = 5;
+  string authenticated_actor_id = 6;
+  int64 deadline_ms = 7;
+  string idempotency_key = 8;
+  oneof operation {
+    LaunchApplication launch_application = 9;
+    InspectForeground inspect_foreground = 10;
+    CaptureForeground capture_foreground = 11;
+    AnalyzeCapture analyze_capture = 12;
+    CharacterMapDigit character_map_digit = 13;
+    PreviewLocalText preview_local_text = 14;
+    CopyLocalText copy_local_text = 15;
+    MoveLocalText move_local_text = 16;
+    DeleteLocalText delete_local_text = 17;
+  }
+}
+
+message InspectForeground {}
+message CaptureForeground {}
+message AnalyzeCapture {}
+message PreviewLocalText {}
+message CopyLocalText {}
+message MoveLocalText {}
+message DeleteLocalText { bool confirmed = 1; }
+message CharacterMapDigit {
+  optional uint32 digit = 1;
+}
+
+message WindowCapture {
+  bytes jpeg = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+}
+
+message UiTree {
+  repeated UiNode nodes = 1;
+  bool truncated = 2;
+}
+
+message UiNode {
+  uint32 parent = 1;
+  uint32 control_type = 2;
+  bool enabled = 3;
+  bool focused = 4;
+}
+
+message LaunchApplication {
+  enum Application {
+    APPLICATION_UNSPECIFIED = 0;
+    APPLICATION_NOTEPAD = 1;
+  }
+  Application application = 1;
+}
+
+message Result {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SUCCESS = 1;
+    STATUS_PARTIAL = 2;
+    STATUS_FAILED = 3;
+    STATUS_DENIED = 4;
+    STATUS_CANCELLED = 5;
+    STATUS_TIMEOUT = 6;
+  }
+  uint32 schema_version = 1;
+  string request_id = 2;
+  Status status = 3;
+  Error error = 4;
+  uint64 duration_ms = 5;
+  optional uint32 process_id = 6;
+  UiTree ui_tree = 7;
+  WindowCapture window_capture = 8;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+message Event {
+  uint32 schema_version = 1;
+  string id = 2;
+  uint64 sequence = 3;
+  string timestamp_utc = 4;
+  string session_id = 5;
+  string task_id = 6;
+  string type = 7;
+  string source = 8;
+  string correlation_id = 9;
+  oneof payload {
+    PolicyDecision policy_decision = 10;
+    Result execution_result = 11;
+  }
+}
+
+message PolicyDecision {
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    OUTCOME_ALLOW = 1;
+    OUTCOME_DENY = 2;
+    OUTCOME_ASK = 3;
+    OUTCOME_SIMULATE = 4;
+  }
+  Outcome outcome = 1;
+  string code = 2;
+}

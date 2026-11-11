@@ -1,0 +1,135 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using Google.Protobuf;
+using Protocol = Aiwin11.V1;
+
+const int maxMessageBytes = 1024;
+using var input = Console.OpenStandardInput();
+using var output = Console.OpenStandardOutput();
+var bytes = new byte[maxMessageBytes + 1];
+int length = 0;
+while (length < bytes.Length)
+{
+    int count = input.Read(bytes, length, bytes.Length - length);
+    if (count == 0) break;
+    length += count;
+}
+if (length > maxMessageBytes) return 2;
+
+Protocol.Command command;
+try
+{
+    command = Protocol.Command.Parser.ParseFrom(bytes, 0, length);
+}
+catch (InvalidProtocolBufferException)
+{
+    return 2;
+}
+
+var result = new Protocol.Result { SchemaVersion = 1, RequestId = command.RequestId };
+var elapsed = Stopwatch.StartNew();
+if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", out _)
+    || (command.InspectForeground is null && command.CaptureForeground is null && command.CharacterMapDigit is null
+        && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
+{
+    Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
+}
+else if (command.DeadlineMs <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+{
+    Reject(Protocol.Result.Types.Status.Timeout, "expired", "The command deadline expired.");
+}
+else if (!OperatingSystem.IsWindows() || !Environment.UserInteractive)
+{
+    Reject(Protocol.Result.Types.Status.Failed, "interactive_windows_required", "An interactive Windows session is required.");
+}
+else if (command.CharacterMapDigit is { } entry)
+{
+    if (!entry.HasDigit || entry.Digit > 9)
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_digit", "A decimal digit is required.");
+    else
+        CharacterMapInput.Apply(entry.Digit, command.DeadlineMs, result);
+}
+else if (command.CaptureForeground is not null)
+{
+    try
+    {
+        var capture = WindowCapture.Read(command.DeadlineMs);
+        if (capture is null)
+            Reject(Protocol.Result.Types.Status.Failed, "capture_unavailable", "The foreground window could not be captured.");
+        else
+        {
+            result.WindowCapture = capture;
+            result.Status = Protocol.Result.Types.Status.Success;
+        }
+    }
+    catch (Exception error) when (error is Win32Exception or IOException or ArgumentException
+        or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the foreground window.");
+    }
+}
+else if (command.InspectForeground is not null)
+{
+    try
+    {
+        var tree = UiInspector.Read(command.DeadlineMs);
+        if (tree is null)
+            Reject(Protocol.Result.Types.Status.Failed, "window_unavailable", "The foreground window could not be inspected.");
+        else
+        {
+            result.UiTree = tree;
+            result.Status = Protocol.Result.Types.Status.Success;
+        }
+    }
+    catch (Exception error) when (error is System.Windows.Automation.ElementNotAvailableException
+        or System.Runtime.InteropServices.COMException or UnauthorizedAccessException
+        or ArgumentException or InvalidOperationException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "inspection_failed", "Windows could not inspect the foreground window.");
+    }
+}
+else
+{
+    try
+    {
+        var existing = Notepad.Windows();
+        if (command.DeadlineMs <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+        {
+            Reject(Protocol.Result.Types.Status.Timeout, "expired", "The command deadline expired.");
+        }
+        else
+        {
+            using var launched = Notepad.Start();
+            var verification = Stopwatch.StartNew();
+            while (verification.Elapsed < TimeSpan.FromSeconds(4)
+                   && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < command.DeadlineMs)
+            {
+                var opened = Notepad.Windows().Except(existing).FirstOrDefault();
+                if (opened != default)
+                {
+                    result.Status = Protocol.Result.Types.Status.Success;
+                    result.ProcessId = (uint)opened.Pid;
+                    break;
+                }
+                Thread.Sleep(75);
+            }
+            if (!result.HasProcessId)
+                Reject(Protocol.Result.Types.Status.Partial, "window_unverified", "Launch requested. No new Notepad window was verified.");
+        }
+    }
+    catch (Exception error) when (error is Win32Exception or InvalidOperationException or IOException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "bridge_failure", "Windows could not complete the Notepad operation.");
+    }
+}
+
+result.DurationMs = (ulong)elapsed.ElapsedMilliseconds;
+result.WriteTo(output);
+return 0;
+
+void Reject(Protocol.Result.Types.Status status, string code, string message)
+{
+    result.Status = status;
+    result.Error = new Protocol.Error { Code = code, Message = message };
+}

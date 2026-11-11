@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-local-text"
+description = "Enables the preview_local_text command without any pre-configured scope."
+commands.allow = ["preview_local_text"]
+
+[[permission]]
+identifier = "deny-preview-local-text"
+description = "Denies the preview_local_text command without any pre-configured scope."
+commands.deny = ["preview_local_text"]

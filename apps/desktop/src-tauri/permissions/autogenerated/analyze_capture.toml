@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-analyze-capture"
+description = "Enables the analyze_capture command without any pre-configured scope."
+commands.allow = ["analyze_capture"]
+
+[[permission]]
+identifier = "deny-analyze-capture"
+description = "Denies the analyze_capture command without any pre-configured scope."
+commands.deny = ["analyze_capture"]

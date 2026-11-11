@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enter-character-map-digit"
+description = "Enables the enter_character_map_digit command without any pre-configured scope."
+commands.allow = ["enter_character_map_digit"]
+
+[[permission]]
+identifier = "deny-enter-character-map-digit"
+description = "Denies the enter_character_map_digit command without any pre-configured scope."
+commands.deny = ["enter_character_map_digit"]
