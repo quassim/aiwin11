@@ -12,9 +12,12 @@ type Snapshot = { sessionId: string; events: Activity[] };
 type TaskOutcome =
   | { kind: "launched"; application: "notepad"; processId: number }
   | { kind: "reply"; text: string };
+type PendingApproval = { approvalId: string; tool: "launch_application"; application: "notepad"; expiresInMs: number };
 type TaskUpdate =
   | { type: "stage"; stage: string }
-  | { type: "delta"; text: string };
+  | { type: "delta"; text: string }
+  | ({ type: "approvalRequired" } & PendingApproval);
+const applicationNames: Record<PendingApproval["application"], string> = { notepad: "le Bloc-notes" };
 const MAX_PROMPT_CHARS = 2000;
 
 const pages: Page[] = ["Accueil", "Modèles", "Inspecteur", "Fichiers", "Activité"];
@@ -26,6 +29,10 @@ const activityNames: Record<string, string> = {
   "model.cloud.denied": "Requête OpenAI refusée",
   "agent.tool.requested": "Action demandée par l’agent",
   "agent.reply": "Réponse de l’agent",
+  "policy.approval.required": "Approbation demandée",
+  "policy.approval.granted": "Action approuvée par toi",
+  "policy.approval.declined": "Action refusée par toi",
+  "policy.approval.expired": "Approbation expirée",
   "policy.allowed": "Action autorisée",
   "policy.denied": "Action refusée",
   "tool.execution.completed": "Nouvelle fenêtre vérifiée",
@@ -62,7 +69,10 @@ const taskErrors: Record<string, string> = {
   MODEL_UNAVAILABLE_OR_INVALID: "Ollama ou le modèle est indisponible, ou le modèle ne prend pas en charge les appels d’outils.",
   AGENT_UNAVAILABLE: "L’agent Python est indisponible. Vérifie son installation.",
   AGENT_REJECTED: "L’agent a rejeté la proposition du modèle : outil inconnu ou arguments invalides.",
-  ACTION_DENIED: "L’agent a proposé d’ouvrir le Bloc-notes, mais tu ne l’as pas autorisé pour cette demande.",
+  ACTION_DENIED: "Le broker a refusé l’action proposée.",
+  ACTION_DECLINED: "Action refusée. Rien n’a été exécuté.",
+  APPROVAL_EXPIRED: "La proposition a expiré sans réponse. Rien n’a été exécuté.",
+  APPROVAL_NOT_PENDING: "Cette proposition n’est plus en attente.",
   TASK_BUSY: "Une demande est déjà en cours.",
   TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
   WINDOW_UNVERIFIED: "Windows a reçu la demande. Aucune nouvelle fenêtre du Bloc-notes n’a pu être confirmée.",
@@ -86,7 +96,8 @@ function App() {
   const [catalogStatus, setCatalogStatus] = useState("");
   const [loadingModels, setLoadingModels] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [approved, setApproved] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval>();
+  const [approvalBusy, setApprovalBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [lastPrompt, setLastPrompt] = useState("");
   const [taskStatus, setTaskStatus] = useState("");
@@ -98,8 +109,21 @@ function App() {
     && (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
 
   function resetApproval() {
-    setApproved(false);
     setCloudApproved(false);
+  }
+
+  async function resolveApproval(approved: boolean) {
+    if (!pendingApproval || approvalBusy) return;
+    setApprovalBusy(true);
+    try {
+      await invoke("resolve_approval", { approvalId: pendingApproval.approvalId, approved });
+      setPendingApproval(undefined);
+    } catch (failure) {
+      setPendingApproval(undefined);
+      setTaskStatus(taskErrors[String(failure)] ?? "La décision n’a pas pu être transmise.");
+    } finally {
+      setApprovalBusy(false);
+    }
   }
 
   async function refreshKey() {
@@ -158,17 +182,25 @@ function App() {
     setTaskProgress("");
     setAgentReply("");
     setDraftReply("");
+    setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "delta") {
         setDraftReply((current) => current + update.text);
         return;
       }
+      if (update.type === "approvalRequired") {
+        const { type: _type, ...approval } = update;
+        setDraftReply("");
+        setPendingApproval(approval);
+        return;
+      }
+      if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
       setTaskProgress(activityNames[update.stage] ?? "");
       refresh();
     });
     try {
       const outcome = await invoke<TaskOutcome>("run_task", {
-        request: { prompt, model: selectedModel, provider, approved, cloudApproved },
+        request: { prompt, model: selectedModel, provider, cloudApproved },
         progress,
       });
       if (outcome.kind === "reply") {
@@ -183,6 +215,7 @@ function App() {
     } finally {
       // The streamed draft is unvalidated: only the agent-approved reply stays on screen.
       setDraftReply("");
+      setPendingApproval(undefined);
       setRunning(false);
       refresh();
     }
@@ -227,6 +260,24 @@ function App() {
             {taskStatus && <p role="status">
               {running && taskStatus === "Demande en cours…" && taskProgress ? taskProgress : taskStatus}
             </p>}
+            {pendingApproval && (
+              <div className="approval-request" role="group" aria-labelledby="approval-heading"
+                aria-describedby="approval-detail">
+                <h3 id="approval-heading">L’agent propose d’ouvrir {applicationNames[pendingApproval.application]}</h3>
+                <p id="approval-detail">
+                  Action : lancer une nouvelle fenêtre de {applicationNames[pendingApproval.application]}, sans argument.
+                  Ton accord vaut pour cette action uniquement. Sans réponse, la proposition expire
+                  dans {Math.round(pendingApproval.expiresInMs / 1000)} secondes.
+                </p>
+                <div className="section-header">
+                  <button type="button" disabled={approvalBusy}
+                    onClick={() => void resolveApproval(true)}>Autoriser</button>
+                  {/* Focus starts on the safe choice, so Enter alone never approves. */}
+                  <button type="button" autoFocus disabled={approvalBusy}
+                    onClick={() => void resolveApproval(false)}>Refuser</button>
+                </div>
+              </div>
+            )}
             <form className="task-form" onSubmit={(event) => {
               event.preventDefault();
               if (canSend) void runTask();
@@ -234,11 +285,6 @@ function App() {
               <label htmlFor="prompt">Ta demande</label>
               <textarea id="prompt" rows={3} maxLength={MAX_PROMPT_CHARS} placeholder="Ouvre le Bloc-notes"
                 value={prompt} disabled={running} onChange={(event) => { setPrompt(event.target.value); resetApproval(); }} />
-              <label className="approval">
-                <input type="checkbox" checked={approved} disabled={running}
-                  onChange={(event) => setApproved(event.target.checked)} />
-                Si l’agent le propose, autoriser l’ouverture du Bloc-notes pour cette demande
-              </label>
               {provider === "openai" && <label className="approval">
                 <input type="checkbox" checked={cloudApproved} disabled={running}
                   onChange={(event) => setCloudApproved(event.target.checked)} />

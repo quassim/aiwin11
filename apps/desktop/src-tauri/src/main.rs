@@ -176,6 +176,14 @@ fn cancel_task(state: State<'_, Arc<AppState>>) -> bool {
     state.task.cancel()
 }
 
+/// The user's answer to the action the agent proposed for the running task.
+#[tauri::command]
+fn resolve_approval(
+    state: State<'_, Arc<AppState>>, approval_id: String, approved: bool,
+) -> Result<(), &'static str> {
+    state.task.resolve_approval(&approval_id, approved)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -190,7 +198,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_snapshot, discover_models, run_task, cancel_task,
+            get_snapshot, discover_models, run_task, cancel_task, resolve_approval,
             openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
             capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,
             local_files_root, preview_local_text, copy_local_text,

@@ -3,7 +3,7 @@ use std::{
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command as Process, Stdio},
-    sync::{atomic::{AtomicU8, Ordering}, Mutex},
+    sync::{atomic::{AtomicU8, Ordering}, Condvar, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -36,9 +36,8 @@ pub struct TaskRequest {
     pub provider: Provider,
     pub prompt: String,
     pub model: String,
-    /// Scoped approval: lets the broker allow a Notepad launch proposed for this request.
-    pub approved: bool,
     /// Scoped approval: lets this request's prompt be sent to the cloud provider.
+    /// Tool actions are approved later, once proposed (see `TaskSlot::resolve_approval`).
     pub cloud_approved: bool,
 }
 
@@ -59,6 +58,14 @@ pub enum TaskUpdate {
     Stage { stage: &'static str },
     /// Unvalidated model text, for display only. The final reply replaces it.
     Delta { text: String },
+    /// The agent proposed a validated action; the task waits for the user's decision.
+    #[serde(rename_all = "camelCase")]
+    ApprovalRequired {
+        approval_id: String,
+        tool: &'static str,
+        application: &'static str,
+        expires_in_ms: u64,
+    },
 }
 
 impl TaskUpdate {
@@ -78,19 +85,100 @@ const IDLE: u8 = 0;
 const PLANNING: u8 = 1;
 const CANCELLED: u8 = 2;
 const DISPATCHING: u8 = 3;
+const AWAITING_APPROVAL: u8 = 4;
 pub const MAX_PROMPT_CHARS: usize = 2000;
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 const AGENT_PROTOCOL: u32 = 2;
 const MAX_AGENT_INPUT: usize = 32 * 1024;
 const MAX_AGENT_OUTPUT: usize = 32 * 1024;
 
+/// The user's answer to one pending approval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Decision {
+    Approved,
+    Declined,
+    Expired,
+}
+
+#[derive(Default)]
+enum ApprovalState {
+    #[default]
+    Idle,
+    Pending { id: String },
+    Decided { id: String, approved: bool },
+}
+
 #[derive(Default)]
 pub struct TaskSlot {
     phase: AtomicU8,
+    approval: Mutex<ApprovalState>,
+    signal: Condvar,
 }
 
 impl TaskSlot {
+    /// Requests cancellation. Succeeds while the model is planning or while an approval is
+    /// pending; once dispatch started, the action is no longer cancellable.
     pub fn cancel(&self) -> bool {
-        self.phase.compare_exchange(PLANNING, CANCELLED, Ordering::AcqRel, Ordering::Acquire).is_ok()
+        let cancelled = [PLANNING, AWAITING_APPROVAL].into_iter().any(|phase| {
+            self.phase.compare_exchange(phase, CANCELLED, Ordering::AcqRel, Ordering::Acquire).is_ok()
+        });
+        if cancelled {
+            // Take the lock so a waiter cannot miss the wake-up between its check and its wait.
+            drop(self.approval.lock());
+            self.signal.notify_all();
+        }
+        cancelled
+    }
+
+    /// Records the user's decision for the pending approval with this exact ID.
+    pub fn resolve_approval(&self, approval_id: &str, approved: bool) -> Result<(), &'static str> {
+        let mut state = self.approval.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+        match &*state {
+            ApprovalState::Pending { id } if id == approval_id => {
+                *state = ApprovalState::Decided { id: id.clone(), approved };
+                drop(state);
+                self.signal.notify_all();
+                Ok(())
+            }
+            _ => Err("APPROVAL_NOT_PENDING"),
+        }
+    }
+
+    /// Publishes a pending approval, then blocks until the user decides, the approval
+    /// expires or the task is cancelled. The UI learns the ID only through `announce`.
+    fn await_approval(
+        &self, timeout: Duration, announce: impl FnOnce(String),
+    ) -> Result<Decision, &'static str> {
+        let id = Uuid::new_v4().to_string();
+        *self.approval.lock().map_err(|_| "CORE_UNAVAILABLE")? = ApprovalState::Pending { id: id.clone() };
+        if self.phase.compare_exchange(PLANNING, AWAITING_APPROVAL, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            return Err("TASK_CANCELLED");
+        }
+        announce(id.clone());
+        let deadline = Instant::now() + timeout;
+        let mut state = self.approval.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+        let decision = loop {
+            if self.phase.load(Ordering::Acquire) == CANCELLED {
+                break Err("TASK_CANCELLED");
+            }
+            if let ApprovalState::Decided { id: decided, approved } = &*state {
+                if *decided == id {
+                    break Ok(if *approved { Decision::Approved } else { Decision::Declined });
+                }
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                break Ok(Decision::Expired);
+            }
+            state = self.signal.wait_timeout(state, deadline - now).map_err(|_| "CORE_UNAVAILABLE")?.0;
+        };
+        // The ID is single-use: any later resolve attempt is rejected.
+        *state = ApprovalState::Idle;
+        drop(state);
+        decision?;
+        self.phase.compare_exchange(AWAITING_APPROVAL, PLANNING, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "TASK_CANCELLED")?;
+        decision
     }
 
     pub fn run(
@@ -177,6 +265,27 @@ impl TaskSlot {
         };
         record(core, task, "agent.tool.requested")?;
         progress(TaskUpdate::stage("agent.tool.requested"));
+        if self.phase.load(Ordering::Acquire) == CANCELLED {
+            return Err("TASK_CANCELLED");
+        }
+        // AWAITING_APPROVAL: the user decides on this exact action, now that it is known.
+        record(core, task, "policy.approval.required")?;
+        let decision = self.await_approval(APPROVAL_TIMEOUT, |approval_id| {
+            progress(TaskUpdate::ApprovalRequired {
+                approval_id,
+                tool: "launch_application",
+                application: "notepad",
+                expires_in_ms: APPROVAL_TIMEOUT.as_millis() as u64,
+            });
+        })?;
+        let decided = match decision {
+            Decision::Approved => "policy.approval.granted",
+            Decision::Declined => "policy.approval.declined",
+            Decision::Expired => "policy.approval.expired",
+        };
+        record(core, task, decided)?;
+        progress(TaskUpdate::stage(decided));
+        // The command and its deadline are built only after the decision.
         let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
         let deadline_ms = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(|_| "CLOCK_UNAVAILABLE")?.as_millis() as i64 + 8_000;
@@ -195,14 +304,18 @@ impl TaskSlot {
         };
         self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "TASK_CANCELLED")?;
-        core.execute_windows(Policy { allow_agent_to_launch_notepad: request.approved }, Peer::Agent, &command)
+        // Every decision goes through the broker, so a refusal is audited as policy.denied.
+        let policy = Policy { allow_agent_to_launch_notepad: decision == Decision::Approved };
+        core.execute_windows(policy, Peer::Agent, &command)
             .map(|process_id| TaskOutcome::Launched { application: "notepad", process_id })
-            .map_err(|error| match error {
-                ExecutionError::Denied(_) => "ACTION_DENIED",
-                ExecutionError::WindowUnverified => "WINDOW_UNVERIFIED",
-                ExecutionError::AuditUnavailable => "AUDIT_UNAVAILABLE",
-                ExecutionError::OutcomeUnrecorded => "OUTCOME_UNRECORDED",
-                ExecutionError::ExecutionFailed => "BRIDGE_FAILED",
+            .map_err(|error| match (error, decision) {
+                (ExecutionError::Denied(_), Decision::Declined) => "ACTION_DECLINED",
+                (ExecutionError::Denied(_), Decision::Expired) => "APPROVAL_EXPIRED",
+                (ExecutionError::Denied(_), Decision::Approved) => "ACTION_DENIED",
+                (ExecutionError::WindowUnverified, _) => "WINDOW_UNVERIFIED",
+                (ExecutionError::AuditUnavailable, _) => "AUDIT_UNAVAILABLE",
+                (ExecutionError::OutcomeUnrecorded, _) => "OUTCOME_UNRECORDED",
+                (ExecutionError::ExecutionFailed, _) => "BRIDGE_FAILED",
             })
     }
 }
@@ -219,6 +332,9 @@ struct ResetSlot<'a>(&'a TaskSlot);
 
 impl Drop for ResetSlot<'_> {
     fn drop(&mut self) {
+        if let Ok(mut state) = self.0.approval.lock() {
+            *state = ApprovalState::Idle;
+        }
         self.0.phase.store(IDLE, Ordering::Release);
     }
 }
@@ -406,14 +522,80 @@ mod tests {
         );
     }
 
-    fn live_request(prompt: &str, approved: bool) -> TaskRequest {
+    /// Moves a slot into the planning phase, as `run` does, for approval unit tests.
+    fn planning_slot() -> TaskSlot {
+        let slot = TaskSlot::default();
+        slot.phase.store(PLANNING, Ordering::Release);
+        slot
+    }
+
+    #[test]
+    fn approval_returns_the_users_decision_for_the_announced_id() {
+        for (approved, expected) in [(true, Decision::Approved), (false, Decision::Declined)] {
+            let slot = planning_slot();
+            let decision = slot.await_approval(Duration::from_secs(5), |id| {
+                assert_eq!(slot.phase.load(Ordering::Acquire), AWAITING_APPROVAL);
+                assert_eq!(slot.resolve_approval("00000000-0000-0000-0000-000000000000", true), Err("APPROVAL_NOT_PENDING"));
+                slot.resolve_approval(&id, approved).unwrap();
+                assert_eq!(slot.resolve_approval(&id, true), Err("APPROVAL_NOT_PENDING"), "single decision");
+            });
+            assert_eq!(decision, Ok(expected));
+            assert_eq!(slot.phase.load(Ordering::Acquire), PLANNING);
+        }
+    }
+
+    #[test]
+    fn approval_ids_are_single_use_and_expire() {
+        let slot = planning_slot();
+        let mut announced = String::new();
+        let decision = slot.await_approval(Duration::from_millis(50), |id| announced = id);
+        assert_eq!(decision, Ok(Decision::Expired));
+        assert_eq!(slot.resolve_approval(&announced, true), Err("APPROVAL_NOT_PENDING"));
+    }
+
+    #[test]
+    fn cancelling_wakes_a_pending_approval() {
+        let slot = planning_slot();
+        let decision = thread::scope(|scope| {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let waiter = scope.spawn(|| slot.await_approval(Duration::from_secs(30), move |_| sender.send(()).unwrap()));
+            receiver.recv().unwrap();
+            assert!(slot.cancel());
+            waiter.join().unwrap()
+        });
+        assert_eq!(decision, Err("TASK_CANCELLED"));
+        assert!(!slot.cancel(), "a cancelled task cannot be cancelled twice");
+    }
+
+    #[test]
+    fn approval_requests_serialize_for_the_desktop() {
+        let update = TaskUpdate::ApprovalRequired {
+            approval_id: "id".into(), tool: "launch_application", application: "notepad", expires_in_ms: 60_000,
+        };
+        assert_eq!(serde_json::to_value(update).unwrap(), json!({
+            "type":"approvalRequired","approvalId":"id","tool":"launch_application",
+            "application":"notepad","expiresInMs":60000
+        }));
+    }
+
+    fn live_request(prompt: &str) -> TaskRequest {
         TaskRequest {
             provider: Provider::Ollama,
             prompt: prompt.into(),
             model: std::env::var("AIWIN11_TEST_MODEL").expect("set AIWIN11_TEST_MODEL"),
-            approved,
             cloud_approved: false,
         }
+    }
+
+    /// Runs a live request and answers its approval prompt, if any, with `approve`.
+    fn run_answering(
+        core: &Mutex<Core>, task: &TaskSlot, prompt: &str, approve: bool, stages: &Mutex<Vec<&'static str>>,
+    ) -> Result<TaskOutcome, &'static str> {
+        task.run(core, &live_request(prompt), |update| match update {
+            TaskUpdate::Stage { stage } => stages.lock().unwrap().push(stage),
+            TaskUpdate::ApprovalRequired { approval_id, .. } => task.resolve_approval(&approval_id, approve).unwrap(),
+            TaskUpdate::Delta { .. } => {}
+        })
     }
 
     #[test]
@@ -421,26 +603,26 @@ mod tests {
     fn opens_notepad_only_after_broker_authorization() {
         let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
         let task = TaskSlot::default();
-        assert_eq!(task.run(&core, &live_request("Ouvre le Bloc-notes", false), |_| {}), Err("ACTION_DENIED"));
-        let denied = core.lock().unwrap().activity().unwrap();
-        assert!(denied.iter().any(|event| event.kind == "policy.denied"));
-        assert!(!denied.iter().any(|event| event.kind.starts_with("tool.execution.")));
-
         let stages = Mutex::new(Vec::new());
-        let outcome = task.run(&core, &live_request("Peux-tu ouvrir le Bloc-notes ?", true), |update| {
-            if let TaskUpdate::Stage { stage } = update {
-                stages.lock().unwrap().push(stage);
-            }
-        }).unwrap();
+        assert_eq!(run_answering(&core, &task, "Ouvre le Bloc-notes", false, &stages), Err("ACTION_DECLINED"));
+        let declined = core.lock().unwrap().activity().unwrap();
+        assert!(declined.iter().any(|event| event.kind == "policy.approval.declined"));
+        assert!(declined.iter().any(|event| event.kind == "policy.denied"));
+        assert!(!declined.iter().any(|event| event.kind.starts_with("tool.execution.")));
+
+        stages.lock().unwrap().clear();
+        let outcome = run_answering(&core, &task, "Peux-tu ouvrir le Bloc-notes ?", true, &stages).unwrap();
         assert!(matches!(outcome, TaskOutcome::Launched { application: "notepad", process_id } if process_id > 0));
         assert_eq!(
             *stages.lock().unwrap(),
-            ["task.created", "task.planning", "agent.tool.requested"]
+            ["task.created", "task.planning", "agent.tool.requested", "policy.approval.granted"]
         );
         let activity = core.lock().unwrap().activity().unwrap();
-        assert_eq!(activity[0].kind, "task.completed");
-        assert_eq!(activity[1].kind, "tool.execution.completed");
-        assert_eq!(activity[2].kind, "policy.allowed");
+        let kinds: Vec<_> = activity.iter().take(5).map(|event| event.kind.as_str()).collect();
+        assert_eq!(kinds, [
+            "task.completed", "tool.execution.completed", "policy.allowed",
+            "policy.approval.granted", "policy.approval.required",
+        ]);
     }
 
     #[test]
@@ -449,7 +631,7 @@ mod tests {
         let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
         let task = TaskSlot::default();
         let streamed = Mutex::new(String::new());
-        let outcome = task.run(&core, &live_request("Combien font deux plus trois ?", true), |update| {
+        let outcome = task.run(&core, &live_request("Combien font deux plus trois ?"), |update| {
             if let TaskUpdate::Delta { text } = update {
                 streamed.lock().unwrap().push_str(&text);
             }
