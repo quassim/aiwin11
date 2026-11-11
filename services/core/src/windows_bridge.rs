@@ -172,7 +172,7 @@ impl Core {
     }
 
     /// Agent tool, step 2: reads the named control tree of exactly that window.
-    /// The host passes `allow_agent_window_inspection` only after the user approved it.
+    /// The host grants `Capability::WindowInspect` only after the user approved it.
     pub(crate) fn agent_inspect_window(
         &mut self, task: &str, policy: Policy, target: &WindowTarget,
     ) -> Result<(Vec<NamedNode>, bool), &'static str> {

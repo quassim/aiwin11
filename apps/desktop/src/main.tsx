@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
+import { Security } from "./Security";
 import "./style.css";
 
-type Page = "Accueil" | "Modèles" | "Inspecteur" | "Fichiers" | "Activité";
+type Page = "Accueil" | "Modèles" | "Sécurité" | "Inspecteur" | "Fichiers" | "Activité";
 type Provider = "ollama" | "openai";
 type Activity = { sequence: number; kind: string; timestamp: string };
 type Snapshot = { sessionId: string; events: Activity[] };
@@ -48,7 +49,7 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
 }
 const MAX_PROMPT_CHARS = 2000;
 
-const pages: Page[] = ["Accueil", "Modèles", "Inspecteur", "Fichiers", "Activité"];
+const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Inspecteur", "Fichiers", "Activité"];
 const activityNames: Record<string, string> = {
   "session.started": "Session ouverte",
   "task.created": "Demande reçue",
@@ -68,6 +69,9 @@ const activityNames: Record<string, string> = {
   "policy.approval.granted": "Action approuvée par toi",
   "policy.approval.declined": "Action refusée par toi",
   "policy.approval.expired": "Approbation expirée",
+  "settings.policy.changed": "Profil de sécurité modifié",
+  "policy.evaluated": "Politique appliquée",
+  "policy.simulated": "Action simulée, rien n’a été modifié",
   "policy.allowed": "Action autorisée",
   "policy.denied": "Action refusée",
   "tool.execution.completed": "Nouvelle fenêtre vérifiée",
@@ -398,6 +402,7 @@ function App() {
             </>}
           </section>
         )}
+        {page === "Sécurité" && <Security onFinished={refresh} />}
         {page === "Inspecteur" && <Inspector onFinished={refresh} />}
         {page === "Fichiers" && <LocalFiles onFinished={refresh} />}
         {page === "Activité" && (

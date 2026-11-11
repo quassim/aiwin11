@@ -4,6 +4,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-get-snapshot", "allow-discover-models", "allow-run-task", "allow-cancel-task", "allow-resolve-approval",
+    "allow-get-policy-overview", "allow-set-policy-settings",
     "allow-openai-key-configured", "allow-save-openai-key", "allow-delete-openai-key",
     "allow-inspect-foreground", "allow-capture-foreground", "allow-discover-vision-models", "allow-analyze-capture",
     "allow-enter-character-map-digit", "allow-local-files-root", "allow-preview-local-text", "allow-copy-local-text"

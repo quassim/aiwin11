@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-policy-overview"
+description = "Enables the get_policy_overview command without any pre-configured scope."
+commands.allow = ["get_policy_overview"]
+
+[[permission]]
+identifier = "deny-get-policy-overview"
+description = "Denies the get_policy_overview command without any pre-configured scope."
+commands.deny = ["get_policy_overview"]

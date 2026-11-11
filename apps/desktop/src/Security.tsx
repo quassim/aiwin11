@@ -1,0 +1,119 @@
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+
+type Autonomy = "observation" | "assisted" | "limited" | "advanced";
+type Effect = "allow" | "ask" | "deny" | "simulate";
+type PolicySettings = { autonomy: Autonomy; simulate: boolean };
+type PolicyRow = { action: string; effects: [Effect, Effect, Effect, Effect] };
+type PolicyOverview = { settings: PolicySettings; table: PolicyRow[] };
+
+const profiles: { id: Autonomy; label: string; description: string }[] = [
+  { id: "observation", label: "Observation", description: "L’agent lit, mais ne modifie rien : toute action avec effet est refusée." },
+  { id: "assisted", label: "Assisté", description: "L’agent lit librement et te demande ton accord avant chaque action. Recommandé." },
+  { id: "limited", label: "Autonome limité", description: "Les actions à faible risque dans le périmètre d’AiWin11 (ouvrir le Bloc-notes, copier, écrire dans le Bloc-notes qu’il a ouvert) se font sans demander." },
+  { id: "advanced", label: "Avancé", description: "Les renommages se font aussi sans demander. La corbeille et la lecture de l’écran demandent toujours ton accord." },
+];
+
+const actionNames: Record<string, string> = {
+  launchApplication: "Ouvrir le Bloc-notes",
+  listFiles: "Lister les fichiers",
+  readFile: "Lire un fichier",
+  copyFile: "Copier un fichier",
+  moveFile: "Renommer un fichier",
+  trashFile: "Mettre un fichier à la corbeille",
+  inspectWindow: "Lire la structure d’une fenêtre",
+  describeWindow: "Décrire une fenêtre (capture + vision locale)",
+  typeText: "Écrire dans le Bloc-notes ouvert par l’agent",
+};
+
+const effectNames: Record<Effect, string> = {
+  allow: "Autorisé",
+  ask: "Demande",
+  deny: "Refusé",
+  simulate: "Simulé",
+};
+
+export function Security({ onFinished }: { onFinished: () => void }) {
+  const [overview, setOverview] = useState<PolicyOverview>();
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    try {
+      setOverview(await invoke<PolicyOverview>("get_policy_overview"));
+    } catch {
+      setStatus("Les réglages de sécurité sont indisponibles.");
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function save(settings: PolicySettings) {
+    setBusy(true);
+    try {
+      await invoke("set_policy_settings", { settings });
+      // The core recomputes the table for the new settings.
+      await load();
+      setStatus("Réglage enregistré. Il s’applique à la prochaine demande.");
+      onFinished();
+    } catch {
+      setStatus("Le réglage n’a pas pu être enregistré.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!overview) return <section className="card"><p role="status">{status || "Chargement…"}</p></section>;
+  const { settings, table } = overview;
+  const column = profiles.findIndex((profile) => profile.id === settings.autonomy);
+
+  return (
+    <section className="card" aria-labelledby="security-heading">
+      <h2 id="security-heading">Autonomie de l’agent</h2>
+      <fieldset className="task-form" disabled={busy}>
+        <legend>Profil</legend>
+        {profiles.map((profile) => (
+          <label key={profile.id} className="approval">
+            <input type="radio" name="autonomy" value={profile.id} checked={settings.autonomy === profile.id}
+              onChange={() => void save({ ...settings, autonomy: profile.id })} />
+            <span><strong>{profile.label}</strong> — {profile.description}</span>
+          </label>
+        ))}
+        <label className="approval">
+          <input type="checkbox" checked={settings.simulate}
+            onChange={(event) => void save({ ...settings, simulate: event.target.checked })} />
+          <span><strong>Mode simulation</strong> — les actions avec effet ne sont pas exécutées :
+            l’agent te montre ce qu’il aurait fait.</span>
+        </label>
+      </fieldset>
+      <p role="status">{status}</p>
+      <h3>Décisions par action</h3>
+      <p>Avec un modèle local. Avec OpenAI, seuls l’ouverture du Bloc-notes et les réponses texte sont possibles :
+        aucun fichier ni contenu d’écran n’est envoyé au cloud.</p>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Action</th>
+              {profiles.map((profile, index) => (
+                <th key={profile.id} scope="col" aria-current={index === column ? "true" : undefined}>{profile.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.map((row) => (
+              <tr key={row.action}>
+                <th scope="row">{actionNames[row.action] ?? row.action}</th>
+                {row.effects.map((effect, index) => (
+                  <td key={index} className={`effect-${effect}`} aria-current={index === column ? "true" : undefined}>
+                    {effectNames[effect]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}

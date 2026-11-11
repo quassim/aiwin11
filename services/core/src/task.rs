@@ -18,7 +18,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::{
-    broker::{ExecutionError, Peer, Policy},
+    broker::{Capability, ExecutionError, Peer, Policy},
     local_files::LocalFiles,
     windows_bridge::{NamedNode, WindowTarget},
     model_gateway::{tool_catalog, GatewayError, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
@@ -320,7 +320,7 @@ impl TaskSlot {
                     record(core, task, "agent.tool.requested")?;
                     progress(TaskUpdate::stage("agent.tool.requested"));
                     let files = files.ok_or("FILE_UNAVAILABLE")?;
-                    let reads = Policy { allow_agent_file_reads: true, ..Policy::default() };
+                    let reads = Policy::granting(&[Capability::FileRead]);
                     let preview = {
                         let mut guard = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
                         files.agent_copy_preview(&mut guard, task, reads, &source, &destination)
@@ -341,7 +341,7 @@ impl TaskSlot {
                     record(core, task, "agent.tool.requested")?;
                     progress(TaskUpdate::stage("agent.tool.requested"));
                     let files = files.ok_or("FILE_UNAVAILABLE")?;
-                    let policy = Policy { allow_agent_file_reads: true, ..Policy::default() };
+                    let policy = Policy::granting(&[Capability::FileRead]);
                     let mut guard = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
                     match action {
                         PlannedAction::ReadFile(name) => {
@@ -401,7 +401,7 @@ impl TaskSlot {
     fn inspect_window(
         &self, core: &Mutex<Core>, task: &str, progress: &impl Fn(TaskUpdate),
     ) -> Result<String, &'static str> {
-        let lookup = Policy { allow_agent_window_lookup: true, ..Policy::default() };
+        let lookup = Policy::granting(&[Capability::WindowLookup]);
         let located = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.agent_locate_window(task, lookup);
         let target = match located {
             Ok(target) => target,
@@ -412,7 +412,7 @@ impl TaskSlot {
         };
         let decision = self.approve(core, task, action, progress)?;
         // Every decision goes through the broker, so a refusal is audited as policy.denied.
-        let policy = Policy { allow_agent_window_inspection: decision == Decision::Approved, ..Policy::default() };
+        let policy = Policy::granting_if(decision == Decision::Approved, Capability::WindowInspect);
         let inspected = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.agent_inspect_window(task, policy, &target);
         Ok(match (inspected, decision) {
             (Ok((nodes, truncated)), _) => describe_window(&target, &nodes, truncated),
@@ -441,7 +441,7 @@ impl TaskSlot {
         self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "TASK_CANCELLED")?;
         // Every decision goes through the broker, so a refusal is audited as policy.denied.
-        let policy = Policy { allow_agent_file_copy: decision == Decision::Approved, ..Policy::default() };
+        let policy = Policy::granting_if(decision == Decision::Approved, Capability::FileCopy);
         let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
         match (files.agent_copy(&mut core, task, policy, &source, &destination), decision) {
             (Ok(()), _) => Ok(TaskOutcome::Copied { source, destination }),
@@ -483,7 +483,7 @@ impl TaskSlot {
         self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "TASK_CANCELLED")?;
         // Every decision goes through the broker, so a refusal is audited as policy.denied.
-        let policy = Policy { allow_agent_to_launch_notepad: decision == Decision::Approved, ..Policy::default() };
+        let policy = Policy::granting_if(decision == Decision::Approved, Capability::LaunchNotepad);
         core.execute_windows(policy, Peer::Agent, &command)
             .map(|process_id| TaskOutcome::Launched { application: "notepad", process_id })
             .map_err(|error| match (error, decision) {

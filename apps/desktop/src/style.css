@@ -43,6 +43,15 @@ li { padding: 12px 0; border-top: 1px solid #344646; }
 .approval input { accent-color: #83e8c6; }
 .user-message { background: #25403b; border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; }
 .agent-message { background: #2a2f3a; border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.table-scroll { overflow-x: auto; }
+.table-scroll table { border-collapse: collapse; width: 100%; }
+.table-scroll th, .table-scroll td { padding: 6px 8px; border-bottom: 1px solid #333a45; text-align: left; }
+.table-scroll [aria-current="true"] { background: #2a3442; }
+.effect-allow { color: #9ece6a; }
+.effect-ask { color: #e0af68; }
+.effect-deny { color: #f7768e; }
+.effect-simulate { color: #7aa2f7; }
+fieldset { border: 0; padding: 0; margin: 0; }
 .approval-request { border: 1px solid #e0af68; border-radius: 8px; padding: 12px; margin: 8px 0; }
 .approval-request h3 { margin: 0 0 6px; font-size: 1rem; }
 .agent-message.draft { opacity: 0.75; border-left: 3px solid #7aa2f7; }

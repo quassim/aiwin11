@@ -17,21 +17,50 @@ pub enum Peer {
     Other,
 }
 
-#[derive(Clone, Copy, Default)]
+/// Agent capabilities the broker can grant for one command. The host requests a capability
+/// only when the policy engine allowed the action, or the user approved it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum Capability {
+    /// Start Windows Notepad (fixed executable, no arguments).
+    LaunchNotepad = 1 << 0,
+    /// List and read text files in the dedicated folder.
+    FileRead = 1 << 1,
+    /// Copy one text file inside the dedicated folder.
+    FileCopy = 1 << 2,
+    /// Rename one text file inside the dedicated folder.
+    FileMove = 1 << 3,
+    /// Move one text file to AiWin11's own trash folder.
+    FileTrash = 1 << 4,
+    /// Identify the window used before AiWin11 (title and application only).
+    WindowLookup = 1 << 5,
+    /// Read one window's control tree.
+    WindowInspect = 1 << 6,
+    /// Capture one window's pixels for a local vision model.
+    WindowCapture = 1 << 7,
+    /// Type text into a Notepad window the same task launched.
+    TypeText = 1 << 8,
+}
+
+/// The capabilities granted for one command. Empty by default: deny by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
-    pub allow_agent_to_launch_notepad: bool,
-    /// Lets the agent list and read text files in the dedicated local folder.
-    /// The host grants it only for tasks served by a local model.
-    pub allow_agent_file_reads: bool,
-    /// Lets the agent copy one text file inside the dedicated folder. The host grants it
-    /// only after the user approved that exact copy.
-    pub allow_agent_file_copy: bool,
-    /// Lets the agent identify the window the user was using before AiWin11 (title and
-    /// application only). Granted for local-model tasks.
-    pub allow_agent_window_lookup: bool,
-    /// Lets the agent read one window's control tree. Granted only after the user approved
-    /// reading that exact window.
-    pub allow_agent_window_inspection: bool,
+    grants: u16,
+}
+
+impl Policy {
+    pub fn granting(capabilities: &[Capability]) -> Self {
+        Self { grants: capabilities.iter().fold(0, |grants, capability| grants | *capability as u16) }
+    }
+
+    /// Grants `capability` only if `condition` holds, e.g. the user approved.
+    pub fn granting_if(condition: bool, capability: Capability) -> Self {
+        if condition { Self::granting(&[capability]) } else { Self::default() }
+    }
+
+    pub fn allows(self, capability: Capability) -> bool {
+        self.grants & capability as u16 != 0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -74,38 +103,30 @@ impl Policy {
         if command.deadline_ms <= now {
             return Err("expired");
         }
+        let desktop = peer == Peer::DesktopInspector;
+        let agent = |capability| peer == Peer::Agent && self.allows(capability);
         match &command.operation {
             Some(Operation::LaunchApplication(launch))
-                if launch.application == Application::Notepad as i32
-                    && self.allow_agent_to_launch_notepad && peer == Peer::Agent =>
+                if launch.application == Application::Notepad as i32 && agent(Capability::LaunchNotepad) =>
             {
                 Ok("launch_notepad")
             }
             Some(Operation::InspectForeground(_)) if peer == Peer::DesktopInspector => Ok("inspect_foreground"),
-            Some(Operation::LocateWindow(_)) if peer == Peer::Agent && self.allow_agent_window_lookup => {
-                Ok("locate_window")
-            }
-            Some(Operation::InspectWindow(_)) if peer == Peer::Agent && self.allow_agent_window_inspection => {
-                Ok("inspect_window")
+            Some(Operation::LocateWindow(_)) if agent(Capability::WindowLookup) => Ok("locate_window"),
+            Some(Operation::InspectWindow(_)) if agent(Capability::WindowInspect) => Ok("inspect_window"),
+            Some(Operation::CaptureWindow(_)) if agent(Capability::WindowCapture) => Ok("capture_window"),
+            Some(Operation::TypeInNotepad(input))
+                if agent(Capability::TypeText) && !input.text.is_empty() && input.text.chars().count() <= 2000 =>
+            {
+                Ok("type_in_notepad")
             }
             Some(Operation::CaptureForeground(_)) if peer == Peer::DesktopInspector => Ok("capture_foreground"),
             Some(Operation::AnalyzeCapture(_)) if peer == Peer::DesktopInspector => Ok("analyze_capture"),
-            Some(Operation::PreviewLocalText(_))
-                if peer == Peer::DesktopInspector || (peer == Peer::Agent && self.allow_agent_file_reads) =>
-            {
-                Ok("preview_local_text")
-            }
-            Some(Operation::ListLocalText(_))
-                if peer == Peer::DesktopInspector || (peer == Peer::Agent && self.allow_agent_file_reads) =>
-            {
-                Ok("list_local_text")
-            }
-            Some(Operation::CopyLocalText(_))
-                if peer == Peer::DesktopInspector || (peer == Peer::Agent && self.allow_agent_file_copy) =>
-            {
-                Ok("copy_local_text")
-            }
-            Some(Operation::MoveLocalText(_)) if peer == Peer::DesktopInspector => Ok("move_local_text"),
+            Some(Operation::PreviewLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("preview_local_text"),
+            Some(Operation::ListLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("list_local_text"),
+            Some(Operation::CopyLocalText(_)) if desktop || agent(Capability::FileCopy) => Ok("copy_local_text"),
+            Some(Operation::MoveLocalText(_)) if desktop || agent(Capability::FileMove) => Ok("move_local_text"),
+            Some(Operation::TrashLocalText(_)) if agent(Capability::FileTrash) => Ok("trash_local_text"),
             Some(Operation::DeleteLocalText(input)) if peer == Peer::DesktopInspector => {
                 if input.confirmed { Ok("delete_local_text") } else { Err("confirmation_required") }
             }
@@ -275,7 +296,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
         command.operation = Some(Operation::CaptureForeground(Default::default()));
-        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let policy = Policy::granting(&[Capability::LaunchNotepad]);
         assert_eq!(
             core.authorize_dispatch(policy, Peer::Agent, &command),
             Err(ExecutionError::Denied("default_deny"))
@@ -288,7 +309,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
         command.operation = Some(Operation::CopyLocalText(Default::default()));
-        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let policy = Policy::granting(&[Capability::LaunchNotepad]);
         assert_eq!(
             core.authorize_dispatch(policy, Peer::Agent, &command),
             Err(ExecutionError::Denied("default_deny"))
@@ -302,8 +323,8 @@ mod tests {
             Operation::PreviewLocalText(Default::default()),
             Operation::ListLocalText(Default::default()),
         ];
-        let launch_only = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
-        let reads_only = Policy { allow_agent_file_reads: true, ..Default::default() };
+        let launch_only = Policy::granting(&[Capability::LaunchNotepad]);
+        let reads_only = Policy::granting(&[Capability::FileRead]);
         for operation in reads {
             let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
             let mut command = request(&core);
@@ -343,12 +364,12 @@ mod tests {
 
     #[test]
     fn window_lookup_and_inspection_are_separate_agent_grants() {
-        let lookup = Policy { allow_agent_window_lookup: true, ..Default::default() };
-        let inspection = Policy { allow_agent_window_inspection: true, ..Default::default() };
-        let everything_else = Policy {
-            allow_agent_to_launch_notepad: true, allow_agent_file_reads: true, allow_agent_file_copy: true,
-            ..Default::default()
-        };
+        let lookup = Policy::granting(&[Capability::WindowLookup]);
+        let inspection = Policy::granting(&[Capability::WindowInspect]);
+        let everything_else = Policy::granting(&[
+            Capability::LaunchNotepad, Capability::FileRead, Capability::FileCopy, Capability::FileMove,
+            Capability::FileTrash, Capability::WindowCapture, Capability::TypeText,
+        ]);
         let locate = Operation::LocateWindow(Default::default());
         let inspect = Operation::InspectWindow(Default::default());
         for (operation, allowed, denied) in [(locate, lookup, inspection), (inspect, inspection, lookup)] {
@@ -360,7 +381,7 @@ mod tests {
             ] {
                 let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
                 let mut command = request(&core);
-                command.operation = Some(operation);
+                command.operation = Some(operation.clone());
                 assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
             }
         }
@@ -369,11 +390,11 @@ mod tests {
     #[test]
     fn agent_copy_grant_covers_copy_only() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
-        let copy_only = Policy { allow_agent_file_copy: true, ..Default::default() };
+        let copy_only = Policy::granting(&[Capability::FileCopy]);
         let mut command = request(&core);
         command.operation = Some(Operation::CopyLocalText(Default::default()));
         assert_eq!(
-            core.authorize_dispatch(Policy { allow_agent_file_reads: true, ..Default::default() }, Peer::Agent, &command),
+            core.authorize_dispatch(Policy::granting(&[Capability::FileRead]), Peer::Agent, &command),
             Err(ExecutionError::Denied("default_deny")),
             "reading does not imply copying"
         );
@@ -397,7 +418,7 @@ mod tests {
     fn trusts_transport_identity_and_deduplicates_dispatch() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let command = request(&core);
-        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let policy = Policy::granting(&[Capability::LaunchNotepad]);
         assert_eq!(
             core.execute(policy, Peer::Other, &command, || panic!("dispatched")),
             Err(ExecutionError::Denied("invalid_scope"))
@@ -417,7 +438,7 @@ mod tests {
     fn enabled_rule_still_denies_unknown_applications_and_expired_requests() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
-        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let policy = Policy::granting(&[Capability::LaunchNotepad]);
         command.operation = Some(Operation::LaunchApplication(LaunchApplication {
             application: i32::MAX,
         }));
@@ -437,7 +458,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let command = request(&core);
         core.db.execute("DROP TABLE events", []).unwrap();
-        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let policy = Policy::granting(&[Capability::LaunchNotepad]);
         assert_eq!(
             core.execute(policy, Peer::Agent, &command, || panic!("without audit")),
             Err(ExecutionError::AuditUnavailable)
@@ -453,7 +474,7 @@ mod tests {
     fn reports_and_audits_unverified_launch() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let command = request(&core);
-        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let policy = Policy::granting(&[Capability::LaunchNotepad]);
         assert_eq!(
             core.execute(policy, Peer::Agent, &command, || LaunchOutcome::Unverified),
             Err(ExecutionError::WindowUnverified)

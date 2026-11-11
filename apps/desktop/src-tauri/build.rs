@@ -3,6 +3,7 @@ fn main() {
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(&[
                 "get_snapshot", "discover_models", "run_task", "cancel_task", "resolve_approval",
+                "get_policy_overview", "set_policy_settings",
                 "openai_key_configured", "save_openai_key", "delete_openai_key",
                 "inspect_foreground", "capture_foreground", "discover_vision_models", "analyze_capture",
                 "enter_character_map_digit",

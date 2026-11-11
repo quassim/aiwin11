@@ -25,6 +25,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 use crate::{broker::{ExecutionError, Peer, Policy}, Core};
+#[cfg(test)]
+use crate::broker::Capability;
 
 const MAX_BYTES: usize = 64 * 1024;
 const MAX_NAME: usize = 128;
@@ -126,7 +128,7 @@ impl LocalFiles {
     }
 
     /// Agent tool: copies one text file inside the folder. The host passes a policy with
-    /// `allow_agent_file_copy` only after the user approved this exact copy.
+    /// `Capability::FileCopy` only when the policy engine or the user allowed this exact copy.
     pub fn agent_copy(
         &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
     ) -> Result<(), &'static str> {
@@ -467,7 +469,7 @@ mod tests {
         assert_eq!(files.agent_list(&mut core, &task, denied), Err("FILE_ACCESS_DENIED"));
         assert_eq!(files.agent_read(&mut core, &task, denied, "A.txt"), Err("FILE_ACCESS_DENIED"));
 
-        let reads = Policy { allow_agent_file_reads: true, ..Default::default() };
+        let reads = Policy::granting(&[Capability::FileRead]);
         // Hard links are listed by name but refused when read, like in the preview.
         assert_eq!(files.agent_list(&mut core, &task, reads), Ok(vec!["A.txt".into(), "b note.txt".into(), "lien.txt".into()]));
         assert_eq!(files.agent_read(&mut core, &task, reads, "b note.txt"), Ok("Deuxième".into()));
@@ -490,8 +492,8 @@ mod tests {
         let original = "\u{feff}Données\r\n".as_bytes();
         fs::write(files.root().join("source.txt"), original).unwrap();
         fs::write(files.root().join("pris.txt"), "déjà là").unwrap();
-        let reads = Policy { allow_agent_file_reads: true, ..Default::default() };
-        let copy = Policy { allow_agent_file_copy: true, ..Default::default() };
+        let reads = Policy::granting(&[Capability::FileRead]);
+        let copy = Policy::granting(&[Capability::FileCopy]);
 
         assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "copie.txt"), Ok(9));
         assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "PRIS.txt"), Err("FILE_DESTINATION_EXISTS"));

@@ -6,6 +6,7 @@ use aiwin11_core::{
     local_files::LocalFiles,
     model_gateway::{LocalModelProvider, Ollama},
     openai,
+    policy::{self, AgentAction, Effect, PolicySettings},
     task::{TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
     Core,
@@ -176,6 +177,36 @@ fn cancel_task(state: State<'_, Arc<AppState>>) -> bool {
     state.task.cancel()
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicyRow {
+    action: AgentAction,
+    effects: [Effect; 4],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicyOverview {
+    settings: PolicySettings,
+    /// Effect of each action in the Observation, Assisted, Limited and Advanced profiles.
+    table: Vec<PolicyRow>,
+}
+
+#[tauri::command]
+fn get_policy_overview(state: State<'_, Arc<AppState>>) -> Result<PolicyOverview, &'static str> {
+    let settings = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
+    let table = policy::table(settings.simulate).into_iter()
+        .map(|(action, effects)| PolicyRow { action, effects }).collect();
+    Ok(PolicyOverview { settings, table })
+}
+
+/// Applies to the next task; a running task keeps the settings it started with.
+#[tauri::command]
+fn set_policy_settings(state: State<'_, Arc<AppState>>, settings: PolicySettings) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?
+        .set_policy_settings(settings).map_err(|_| "SETTINGS_UNAVAILABLE")
+}
+
 /// The user's answer to the action the agent proposed for the running task.
 #[tauri::command]
 fn resolve_approval(
@@ -202,6 +233,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot, discover_models, run_task, cancel_task, resolve_approval,
+            get_policy_overview, set_policy_settings,
             openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
             capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,
             local_files_root, preview_local_text, copy_local_text,

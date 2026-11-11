@@ -23,8 +23,26 @@ message Command {
     ListLocalText list_local_text = 18;
     LocateWindow locate_window = 19;
     InspectWindow inspect_window = 20;
+    CaptureWindow capture_window = 21;
+    TypeInNotepad type_in_notepad = 22;
+    TrashLocalText trash_local_text = 23;
   }
 }
+
+// Captures exactly this window (checked against its process) for a local vision model.
+message CaptureWindow {
+  uint64 window = 1;
+  uint32 process_id = 2;
+}
+
+// Types text into the Notepad window of this process, only if its document is empty.
+message TypeInNotepad {
+  uint32 process_id = 1;
+  string text = 2;
+}
+
+// Moves one text file of the dedicated folder to AiWin11's own trash folder.
+message TrashLocalText {}
 
 message ListLocalText {}
 
