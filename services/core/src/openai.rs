@@ -109,7 +109,7 @@ pub(crate) fn propose(
         "parallel_tool_calls": false,
         "messages": messages,
         // No file or window tools: file contents and screen data never go to the cloud.
-        "tools": tool_catalog(true, false, false)
+        "tools": tool_catalog(true, false, false, false)
     }));
     drop(credential);
     let stream = open_stream(request).map_err(|_| "CLOUD_REQUEST_FAILED")?;

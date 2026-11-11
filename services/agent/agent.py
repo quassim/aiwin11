@@ -52,6 +52,7 @@ TOOLS = {
     "move_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
     "trash_text_file": {"name": is_text_file_name},
     "inspect_window": {},
+    "describe_window": {},
     "type_in_notepad": {"text": is_typed_text},
 }
 

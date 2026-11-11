@@ -62,6 +62,25 @@ else if (command.TypeInNotepad is { } typing)
     else
         NotepadInput.Apply(typing.ProcessId, typing.Text, command.DeadlineMs, result);
 }
+else if (command.CaptureWindow is { } captureTarget)
+{
+    try
+    {
+        var frame = WindowCapture.ReadWindow(captureTarget.Window, captureTarget.ProcessId, command.DeadlineMs);
+        if (frame is null)
+            Reject(Protocol.Result.Types.Status.Failed, "capture_unavailable", "The window could not be captured.");
+        else
+        {
+            result.WindowCapture = frame;
+            result.Status = Protocol.Result.Types.Status.Success;
+        }
+    }
+    catch (Exception error) when (error is Win32Exception or IOException or ArgumentException
+        or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the window.");
+    }
+}
 else if (command.LocateWindow is { } locate)
 {
     var info = WindowInspector.Locate(locate.ExcludeProcessId);

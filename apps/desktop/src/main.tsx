@@ -30,6 +30,7 @@ type ApprovalAction =
   | { kind: "moveFile"; source: string; destination: string; characters: number }
   | { kind: "trashFile"; name: string; characters: number }
   | { kind: "inspectWindow"; application: string; title: string }
+  | { kind: "describeWindow"; application: string; title: string; model: string }
   | { kind: "typeText"; text: string; characters: number };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
@@ -74,6 +75,14 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
         + "Le fichier n’est pas supprimé : il reste récupérable dans le dossier trash d’AiWin11.",
     };
   }
+  if (action.kind === "describeWindow") {
+    return {
+      title: "L’agent demande à décrire une fenêtre",
+      detail: `Fenêtre : « ${action.title} » (application ${action.application}), la dernière que tu utilisais `
+        + `avant AiWin11. Une capture de cette fenêtre sera analysée par le modèle de vision local ${action.model} ; `
+        + "l’agent ne recevra que la description. L’image n’est ni enregistrée ni envoyée ailleurs.",
+    };
+  }
   if (action.kind === "inspectWindow") {
     return {
       title: "L’agent demande à lire une fenêtre",
@@ -102,6 +111,10 @@ const activityNames: Record<string, string> = {
   "agent.observation": "Résultat transmis à l’agent",
   "window.locate.completed": "Fenêtre précédente identifiée",
   "window.locate.failed": "Aucune fenêtre précédente trouvée",
+  "window.capture.completed": "Fenêtre capturée pour la vision locale",
+  "window.capture.failed": "Capture de la fenêtre impossible",
+  "vision.describe.completed": "Fenêtre décrite par le modèle de vision local",
+  "vision.describe.failed": "Description de la fenêtre impossible",
   "window.inspect.completed": "Fenêtre lue par l’agent",
   "window.inspect.failed": "Lecture de la fenêtre impossible",
   "file.list.completed": "Fichiers listés par l’agent",
@@ -158,6 +171,7 @@ const taskErrors: Record<string, string> = {
   AGENT_REJECTED: "L’agent a rejeté la proposition du modèle : outil inconnu ou arguments invalides.",
   APPROVAL_NOT_PENDING: "Cette proposition n’est plus en attente.",
   TASK_BUSY: "Une demande est déjà en cours.",
+  VISION_MODEL_REQUIRED: "Le modèle de vision choisi n’est pas valide.",
   AGENT_STEP_LIMIT: "L’agent n’a pas conclu dans le nombre d’étapes autorisé. Reformule ou précise ta demande.",
   FILE_UNAVAILABLE: "Le fichier ou le dossier de fichiers d’AiWin11 est indisponible.",
   FILE_DESTINATION_EXISTS: "Un fichier porte déjà ce nom. Rien n’a été remplacé.",
@@ -180,6 +194,9 @@ function App() {
   const [error, setError] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
+  const [visionModels, setVisionModels] = useState<string[]>([]);
+  const [visionModel, setVisionModel] = useState("");
+  const [visionStatus, setVisionStatus] = useState("");
   const [provider, setProvider] = useState<Provider>("ollama");
   const [cloudModel, setCloudModel] = useState("");
   const [cloudApproved, setCloudApproved] = useState(false);
@@ -251,6 +268,22 @@ function App() {
 
   useEffect(refresh, [refresh]);
   useEffect(() => { void refreshKey(); }, []);
+  async function discoverVisionModels() {
+    setVisionStatus("Recherche en cours…");
+    try {
+      const available = await invoke<string[]>("discover_vision_models");
+      setVisionModels(available);
+      setVisionModel((current) => available.includes(current) ? current : "");
+      setVisionStatus(available.length ? "" : "Aucun modèle de vision local installé.");
+    } catch (failure) {
+      setVisionModels([]);
+      setVisionModel("");
+      setVisionStatus(String(failure) === "OLLAMA_CLOUD_NOT_DISABLED"
+        ? "Ollama doit tourner avec ses fonctions cloud désactivées (voir le README)."
+        : "Les modèles de vision locaux sont indisponibles.");
+    }
+  }
+
   async function discoverModels() {
     setLoadingModels(true);
     setCatalogStatus("Recherche en cours…");
@@ -297,7 +330,11 @@ function App() {
     });
     try {
       const outcome = await invoke<TaskOutcome>("run_task", {
-        request: { prompt, model: selectedModel, provider, cloudApproved },
+        request: {
+          prompt, model: selectedModel, provider, cloudApproved,
+          // Vision stays local: only sent for Ollama tasks.
+          visionModel: provider === "ollama" && visionModel ? visionModel : null,
+        },
         progress,
       });
       setAgentReply(outcome.reply);
@@ -430,6 +467,18 @@ function App() {
                 onChange={(event) => { setModel(event.target.value); resetApproval(); }}>
                 <option value="">Sélectionner un modèle</option>
                 {models.map((name) => <option key={name}>{name}</option>)}
+              </select>
+            </div>
+            <div className="section-header">
+              <button onClick={() => void discoverVisionModels()} disabled={running}>Détecter les modèles de vision</button>
+            </div>
+            <p role="status">{visionStatus}</p>
+            <div className="task-form">
+              <label htmlFor="vision-model">Modèle de vision local (facultatif)</label>
+              <select id="vision-model" value={visionModel} disabled={!visionModels.length || running}
+                onChange={(event) => setVisionModel(event.target.value)}>
+                <option value="">Aucun : l’agent ne peut pas décrire de fenêtre</option>
+                {visionModels.map((name) => <option key={name}>{name}</option>)}
               </select>
             </div>
             </> : <>

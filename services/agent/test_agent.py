@@ -90,9 +90,12 @@ class AgentProtocolTest(unittest.TestCase):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("inspect_window", {})]}})
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout)["tool"], "inspect_window")
-        for arguments in [{"window": 123}, {"title": "Banque"}, {"process_id": 4}]:
-            with self.subTest(arguments=arguments):
-                self.assert_rejected({"version": 2, "proposal": {"calls": [call("inspect_window", arguments)]}})
+        for tool in ["inspect_window", "describe_window"]:
+            result = self.invoke({"version": 2, "proposal": {"calls": [call(tool, {})]}})
+            self.assertEqual(result.returncode, 0)
+            for arguments in [{"window": 123}, {"title": "Banque"}, {"process_id": 4}]:
+                with self.subTest(tool=tool, arguments=arguments):
+                    self.assert_rejected({"version": 2, "proposal": {"calls": [call(tool, arguments)]}})
 
     def test_copy_tool_requires_two_distinct_valid_names(self):
         copy = call("copy_text_file", {"source": "a.txt", "destination": "b copie.txt"})

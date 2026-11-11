@@ -8,7 +8,7 @@ use std::{
 
 use aiwin11_contracts::{
     v1::{
-        command::Operation, result::Status, AnalyzeCapture, CharacterMapDigit, CaptureForeground, Command,
+        command::Operation, result::Status, AnalyzeCapture, CharacterMapDigit, CaptureForeground, CaptureWindow, Command,
         InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, TypeInNotepad, UiTree,
     },
     Message, SCHEMA_VERSION,
@@ -184,6 +184,22 @@ impl Core {
                 return None;
             }
             named_tree(reply.ui_tree?)
+        })
+    }
+
+    /// Agent tool: captures exactly that window as a JPEG (at most 1024 px per side, 256 KiB),
+    /// for a local vision model. The host grants `Capability::WindowCapture` only after approval.
+    pub(crate) fn agent_capture_window(
+        &mut self, task: &str, policy: Policy, target: &WindowTarget,
+    ) -> Result<Vec<u8>, &'static str> {
+        let operation = Operation::CaptureWindow(CaptureWindow { window: target.window, process_id: target.process_id });
+        self.agent_bridge_call(task, policy, operation, "window.capture", |reply| {
+            if reply.ui_tree.is_some() || reply.window_info.is_some() || reply.process_id.is_some() {
+                return None;
+            }
+            let frame = reply.window_capture?;
+            ((1..=1024).contains(&frame.width) && (1..=1024).contains(&frame.height) && valid_jpeg(&frame.jpeg))
+                .then_some(frame.jpeg)
         })
     }
 
@@ -406,7 +422,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     // Close the writer to delimit the frame.
     let wrote = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(&bytes).is_ok());
     let limit = match command.operation {
-        Some(Operation::CaptureForeground(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
+        Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
