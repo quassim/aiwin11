@@ -48,7 +48,7 @@ SQLite tables: providers, models, model_profiles, agents, sessions, tasks, tool_
 
 `Core::execute_windows` invokes the fixed `AiWin11.Windows.exe` installed beside the host executable after broker authorization. It sends one raw v1 `Command` on the child's private stdin and closes the writer. The child returns one raw v1 `Result` on stdout and exits. Each message is limited to 1 KiB. The host checks the schema, request ID and result fields. There is no listening service. The host derives the actor from its trusted context.
 
-The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The host stops waiting for the bridge after seven seconds.
+The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The bridge stops verifying at the command deadline and then reports. The host waits until that deadline plus two seconds (fifteen seconds at most) before killing the bridge, so a slow .NET cold start still produces a reported outcome.
 
 ## Local provider discovery
 

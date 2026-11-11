@@ -100,7 +100,7 @@ else
         }
         else
         {
-            using var launched = Notepad.Start();
+            Notepad.Start();
             var verification = Stopwatch.StartNew();
             while (verification.Elapsed < TimeSpan.FromSeconds(4)
                    && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < command.DeadlineMs)

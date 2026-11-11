@@ -9,15 +9,21 @@ internal static class Notepad
     private const string PackageFamily = "Microsoft.WindowsNotepad_8wekyb3d8bbwe";
     private static string SystemNotepad => Path.Combine(Environment.SystemDirectory, "notepad.exe");
 
-    internal static Process Start() =>
-        Process.Start(new ProcessStartInfo(SystemNotepad)
-        {
-            WorkingDirectory = Environment.SystemDirectory,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        }) ?? throw new InvalidOperationException("Notepad did not start.");
+    /// <summary>
+    /// Starts the system Notepad without handle inheritance. Process.Start with
+    /// UseShellExecute=false passes every inheritable handle to the child, so a launched
+    /// application would keep the bridge's and host's pipes open for its whole lifetime.
+    /// </summary>
+    internal static void Start()
+    {
+        var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>() };
+        var commandLine = new StringBuilder($"\"{SystemNotepad}\"");
+        if (!CreateProcessW(SystemNotepad, commandLine, 0, 0, false, 0, 0,
+                Environment.SystemDirectory, ref startup, out var created))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        CloseHandle(created.hThread);
+        CloseHandle(created.hProcess);
+    }
 
     internal static HashSet<(int Pid, nint Window)> Windows()
     {
@@ -57,4 +63,31 @@ internal static class Notepad
         ref uint length,
         StringBuilder family);
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct StartupInfo
+    {
+        public int cb;
+        public nint lpReserved, lpDesktop, lpTitle;
+        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+        public short wShowWindow, cbReserved2;
+        public nint lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessInformation
+    {
+        public nint hProcess, hThread;
+        public int dwProcessId, dwThreadId;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateProcessW(
+        string applicationName, StringBuilder commandLine, nint processAttributes, nint threadAttributes,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint creationFlags, nint environment,
+        string currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint handle);
 }

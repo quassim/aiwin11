@@ -21,6 +21,10 @@ use crate::{
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Time allowed after the command deadline for the bridge to report and exit.
+const REPLY_GRACE: Duration = Duration::from_secs(2);
+/// Upper bound on any wait, whatever deadline the command carries.
+const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(15);
 const MAX_MESSAGE_BYTES: usize = 1024;
 const MAX_JPEG_BYTES: usize = 256 * 1024;
 
@@ -208,7 +212,9 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     }
     let executable = std::env::current_exe().ok()?;
     let directory = executable.parent()?;
-    let deadline = Instant::now() + Duration::from_secs(7);
+    // The bridge stops working at the command deadline, then reports. Wait for that report
+    // instead of a fixed delay, so a slow .NET cold start yields a result rather than a kill.
+    let deadline = Instant::now() + bridge_wait(command.deadline_ms, unix_millis()?);
     let mut child = Process::new(directory.join("AiWin11.Windows.exe"))
         .current_dir(directory)
         .creation_flags(CREATE_NO_WINDOW)
@@ -270,6 +276,15 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     Some(reply)
 }
 
+fn unix_millis() -> Option<i64> {
+    Some(SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis() as i64)
+}
+
+fn bridge_wait(deadline_ms: i64, now_ms: i64) -> Duration {
+    let remaining = Duration::from_millis(u64::try_from(deadline_ms.saturating_sub(now_ms)).unwrap_or(0));
+    (remaining + REPLY_GRACE).min(MAX_BRIDGE_WAIT)
+}
+
 fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
     let mut available = 0;
     unsafe {
@@ -283,4 +298,17 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
         );
     }
     available
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bridge_wait_follows_the_command_deadline_with_bounds() {
+        assert_eq!(bridge_wait(10_000, 2_000), Duration::from_secs(10));
+        assert_eq!(bridge_wait(1_000, 2_000), REPLY_GRACE, "an expired command still gets time to report");
+        assert_eq!(bridge_wait(i64::MAX, 0), MAX_BRIDGE_WAIT);
+        assert_eq!(bridge_wait(i64::MIN, i64::MAX), REPLY_GRACE);
+    }
 }

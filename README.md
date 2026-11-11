@@ -66,6 +66,8 @@ Copy-Item -LiteralPath services/agent/agent.py -Destination target/debug/deps/ai
 cargo test --locked -p aiwin11-core task::tests -- --ignored
 ```
 
+Ces tests ont été validés le 11 novembre 2026 sur Windows 11 (RTX 3090) avec `qwen3:8b` via Ollama 0.40 portable. Les très petits modèles peuvent appeler l’outil avec des arguments mal formés : `qwen3:0.6b` envoie par exemple `{"application":{"type":"notepad"}}`. L’agent rejette alors la proposition (`AGENT_REJECTED`) et rien n’est exécuté ; choisissez un modèle plus capable. Fermez le Bloc-notes avant le test : s’il est déjà ouvert, il peut ouvrir la demande dans un nouvel onglet et la nouvelle fenêtre ne peut pas être vérifiée.
+
 Si le port 1420 est occupé, arrêtez le serveur de développement qui l’utilise avant de relancer. Si l’édition de liens échoue, vérifiez les outils C++ x64 et le SDK Windows dans Visual Studio Installer. Si la fenêtre ne se rend pas, vérifiez que WebView2 est installé. Une base créée par une version plus récente de l’application nécessite cette version de l’application pour s’ouvrir.
 
 ## Périmètre
