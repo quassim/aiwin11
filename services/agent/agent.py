@@ -41,6 +41,7 @@ TOOLS = {
     "list_text_files": {},
     "read_text_file": {"name": is_text_file_name},
     "copy_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
+    "inspect_window": {},
 }
 
 

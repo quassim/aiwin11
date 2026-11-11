@@ -7,7 +7,10 @@ use std::{
 };
 
 use aiwin11_contracts::{
-    v1::{command::Operation, result::Status, AnalyzeCapture, CharacterMapDigit, CaptureForeground, Command, InspectForeground, Result as BridgeReply},
+    v1::{
+        command::Operation, result::Status, AnalyzeCapture, CharacterMapDigit, CaptureForeground, Command,
+        InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, UiTree,
+    },
     Message, SCHEMA_VERSION,
 };
 use windows_sys::Win32::System::Pipes::PeekNamedPipe;
@@ -27,6 +30,27 @@ const REPLY_GRACE: Duration = Duration::from_secs(2);
 const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(25);
 const MAX_MESSAGE_BYTES: usize = 1024;
 const MAX_JPEG_BYTES: usize = 256 * 1024;
+const MAX_TREE_REPLY_BYTES: usize = 32 * 1024;
+const MAX_AGENT_NODES: usize = 80;
+
+/// A located window. Before approval, only the user sees its title and application.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WindowTarget {
+    pub window: u64,
+    pub process_id: u32,
+    pub title: String,
+    pub process_name: String,
+}
+
+/// One control of an inspected window. The name is empty for password fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NamedNode {
+    pub parent: u32,
+    pub control_type: u32,
+    pub enabled: bool,
+    pub focused: bool,
+    pub name: String,
+}
 
 #[derive(Serialize)]
 pub struct Inspection {
@@ -129,6 +153,56 @@ impl Core {
         Ok(command)
     }
 
+    /// Agent tool, step 1: identifies the window the user was using before AiWin11.
+    pub(crate) fn agent_locate_window(&mut self, task: &str, policy: Policy) -> Result<WindowTarget, &'static str> {
+        let operation = Operation::LocateWindow(LocateWindow { exclude_process_id: std::process::id() });
+        self.agent_bridge_call(task, policy, operation, "window.locate", |reply| {
+            if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
+                return None;
+            }
+            let info = reply.window_info?;
+            let bounded = |text: &str, max: usize| !text.is_empty() && text.chars().count() <= max;
+            let valid = info.window != 0 && info.process_id != 0
+                && bounded(&info.title, 120) && bounded(&info.process_name, 64);
+            valid.then_some(WindowTarget {
+                window: info.window, process_id: info.process_id,
+                title: info.title, process_name: info.process_name,
+            })
+        })
+    }
+
+    /// Agent tool, step 2: reads the named control tree of exactly that window.
+    /// The host passes `allow_agent_window_inspection` only after the user approved it.
+    pub(crate) fn agent_inspect_window(
+        &mut self, task: &str, policy: Policy, target: &WindowTarget,
+    ) -> Result<(Vec<NamedNode>, bool), &'static str> {
+        let operation = Operation::InspectWindow(InspectWindow { window: target.window, process_id: target.process_id });
+        self.agent_bridge_call(task, policy, operation, "window.inspect", |reply| {
+            if reply.window_info.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
+                return None;
+            }
+            named_tree(reply.ui_tree?)
+        })
+    }
+
+    fn agent_bridge_call<T>(
+        &mut self, task: &str, policy: Policy, operation: Operation, event: &str,
+        accept: impl FnOnce(BridgeReply) -> Option<T>,
+    ) -> Result<T, &'static str> {
+        let command = self.agent_command(task, operation).map_err(|_| "WINDOW_UNAVAILABLE")?;
+        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
+            _ => "WINDOW_AUDIT_UNAVAILABLE",
+        })?;
+        let result = dispatch(&command)
+            .filter(|reply| reply.status() == Status::Success && reply.error.is_none())
+            .and_then(accept);
+        let (suffix, code) = if result.is_some() { ("completed", "success") } else { ("failed", "window_unavailable") };
+        self.audit(task_id.as_deref(), &format!("{event}.{suffix}"), code)
+            .map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        result.ok_or("WINDOW_UNAVAILABLE")
+    }
+
     pub fn capture_foreground(&mut self) -> Result<Capture, ExecutionError> {
         let command = self.desktop_command(Operation::CaptureForeground(CaptureForeground {}))?;
         let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
@@ -209,6 +283,23 @@ impl Core {
     }
 }
 
+/// Checks the shape of an agent inspection: 1 to 80 nodes, parents pointing backwards
+/// (one-based, zero for the root), names of at most 80 characters.
+fn named_tree(tree: UiTree) -> Option<(Vec<NamedNode>, bool)> {
+    let valid = !tree.nodes.is_empty() && tree.nodes.len() <= MAX_AGENT_NODES
+        && tree.nodes.iter().enumerate().all(|(index, node)| {
+            (if index == 0 { node.parent == 0 } else { (1..=index as u32).contains(&node.parent) })
+                && node.name.chars().count() <= 80
+        });
+    valid.then(|| (
+        tree.nodes.into_iter().map(|node| NamedNode {
+            parent: node.parent, control_type: node.control_type,
+            enabled: node.enabled, focused: node.focused, name: node.name,
+        }).collect(),
+        tree.truncated,
+    ))
+}
+
 fn valid_jpeg(jpeg: &[u8]) -> bool {
     jpeg.len() <= MAX_JPEG_BYTES
         && jpeg.starts_with(&[0xff, 0xd8])
@@ -238,6 +329,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     let wrote = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(&bytes).is_ok());
     let limit = match command.operation {
         Some(Operation::CaptureForeground(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
+        Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -313,6 +405,28 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn node(parent: u32, name: &str) -> aiwin11_contracts::v1::UiNode {
+        aiwin11_contracts::v1::UiNode { parent, control_type: 50032, enabled: true, focused: false, name: name.into() }
+    }
+
+    #[test]
+    fn named_trees_are_shape_checked() {
+        let tree = |nodes, truncated| UiTree { nodes, truncated };
+        let (nodes, truncated) = named_tree(tree(vec![node(0, "Fenêtre"), node(1, "Fichier"), node(2, "")], true)).unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[1].name, "Fichier");
+        assert!(truncated);
+        for invalid in [
+            vec![],
+            vec![node(1, "root points to itself")],
+            vec![node(0, "a"), node(2, "forward parent")],
+            vec![node(0, &"x".repeat(81))],
+            vec![node(0, "a"); MAX_AGENT_NODES + 1],
+        ] {
+            assert!(named_tree(tree(invalid, false)).is_none());
+        }
+    }
 
     #[test]
     fn bridge_wait_follows_the_command_deadline_with_bounds() {

@@ -21,10 +21,29 @@ message Command {
     MoveLocalText move_local_text = 16;
     DeleteLocalText delete_local_text = 17;
     ListLocalText list_local_text = 18;
+    LocateWindow locate_window = 19;
+    InspectWindow inspect_window = 20;
   }
 }
 
 message ListLocalText {}
+
+// Finds the topmost visible, unowned application window that the given process
+// (the trusted host) does not own: the window the user was using before AiWin11.
+message LocateWindow { uint32 exclude_process_id = 1; }
+
+// Reads the UI Automation tree of exactly this window, if it still belongs to this process.
+message InspectWindow {
+  uint64 window = 1;
+  uint32 process_id = 2;
+}
+
+message WindowInfo {
+  uint64 window = 1;
+  uint32 process_id = 2;
+  string title = 3;
+  string process_name = 4;
+}
 
 message InspectForeground {}
 message CaptureForeground {}
@@ -53,6 +72,9 @@ message UiNode {
   uint32 control_type = 2;
   bool enabled = 3;
   bool focused = 4;
+  // Accessible name, at most 80 characters. Always empty for password fields.
+  // Filled only for InspectWindow; the foreground inspector returns structure only.
+  string name = 5;
 }
 
 message LaunchApplication {
@@ -81,6 +103,7 @@ message Result {
   optional uint32 process_id = 6;
   UiTree ui_tree = 7;
   WindowCapture window_capture = 8;
+  WindowInfo window_info = 9;
 }
 
 message Error {

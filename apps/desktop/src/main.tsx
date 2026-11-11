@@ -15,7 +15,8 @@ type TaskOutcome =
   | { kind: "reply"; text: string };
 type ApprovalAction =
   | { kind: "launch"; application: "notepad" }
-  | { kind: "copyFile"; source: string; destination: string; characters: number };
+  | { kind: "copyFile"; source: string; destination: string; characters: number }
+  | { kind: "inspectWindow"; application: string; title: string };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   | { type: "stage"; stage: string }
@@ -29,6 +30,14 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "inspectWindow") {
+    return {
+      title: "L’agent demande à lire une fenêtre",
+      detail: `Fenêtre : « ${action.title} » (application ${action.application}), la dernière que tu utilisais `
+        + "avant AiWin11. L’agent recevra les types et les noms de ses contrôles, sans capture d’écran ni "
+        + "contenu des champs de mot de passe. Rien ne quitte ta machine.",
     };
   }
   return {
@@ -49,6 +58,10 @@ const activityNames: Record<string, string> = {
   "agent.tool.requested": "Action demandée par l’agent",
   "agent.reply": "Réponse de l’agent",
   "agent.observation": "Résultat transmis à l’agent",
+  "window.locate.completed": "Fenêtre précédente identifiée",
+  "window.locate.failed": "Aucune fenêtre précédente trouvée",
+  "window.inspect.completed": "Fenêtre lue par l’agent",
+  "window.inspect.failed": "Lecture de la fenêtre impossible",
   "file.list.completed": "Fichiers listés par l’agent",
   "file.list.failed": "Liste des fichiers impossible",
   "policy.approval.required": "Approbation demandée",

@@ -112,8 +112,8 @@ pub(crate) fn propose(
             { "role": "system", "content": AGENT_INSTRUCTIONS },
             { "role": "user", "content": prompt }
         ],
-        // No file tools: file contents never go to the cloud.
-        "tools": tool_catalog(true, false)
+        // No file or window tools: file contents and screen data never go to the cloud.
+        "tools": tool_catalog(true, false, false)
     }));
     drop(credential);
     let stream = open_stream(request).map_err(|_| "CLOUD_REQUEST_FAILED")?;

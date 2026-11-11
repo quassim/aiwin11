@@ -60,6 +60,14 @@ class AgentProtocolTest(unittest.TestCase):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
         self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_text_files", {"path": "C:\\"})]}})
 
+    def test_window_inspection_takes_no_target_from_the_model(self):
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("inspect_window", {})]}})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["tool"], "inspect_window")
+        for arguments in [{"window": 123}, {"title": "Banque"}, {"process_id": 4}]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("inspect_window", arguments)]}})
+
     def test_copy_tool_requires_two_distinct_valid_names(self):
         copy = call("copy_text_file", {"source": "a.txt", "destination": "b copie.txt"})
         result = self.invoke({"version": 2, "proposal": {"calls": [copy]}})

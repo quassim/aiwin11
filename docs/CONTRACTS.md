@@ -48,7 +48,7 @@ SQLite tables: providers, models, model_profiles, agents, sessions, tasks, tool_
 
 `Core::execute_windows` invokes the fixed `AiWin11.Windows.exe` installed beside the host executable after broker authorization. It sends one raw v1 `Command` on the child's private stdin and closes the writer. The child returns one raw v1 `Result` on stdout and exits. Each message is limited to 1 KiB. The host checks the schema, request ID and result fields. There is no listening service. The host derives the actor from its trusted context.
 
-The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The bridge stops verifying at the command deadline and then reports. The host waits until that deadline plus two seconds (25 seconds at most) before killing the bridge, so a slow .NET cold start still produces a reported outcome. An approved launch carries a 20-second deadline: window verification still stops 4 seconds after the start, and the margin covers the first start of a newly installed bridge, which was observed above 10 seconds once on the reference machine.
+The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The bridge stops verifying at the command deadline and then reports. The host waits until that deadline plus two seconds (25 seconds at most) before killing the bridge, so a slow .NET cold start still produces a reported outcome. An approved launch carries a 20-second deadline: window verification still stops 4 seconds after the start, and the margin covers the first start of a newly installed bridge, measured at 17.9 seconds (then 60 ms) right after republishing it on the reference machine. Other bridge commands keep a 6-second deadline and can fail on that very first start; a warm-up or signed binaries remain to be evaluated.
 
 ## Local provider discovery
 
@@ -131,6 +131,17 @@ File tools cover the dedicated `files` folder under the app's local data directo
 2. **Approval.** `approvalRequired.action` is `{ "kind": "copyFile", "source", "destination", "characters" }`, shown to the user as is. Launch approvals use `{ "kind": "launch", "application": "notepad" }`.
 3. **Broker.** The host submits a v1 `CopyLocalText` command under the agent identity with `Policy.allow_agent_file_copy` set only if the user approved. That grant covers copy only. A refusal is audited as `policy.denied` and ends with `ACTION_DECLINED` or `APPROVAL_EXPIRED`.
 4. **Copy.** The existing copy runs: staging file, flush, same-folder rename with replacement disabled, cleanup on failure. The task ends with `TaskOutcome { "kind": "copied", "source", "destination" }` or the file error code; the model does not narrate the result.
+
+## Agent window inspection (AW-013, agent side)
+
+`inspect_window` takes no argument: the model cannot choose which window is read. It is offered to local models only and runs as an observation inside the agent loop.
+
+1. **Locate.** The host sends v1 `LocateWindow { exclude_process_id: <host pid> }` under the agent identity with `Policy.allow_agent_window_lookup` (granted for local tasks). The bridge walks the top-level z-order and returns the first window that is visible, not minimized, unowned, not cloaked, not tool/topmost/no-activate, not a shell window, with a non-empty title, and not owned by the host or the bridge: `WindowInfo { window, process_id, title ≤ 120 chars, process_name ≤ 64 chars }`. Audit: `window.locate.*`. The title and application are shown to the user only; the model does not see them before approval.
+2. **Approval.** `approvalRequired.action` is `{ "kind": "inspectWindow", "application", "title" }`.
+3. **Inspect.** The host sends v1 `InspectWindow { window, process_id }` with `Policy.allow_agent_window_inspection` set only if the user approved; a refusal is audited as `policy.denied`. The bridge checks before and after the walk that the handle still exists and belongs to that process, then returns up to 80 nodes, 8 levels deep, with control type, enabled, focus and accessible name (single line, ≤ 80 chars, always empty for password fields). No pixels are captured. The reply is limited to 32 KiB. Audit: `window.inspect.*`, without titles or names.
+4. **Observation.** The host renders the tree as indented `Type « name »` lines framed as untrusted data and appends it to the conversation. A refusal, expiry or failure is also an observation (nothing read), so the model can still answer.
+
+The desktop Inspector page is unchanged: it still reads the foreground window's structure only, without names.
 
 ## Streaming and progress (AW-011)
 

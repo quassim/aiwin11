@@ -22,8 +22,8 @@ Si la demande exige une action qu’aucun outil ne permet, dis-le clairement. \
 N’affirme jamais qu’une action a été réalisée.";
 
 /// Tool schemas offered to the model. The Python agent holds the matching registry.
-/// File tools are offered only when `include_files` is set, i.e. for local models.
-pub(crate) fn tool_catalog(strict: bool, include_files: bool) -> Value {
+/// File and window tools are offered only when set, i.e. for local models.
+pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: bool) -> Value {
     let mut functions = vec![json!({
         "name": "launch_application",
         "description": "Ouvre une nouvelle fenêtre d’une application Windows autorisée. L’utilisateur doit l’approuver.",
@@ -71,6 +71,14 @@ Ne remplace jamais un fichier existant. L’utilisateur doit l’approuver.",
                 "required": ["source", "destination"],
                 "additionalProperties": false
             }
+        }));
+    }
+    if include_windows {
+        functions.push(json!({
+            "name": "inspect_window",
+            "description": "Lit la structure (types et noms des contrôles) de la fenêtre que l’utilisateur utilisait \
+juste avant AiWin11. Sans capture d’écran. L’utilisateur doit l’approuver.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
     }
     Value::Array(functions.into_iter().map(|mut function| {
@@ -606,15 +614,16 @@ mod tests {
             catalog.as_array().unwrap().iter()
                 .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned()).collect()
         };
-        assert_eq!(names(tool_catalog(true, false)), ["launch_application"]);
+        assert_eq!(names(tool_catalog(true, false, false)), ["launch_application"]);
         assert_eq!(
-            names(tool_catalog(false, true)),
-            ["launch_application", "list_text_files", "read_text_file", "copy_text_file"]
+            names(tool_catalog(false, true, true)),
+            ["launch_application", "list_text_files", "read_text_file", "copy_text_file", "inspect_window"]
         );
-        let catalog = tool_catalog(true, false);
+        assert_eq!(names(tool_catalog(false, false, true)), ["launch_application", "inspect_window"]);
+        let catalog = tool_catalog(true, false, false);
         assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));
         assert_eq!(catalog[0]["function"]["strict"], true);
-        assert!(tool_catalog(false, true).as_array().unwrap().iter().all(|tool| tool["function"].get("strict").is_none()));
+        assert!(tool_catalog(false, true, true).as_array().unwrap().iter().all(|tool| tool["function"].get("strict").is_none()));
     }
 
     #[test]

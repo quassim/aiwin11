@@ -26,6 +26,12 @@ pub struct Policy {
     /// Lets the agent copy one text file inside the dedicated folder. The host grants it
     /// only after the user approved that exact copy.
     pub allow_agent_file_copy: bool,
+    /// Lets the agent identify the window the user was using before AiWin11 (title and
+    /// application only). Granted for local-model tasks.
+    pub allow_agent_window_lookup: bool,
+    /// Lets the agent read one window's control tree. Granted only after the user approved
+    /// reading that exact window.
+    pub allow_agent_window_inspection: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -76,6 +82,12 @@ impl Policy {
                 Ok("launch_notepad")
             }
             Some(Operation::InspectForeground(_)) if peer == Peer::DesktopInspector => Ok("inspect_foreground"),
+            Some(Operation::LocateWindow(_)) if peer == Peer::Agent && self.allow_agent_window_lookup => {
+                Ok("locate_window")
+            }
+            Some(Operation::InspectWindow(_)) if peer == Peer::Agent && self.allow_agent_window_inspection => {
+                Ok("inspect_window")
+            }
             Some(Operation::CaptureForeground(_)) if peer == Peer::DesktopInspector => Ok("capture_foreground"),
             Some(Operation::AnalyzeCapture(_)) if peer == Peer::DesktopInspector => Ok("analyze_capture"),
             Some(Operation::PreviewLocalText(_))
@@ -327,6 +339,31 @@ mod tests {
             core.authorize_dispatch(reads_only, Peer::Other, &command),
             Err(ExecutionError::Denied("invalid_scope"))
         );
+    }
+
+    #[test]
+    fn window_lookup_and_inspection_are_separate_agent_grants() {
+        let lookup = Policy { allow_agent_window_lookup: true, ..Default::default() };
+        let inspection = Policy { allow_agent_window_inspection: true, ..Default::default() };
+        let everything_else = Policy {
+            allow_agent_to_launch_notepad: true, allow_agent_file_reads: true, allow_agent_file_copy: true,
+            ..Default::default()
+        };
+        let locate = Operation::LocateWindow(Default::default());
+        let inspect = Operation::InspectWindow(Default::default());
+        for (operation, allowed, denied) in [(locate, lookup, inspection), (inspect, inspection, lookup)] {
+            for (policy, peer, expected) in [
+                (allowed, Peer::Agent, true),
+                (denied, Peer::Agent, false),
+                (everything_else, Peer::Agent, false),
+                (allowed, Peer::DesktopInspector, false),
+            ] {
+                let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+                let mut command = request(&core);
+                command.operation = Some(operation);
+                assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
+            }
+        }
     }
 
     #[test]

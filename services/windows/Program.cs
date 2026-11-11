@@ -31,6 +31,7 @@ var result = new Protocol.Result { SchemaVersion = 1, RequestId = command.Reques
 var elapsed = Stopwatch.StartNew();
 if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", out _)
     || (command.InspectForeground is null && command.CaptureForeground is null && command.CharacterMapDigit is null
+        && command.LocateWindow is null && command.InspectWindow is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -49,6 +50,37 @@ else if (command.CharacterMapDigit is { } entry)
         Reject(Protocol.Result.Types.Status.Denied, "invalid_digit", "A decimal digit is required.");
     else
         CharacterMapInput.Apply(entry.Digit, command.DeadlineMs, result);
+}
+else if (command.LocateWindow is { } locate)
+{
+    var info = WindowInspector.Locate(locate.ExcludeProcessId);
+    if (info is null)
+        Reject(Protocol.Result.Types.Status.Failed, "window_unavailable", "No application window was found.");
+    else
+    {
+        result.WindowInfo = info;
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.InspectWindow is { } target)
+{
+    try
+    {
+        var tree = WindowInspector.Inspect(target.Window, target.ProcessId, command.DeadlineMs);
+        if (tree is null)
+            Reject(Protocol.Result.Types.Status.Failed, "window_unavailable", "The window is no longer available.");
+        else
+        {
+            result.UiTree = tree;
+            result.Status = Protocol.Result.Types.Status.Success;
+        }
+    }
+    catch (Exception error) when (error is System.Windows.Automation.ElementNotAvailableException
+        or System.Runtime.InteropServices.COMException or UnauthorizedAccessException
+        or ArgumentException or InvalidOperationException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "inspection_failed", "Windows could not inspect the window.");
+    }
 }
 else if (command.CaptureForeground is not null)
 {
