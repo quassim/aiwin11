@@ -27,6 +27,20 @@ pub struct Activity {
     pub sequence: u64,
     pub kind: String,
     pub timestamp: String,
+    pub task_id: Option<String>,
+    /// Stable code (decision, rule or error), never user content.
+    pub code: Option<String>,
+}
+
+/// One chat task as persisted, for the activity page and recovery.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TaskRecord {
+    pub id: String,
+    pub state: String,
+    /// Final code, or for an interrupted task the state it was in when interrupted.
+    pub outcome: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 impl Core {
@@ -54,8 +68,69 @@ impl Core {
             "INSERT INTO events (id, session_id, kind, source) VALUES (?1, ?2, 'session.started', 'core')",
             params![Uuid::new_v4().to_string(), session_id],
         )?;
+        Self::recover_interrupted_tasks(&transaction, &session_id)?;
         transaction.commit()?;
         Ok(Self { db, session_id })
+    }
+
+    /// A task still in progress at startup was interrupted by a crash or a forced exit. It is
+    /// closed as `interrupted` (its last state kept as outcome) and journaled in the new
+    /// session. Nothing is re-run: a side effect that may have happened is never repeated.
+    fn recover_interrupted_tasks(transaction: &rusqlite::Transaction<'_>, session_id: &str) -> rusqlite::Result<()> {
+        let open: Vec<(String, String)> = {
+            let mut statement = transaction.prepare(
+                "SELECT id, state FROM tasks WHERE state NOT IN ('completed', 'failed', 'cancelled', 'interrupted')",
+            )?;
+            let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for (task, state) in open {
+            transaction.execute(
+                "UPDATE tasks SET state = 'interrupted', outcome = ?2,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                params![task, state],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, task_id, kind, source, code)
+                 VALUES (?1, ?2, ?3, 'task.recovered', 'core', ?4)",
+                params![Uuid::new_v4().to_string(), session_id, task, state],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Persists a new task in this session.
+    pub(crate) fn task_created(&self, task: &str) -> rusqlite::Result<()> {
+        self.db.execute(
+            "INSERT INTO tasks (id, session_id, state) VALUES (?1, ?2, 'created')",
+            params![task, self.session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Updates a task's state. A final state is never changed afterwards.
+    pub(crate) fn task_state(&self, task: &str, state: &str, outcome: Option<&str>) -> rusqlite::Result<()> {
+        self.db.execute(
+            "UPDATE tasks SET state = ?2, outcome = COALESCE(?3, outcome),
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1 AND session_id = ?4
+               AND state NOT IN ('completed', 'failed', 'cancelled', 'interrupted')",
+            params![task, state, outcome, self.session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Most recent tasks across sessions, newest first.
+    pub fn recent_tasks(&self, limit: u32) -> rusqlite::Result<Vec<TaskRecord>> {
+        let mut statement = self.db.prepare(
+            "SELECT id, state, outcome, created_at, updated_at FROM tasks
+             ORDER BY created_at DESC, rowid DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit], |row| Ok(TaskRecord {
+            id: row.get(0)?, state: row.get(1)?, outcome: row.get(2)?,
+            created_at: row.get(3)?, updated_at: row.get(4)?,
+        }))?;
+        rows.collect()
     }
 
     pub fn session_id(&self) -> &str {
@@ -112,13 +187,16 @@ impl Core {
 
     pub fn activity(&self) -> rusqlite::Result<Vec<Activity>> {
         let mut statement = self.db.prepare(
-            "SELECT sequence, kind, timestamp FROM events WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 100",
+            "SELECT sequence, kind, timestamp, task_id, code FROM events
+             WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 100",
         )?;
         let events = statement.query_map([&self.session_id], |row| {
             Ok(Activity {
                 sequence: row.get(0)?,
                 kind: row.get(1)?,
                 timestamp: row.get(2)?,
+                task_id: row.get(3)?,
+                code: row.get(4)?,
             })
         })?;
         events.collect()
@@ -136,6 +214,37 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "session.started");
         assert!(events[0].timestamp.ends_with('Z'));
+    }
+
+    #[test]
+    fn interrupted_tasks_are_closed_at_the_next_start_and_never_reopened() {
+        let path = std::env::temp_dir().join(format!("aiwin11-recovery-{}.sqlite3", Uuid::new_v4()));
+        {
+            let core = Core::open(&path).unwrap();
+            for (task, state) in [("a", "dispatching"), ("b", "awaiting_approval"), ("c", "completed")] {
+                core.task_created(task).unwrap();
+                core.task_state(task, state, if state == "completed" { Some("ok") } else { None }).unwrap();
+            }
+            core.task_state("c", "planning", None).unwrap();
+            assert_eq!(core.recent_tasks(10).unwrap().iter().find(|task| task.id == "c").unwrap().state,
+                "completed", "a final state never changes");
+        } // The process "crashes" with a and b still in progress.
+        let core = Core::open(&path).unwrap();
+        let tasks = core.recent_tasks(10).unwrap();
+        let state = |id: &str| tasks.iter().find(|task| task.id == id)
+            .map(|task| (task.state.clone(), task.outcome.clone())).unwrap();
+        assert_eq!(state("a"), ("interrupted".into(), Some("dispatching".into())));
+        assert_eq!(state("b"), ("interrupted".into(), Some("awaiting_approval".into())));
+        assert_eq!(state("c"), ("completed".into(), Some("ok".into())));
+        let recovered: Vec<_> = core.activity().unwrap().into_iter()
+            .filter(|event| event.kind == "task.recovered")
+            .map(|event| (event.task_id.unwrap(), event.code.unwrap())).collect();
+        assert_eq!(recovered.len(), 2);
+        assert!(recovered.contains(&("a".into(), "dispatching".into())));
+        core.task_state("a", "planning", None).unwrap();
+        assert_eq!(core.recent_tasks(10).unwrap().iter().find(|task| task.id == "a").unwrap().state, "interrupted");
+        drop(core);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

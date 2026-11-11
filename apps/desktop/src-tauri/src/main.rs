@@ -22,10 +22,37 @@ struct Snapshot {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Activity {
     sequence: u64,
     kind: String,
     timestamp: String,
+    task_id: Option<String>,
+    code: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskEntry {
+    id: String,
+    state: String,
+    outcome: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+/// Recent chat tasks across sessions, including tasks interrupted by a crash.
+#[tauri::command]
+async fn get_tasks(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskEntry>, &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let core = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+        let tasks = core.recent_tasks(30).map_err(|_| "ACTIVITY_UNAVAILABLE")?;
+        Ok(tasks.into_iter().map(|task| TaskEntry {
+            id: task.id, state: task.state, outcome: task.outcome,
+            created_at: task.created_at, updated_at: task.updated_at,
+        }).collect())
+    }).await.map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 struct AppState {
@@ -81,6 +108,8 @@ fn snapshot(state: &AppState) -> Result<Snapshot, &'static str> {
                 sequence: event.sequence,
                 kind: event.kind,
                 timestamp: event.timestamp,
+                task_id: event.task_id,
+                code: event.code,
             })
             .collect(),
     })
@@ -233,7 +262,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot, discover_models, run_task, cancel_task, resolve_approval,
-            get_policy_overview, set_policy_settings,
+            get_policy_overview, set_policy_settings, get_tasks,
             openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
             capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,
             local_files_root, preview_local_text, copy_local_text,

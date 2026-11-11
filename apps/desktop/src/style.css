@@ -50,6 +50,7 @@ li { padding: 12px 0; border-top: 1px solid #344646; }
 .action-report .status-simulated strong { color: #7aa2f7; }
 .action-report .status-declined strong, .action-report .status-expired strong, .action-report .status-partial strong { color: #e0af68; }
 .action-report .status-denied strong, .action-report .status-failed strong { color: #f7768e; }
+.event-code { margin-left: 8px; font-size: 0.8rem; opacity: 0.7; }
 .table-scroll { overflow-x: auto; }
 .table-scroll table { border-collapse: collapse; width: 100%; }
 .table-scroll th, .table-scroll td { padding: 6px 8px; border-bottom: 1px solid #333a45; text-align: left; }

@@ -315,6 +315,7 @@ impl TaskSlot {
         }
         let _reset = ResetSlot(self);
         let task = Uuid::new_v4().to_string();
+        lock(core)?.task_created(&task).map_err(|_| "AUDIT_UNAVAILABLE")?;
         record(core, &task, "task.created")?;
         progress(TaskUpdate::stage("task.created"));
         let outcome = self.plan_and_execute(core, files, &task, prompt, request, &progress);
@@ -325,11 +326,13 @@ impl TaskSlot {
             Err(CANCELLED) => Err("TASK_CANCELLED"),
             _ => outcome,
         };
-        record(core, &task, match outcome {
-            Ok(_) => "task.completed",
-            Err("TASK_CANCELLED") => "task.cancelled",
-            Err(_) => "task.failed",
-        })?;
+        let (kind, state, code) = match outcome {
+            Ok(_) => ("task.completed", "completed", "ok"),
+            Err("TASK_CANCELLED") => ("task.cancelled", "cancelled", "TASK_CANCELLED"),
+            Err(code) => ("task.failed", "failed", code),
+        };
+        set_state(core, &task, state, Some(code))?;
+        record(core, &task, kind)?;
         outcome
     }
 
@@ -344,6 +347,7 @@ impl TaskSlot {
         request: &TaskRequest,
         progress: &F,
     ) -> Result<TaskOutcome, &'static str> {
+        set_state(core, task, "planning", None)?;
         record(core, task, "task.planning")?;
         progress(TaskUpdate::stage("task.planning"));
         if let Provider::OpenAi = request.provider {
@@ -536,7 +540,7 @@ impl TaskSlot {
             Gate::Run(grant) => grant,
         };
         let process_id = target.ok_or("NO_NOTEPAD_LAUNCHED")?;
-        let result = self.dispatching(|| -> Result<bool, &'static str> {
+        let result = self.dispatching(run.core, run.task, || -> Result<bool, &'static str> {
             lock(run.core)?.agent_type_in_notepad(run.task, grant, process_id, text)
         })?;
         Ok(match result {
@@ -619,12 +623,20 @@ impl TaskSlot {
     }
 
     /// Runs a side effect in the DISPATCHING phase: cancellation is no longer accepted until
-    /// it returns, then the task goes back to planning.
-    fn dispatching<T>(&self, effect: impl FnOnce() -> T) -> Result<T, &'static str> {
+    /// it returns, then the task goes back to planning. The persisted state says so too, so
+    /// that a crash during the effect is reported at the next start.
+    fn dispatching<T>(
+        &self, core: &Mutex<Core>, task: &str, effect: impl FnOnce() -> T,
+    ) -> Result<T, &'static str> {
         self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "TASK_CANCELLED")?;
+        if let Err(error) = set_state(core, task, "dispatching", None) {
+            let _ = self.phase.compare_exchange(DISPATCHING, PLANNING, Ordering::AcqRel, Ordering::Acquire);
+            return Err(error);
+        }
         let result = effect();
         let _ = self.phase.compare_exchange(DISPATCHING, PLANNING, Ordering::AcqRel, Ordering::Acquire);
+        set_state(core, task, "planning", None)?;
         Ok(result)
     }
 
@@ -672,6 +684,7 @@ impl TaskSlot {
         if self.phase.load(Ordering::Acquire) == CANCELLED {
             return Err("TASK_CANCELLED");
         }
+        set_state(core, task, "awaiting_approval", None)?;
         record(core, task, "policy.approval.required")?;
         let decision = self.await_approval(APPROVAL_TIMEOUT, |approval_id| {
             progress(TaskUpdate::ApprovalRequired {
@@ -685,6 +698,7 @@ impl TaskSlot {
             Decision::Declined => "policy.approval.declined",
             Decision::Expired => "policy.approval.expired",
         };
+        set_state(core, task, "planning", None)?;
         record(core, task, decided)?;
         progress(TaskUpdate::stage(decided));
         Ok(decision)
@@ -763,7 +777,7 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = self.dispatching(|| -> Result<(), &'static str> {
+        let result = self.dispatching(run.core, run.task, || -> Result<(), &'static str> {
             let mut core = lock(run.core)?;
             match kind {
                 Transfer::Copy => files.agent_copy(&mut core, run.task, grant, source, destination),
@@ -806,7 +820,7 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = self.dispatching(|| -> Result<PathBuf, &'static str> {
+        let result = self.dispatching(run.core, run.task, || -> Result<PathBuf, &'static str> {
             files.agent_trash(&mut *lock(run.core)?, run.task, grant, name)
         })?;
         let (status, code) = status_of(&result);
@@ -827,7 +841,7 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = self.dispatching(|| -> Result<Result<u32, ExecutionError>, &'static str> {
+        let result = self.dispatching(run.core, run.task, || -> Result<Result<u32, ExecutionError>, &'static str> {
             let mut core = lock(run.core)?;
             let mut command = core.agent_command(run.task, Operation::LaunchApplication(LaunchApplication {
                 application: application as i32,
@@ -1027,6 +1041,11 @@ impl Drop for ResetSlot<'_> {
         }
         self.0.phase.store(IDLE, Ordering::Release);
     }
+}
+
+/// Persists the task's lifecycle state (see `Core::task_state`).
+fn set_state(core: &Mutex<Core>, task: &str, state: &str, outcome: Option<&str>) -> Result<(), &'static str> {
+    lock(core)?.task_state(task, state, outcome).map_err(|_| "AUDIT_UNAVAILABLE")
 }
 
 fn record(core: &Mutex<Core>, task: &str, kind: &str) -> Result<(), &'static str> {

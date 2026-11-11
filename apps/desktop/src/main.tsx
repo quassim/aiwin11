@@ -8,7 +8,18 @@ import "./style.css";
 
 type Page = "Accueil" | "Modèles" | "Sécurité" | "Inspecteur" | "Fichiers" | "Activité";
 type Provider = "ollama" | "openai";
-type Activity = { sequence: number; kind: string; timestamp: string };
+type Activity = { sequence: number; kind: string; timestamp: string; taskId: string | null; code: string | null };
+type TaskEntry = { id: string; state: string; outcome: string | null; createdAt: string; updatedAt: string };
+const taskStateNames: Record<string, string> = {
+  created: "Créée",
+  planning: "En cours",
+  awaiting_approval: "En attente de ton accord",
+  dispatching: "Action en cours",
+  completed: "Terminée",
+  failed: "En échec",
+  cancelled: "Annulée",
+  interrupted: "Interrompue (arrêt d’AiWin11)",
+};
 type Snapshot = { sessionId: string; events: Activity[] };
 type ActionStatus = "done" | "partial" | "simulated" | "declined" | "expired" | "denied" | "failed";
 type ActionReport = { action: string; summary: string; status: ActionStatus; code: string | null };
@@ -135,6 +146,8 @@ const activityNames: Record<string, string> = {
   "task.failed": "Demande en échec",
   "task.partial": "Vérification incomplète",
   "task.cancelled": "Demande annulée",
+  "task.recovered": "Demande interrompue retrouvée au démarrage",
+  "policy.profile": "Profil de sécurité appliqué",
   "inspection.completed": "Fenêtre inspectée",
   "inspection.failed": "Inspection impossible",
   "capture.completed": "Fenêtre capturée",
@@ -191,6 +204,7 @@ const taskErrors: Record<string, string> = {
 function App() {
   const [page, setPage] = useState<Page>("Accueil");
   const [snapshot, setSnapshot] = useState<Snapshot>();
+  const [tasks, setTasks] = useState<TaskEntry[]>([]);
   const [error, setError] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
@@ -264,6 +278,7 @@ function App() {
   const refresh = useCallback(() => {
     setError(false);
     void invoke<Snapshot>("get_snapshot").then(setSnapshot, () => setError(true));
+    void invoke<TaskEntry[]>("get_tasks").then(setTasks, () => setTasks([]));
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -511,19 +526,38 @@ function App() {
         {page === "Sécurité" && <Security onFinished={refresh} />}
         {page === "Inspecteur" && <Inspector onFinished={refresh} />}
         {page === "Fichiers" && <LocalFiles onFinished={refresh} />}
-        {page === "Activité" && (
-          <section className="card">
-            <div className="section-header"><h2>Journal de la session</h2><button onClick={refresh}>Actualiser</button></div>
+        {page === "Activité" && (<>
+          <section className="card" aria-labelledby="tasks-heading">
+            <div className="section-header"><h2 id="tasks-heading">Demandes récentes</h2><button onClick={refresh}>Actualiser</button></div>
+            {tasks.length ? (
+              <ul>{tasks.map((task) => (
+                <li key={task.id}>
+                  <span>
+                    {taskStateNames[task.state] ?? task.state}
+                    {task.outcome && task.outcome !== "ok" ? ` (${task.outcome})` : ""}
+                    {task.state === "interrupted" && task.outcome === "dispatching"
+                      && " — une action était peut-être en cours : vérifie son résultat"}
+                  </span>
+                  <time dateTime={task.createdAt}>{new Date(task.createdAt).toLocaleString("fr-FR")}</time>
+                </li>
+              ))}</ul>
+            ) : <p>Aucune demande enregistrée.</p>}
+          </section>
+          <section className="card" aria-labelledby="journal-heading">
+            <h2 id="journal-heading">Journal de la session</h2>
             {snapshot?.events.length ? (
               <ul>{snapshot.events.map((event) => (
                 <li key={event.sequence}>
-                  <span>{activityNames[event.kind] ?? event.kind}</span>
+                  <span>
+                    {activityNames[event.kind] ?? event.kind}
+                    {event.code && <code className="event-code">{event.code}</code>}
+                  </span>
                   <time dateTime={event.timestamp}>{new Date(event.timestamp).toLocaleString("fr-FR")}</time>
                 </li>
               ))}</ul>
             ) : <p>Aucun événement à afficher.</p>}
           </section>
-        )}
+        </>)}
       </main>
     </div>
   );
