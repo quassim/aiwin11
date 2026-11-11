@@ -48,7 +48,7 @@ SQLite tables: providers, models, model_profiles, agents, sessions, tasks, tool_
 
 `Core::execute_windows` invokes the fixed `AiWin11.Windows.exe` installed beside the host executable after broker authorization. It sends one raw v1 `Command` on the child's private stdin and closes the writer. The child returns one raw v1 `Result` on stdout and exits. Each message is limited to 1 KiB. The host checks the schema, request ID and result fields. There is no listening service. The host derives the actor from its trusted context.
 
-The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The bridge stops verifying at the command deadline and then reports. The host waits until that deadline plus two seconds (fifteen seconds at most) before killing the bridge, so a slow .NET cold start still produces a reported outcome.
+The bridge accepts the Notepad enum, checks the deadline, starts the Windows system executable and looks for a new Notepad window using the process and its window handle. Packaged Notepad is identified by package family. An existing window or reused tab can yield `PARTIAL`, which the broker records as `tool.execution.partial`. The process ID is returned only for a verified window. The bridge stops verifying at the command deadline and then reports. The host waits until that deadline plus two seconds (25 seconds at most) before killing the bridge, so a slow .NET cold start still produces a reported outcome. An approved launch carries a 20-second deadline: window verification still stops 4 seconds after the start, and the margin covers the first start of a newly installed bridge, which was observed above 10 seconds once on the reference machine.
 
 ## Local provider discovery
 
@@ -104,6 +104,24 @@ The host accepts one task at a time. Cancellation wins only before dispatch. Too
 4. The host parses the decision with unknown fields denied and validates it again. A reply ends the task with the `agent.reply` event and no broker call. A tool request is mapped by the host to the Protobuf `LaunchApplication` operation and submitted to the broker under the agent peer identity.
 
 Model output is untrusted data. The registry bounds what the agent may request; the broker still decides what runs.
+
+## Agent loop and read-only file tools (AW-016, first step)
+
+A task runs at most 5 model proposals. Each proposal is validated by the Python agent and the host as above, then:
+
+- a text reply ends the task (`agent.reply`);
+- `launch_application` ends the task through the approval flow below;
+- `list_text_files` or `read_text_file` runs a read-only observation, records `agent.tool.requested` then `agent.observation`, and appends the call and its result to the conversation sent to the model for the next proposal.
+
+After 5 proposals without a final answer the task fails with `AGENT_STEP_LIMIT`.
+
+File tools cover the dedicated `files` folder under the app's local data directory, with the same rules as the Files page: flat ASCII `.txt` names, handle-verified paths, no links, 64 KiB maximum, UTF-8. `list_text_files` returns at most 100 sorted names of regular `.txt` files; `read_text_file` returns the text without BOM.
+
+- **Local only.** The host offers file tools, and grants `Policy.allow_agent_file_reads`, only when the provider is Ollama and the folder is available. File contents never reach a cloud provider. A file tool returned in any other case is rejected (`AGENT_REJECTED`).
+- **Broker.** Each call is a v1 `ListLocalText` or `PreviewLocalText` command under the agent identity, with its own request ID and idempotency key and the chat task ID. The broker allows these reads for the agent only with `allow_agent_file_reads`; it never extends to copy, move, delete or launch. Each call is audited (`policy.allowed`, then `file.list.*` or `file.preview.*`), without names or contents.
+- **No approval for reads.** Reading the dedicated folder is a low-risk observation, as in the specification's policy table. Actions with side effects keep their approval.
+- **Untrusted data.** Observations reach the model framed as untrusted data (`<<<DEBUT … FIN>>>`), with at most 16 000 characters per file. Tool failures return only a stable error code. Instructions inside a file cannot do more than the user's own request: any side effect still requires the user's approval and the broker.
+- **Context.** Local requests use `num_ctx` 16384 and `num_predict` 1024 so that observations fit.
 
 ## Streaming and progress (AW-011)
 

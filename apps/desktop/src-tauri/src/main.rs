@@ -149,7 +149,7 @@ async fn run_task(
 ) -> Result<TaskOutcome, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        state.task.run(&state.core, &request, |update| {
+        state.task.run(&state.core, state.files.as_ref(), &request, |update| {
             let _ = progress.send(update);
         })
     })

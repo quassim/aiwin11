@@ -20,6 +20,9 @@ pub enum Peer {
 #[derive(Clone, Copy, Default)]
 pub struct Policy {
     pub allow_agent_to_launch_notepad: bool,
+    /// Lets the agent list and read text files in the dedicated local folder.
+    /// The host grants it only for tasks served by a local model.
+    pub allow_agent_file_reads: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -72,7 +75,16 @@ impl Policy {
             Some(Operation::InspectForeground(_)) if peer == Peer::DesktopInspector => Ok("inspect_foreground"),
             Some(Operation::CaptureForeground(_)) if peer == Peer::DesktopInspector => Ok("capture_foreground"),
             Some(Operation::AnalyzeCapture(_)) if peer == Peer::DesktopInspector => Ok("analyze_capture"),
-            Some(Operation::PreviewLocalText(_)) if peer == Peer::DesktopInspector => Ok("preview_local_text"),
+            Some(Operation::PreviewLocalText(_))
+                if peer == Peer::DesktopInspector || (peer == Peer::Agent && self.allow_agent_file_reads) =>
+            {
+                Ok("preview_local_text")
+            }
+            Some(Operation::ListLocalText(_))
+                if peer == Peer::DesktopInspector || (peer == Peer::Agent && self.allow_agent_file_reads) =>
+            {
+                Ok("list_local_text")
+            }
             Some(Operation::CopyLocalText(_)) if peer == Peer::DesktopInspector => Ok("copy_local_text"),
             Some(Operation::MoveLocalText(_)) if peer == Peer::DesktopInspector => Ok("move_local_text"),
             Some(Operation::DeleteLocalText(input)) if peer == Peer::DesktopInspector => {
@@ -244,7 +256,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
         command.operation = Some(Operation::CaptureForeground(Default::default()));
-        let policy = Policy { allow_agent_to_launch_notepad: true };
+        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
         assert_eq!(
             core.authorize_dispatch(policy, Peer::Agent, &command),
             Err(ExecutionError::Denied("default_deny"))
@@ -257,7 +269,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
         command.operation = Some(Operation::CopyLocalText(Default::default()));
-        let policy = Policy { allow_agent_to_launch_notepad: true };
+        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
         assert_eq!(
             core.authorize_dispatch(policy, Peer::Agent, &command),
             Err(ExecutionError::Denied("default_deny"))
@@ -266,10 +278,55 @@ mod tests {
     }
 
     #[test]
+    fn agent_file_reads_require_their_own_grant_and_never_extend_to_writes() {
+        let reads = [
+            Operation::PreviewLocalText(Default::default()),
+            Operation::ListLocalText(Default::default()),
+        ];
+        let launch_only = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
+        let reads_only = Policy { allow_agent_file_reads: true, ..Default::default() };
+        for operation in reads {
+            let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+            let mut command = request(&core);
+            command.operation = Some(operation);
+            assert_eq!(
+                core.authorize_dispatch(launch_only, Peer::Agent, &command),
+                Err(ExecutionError::Denied("default_deny"))
+            );
+            command.idempotency_key = Uuid::new_v4().to_string();
+            assert!(core.authorize_dispatch(reads_only, Peer::Agent, &command).is_ok());
+        }
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        for write in [
+            Operation::CopyLocalText(Default::default()),
+            Operation::MoveLocalText(Default::default()),
+            Operation::DeleteLocalText(aiwin11_contracts::v1::DeleteLocalText { confirmed: true }),
+        ] {
+            let mut command = request(&core);
+            command.operation = Some(write);
+            assert_eq!(
+                core.authorize_dispatch(reads_only, Peer::Agent, &command),
+                Err(ExecutionError::Denied("default_deny"))
+            );
+        }
+        let mut command = request(&core);
+        assert_eq!(
+            core.authorize_dispatch(reads_only, Peer::Agent, &command),
+            Err(ExecutionError::Denied("default_deny")),
+            "file reads do not grant the Notepad launch"
+        );
+        command.operation = Some(Operation::ListLocalText(Default::default()));
+        assert_eq!(
+            core.authorize_dispatch(reads_only, Peer::Other, &command),
+            Err(ExecutionError::Denied("invalid_scope"))
+        );
+    }
+
+    #[test]
     fn trusts_transport_identity_and_deduplicates_dispatch() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let command = request(&core);
-        let policy = Policy { allow_agent_to_launch_notepad: true };
+        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
         assert_eq!(
             core.execute(policy, Peer::Other, &command, || panic!("dispatched")),
             Err(ExecutionError::Denied("invalid_scope"))
@@ -289,9 +346,7 @@ mod tests {
     fn enabled_rule_still_denies_unknown_applications_and_expired_requests() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
-        let policy = Policy {
-            allow_agent_to_launch_notepad: true,
-        };
+        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
         command.operation = Some(Operation::LaunchApplication(LaunchApplication {
             application: i32::MAX,
         }));
@@ -311,9 +366,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let command = request(&core);
         core.db.execute("DROP TABLE events", []).unwrap();
-        let policy = Policy {
-            allow_agent_to_launch_notepad: true,
-        };
+        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
         assert_eq!(
             core.execute(policy, Peer::Agent, &command, || panic!("without audit")),
             Err(ExecutionError::AuditUnavailable)
@@ -329,9 +382,7 @@ mod tests {
     fn reports_and_audits_unverified_launch() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let command = request(&core);
-        let policy = Policy {
-            allow_agent_to_launch_notepad: true,
-        };
+        let policy = Policy { allow_agent_to_launch_notepad: true, ..Default::default() };
         assert_eq!(
             core.execute(policy, Peer::Agent, &command, || LaunchOutcome::Unverified),
             Err(ExecutionError::WindowUnverified)

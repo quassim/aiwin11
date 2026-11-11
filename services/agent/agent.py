@@ -11,9 +11,35 @@ VERSION = 2
 MAX_INPUT_BYTES = 32 * 1024
 MAX_REPLY_CHARS = 4000
 
-# Tool name -> argument name -> allowed values. Every argument is required.
+MAX_FILE_NAME = 128
+_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_")
+_RESERVED = {"CON", "PRN", "AUX", "NUL"}
+
+
+def is_text_file_name(value):
+    """Flat ASCII `.txt` name, as accepted by the host's local file store."""
+    if not isinstance(value, str) or len(value) > MAX_FILE_NAME or "." not in value:
+        return False
+    stem, extension = value.rsplit(".", 1)
+    upper = stem.upper()
+    reserved = upper in _RESERVED or (
+        len(upper) == 4 and upper[:3] in ("COM", "LPT") and upper[3].isdigit()
+    )
+    return (
+        extension.lower() == "txt"
+        and stem != ""
+        and stem == stem.strip()
+        and not reserved
+        and all(char in _NAME_CHARS for char in stem)
+    )
+
+
+# Tool name -> argument name -> allowed values (tuple) or validator (callable).
+# Every declared argument is required and no other argument is accepted.
 TOOLS = {
     "launch_application": {"application": ("notepad",)},
+    "list_text_files": {},
+    "read_text_file": {"name": is_text_file_name},
 }
 
 
@@ -31,8 +57,10 @@ def _tool_request(calls):
     arguments = function.get("arguments")
     if not isinstance(arguments, dict) or set(arguments) != set(schema):
         raise ValueError("invalid arguments")
-    for key, allowed in schema.items():
-        if not isinstance(arguments[key], str) or arguments[key] not in allowed:
+    for key, rule in schema.items():
+        value = arguments[key]
+        valid = rule(value) if callable(rule) else isinstance(value, str) and value in rule
+        if not valid:
             raise ValueError("argument outside schema")
     return {"version": VERSION, "action": "tool", "tool": name, "arguments": dict(arguments)}
 

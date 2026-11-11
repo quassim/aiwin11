@@ -24,7 +24,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Time allowed after the command deadline for the bridge to report and exit.
 const REPLY_GRACE: Duration = Duration::from_secs(2);
 /// Upper bound on any wait, whatever deadline the command carries.
-const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(15);
+const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(25);
 const MAX_MESSAGE_BYTES: usize = 1024;
 const MAX_JPEG_BYTES: usize = 256 * 1024;
 
@@ -117,6 +117,16 @@ impl Core {
             idempotency_key: id,
             operation: Some(operation),
         })
+    }
+
+    /// A command issued for an agent tool call within a chat task. Each call gets its own
+    /// request ID and idempotency key; the task ID ties it to the task's audit trail.
+    pub(crate) fn agent_command(&self, task: &str, operation: Operation) -> Result<Command, ExecutionError> {
+        let mut command = self.desktop_command(operation)?;
+        command.task_id = task.into();
+        command.correlation_id = task.into();
+        command.authenticated_actor_id = "agent".into();
+        Ok(command)
     }
 
     pub fn capture_foreground(&mut self) -> Result<Capture, ExecutionError> {

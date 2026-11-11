@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf, Prefix, Component},
 };
 
-use aiwin11_contracts::v1::{command::Operation, CopyLocalText, DeleteLocalText, MoveLocalText, PreviewLocalText};
+use aiwin11_contracts::v1::{
+    command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, MoveLocalText, PreviewLocalText,
+};
 use windows_sys::Wdk::{Foundation::OBJECT_ATTRIBUTES, Storage::FileSystem::{
     NtCreateFile, NtSetInformationFile, FileRenameInformation, FILE_CREATE,
     FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_DISPOSITION,
@@ -26,6 +28,8 @@ use crate::{broker::{ExecutionError, Peer, Policy}, Core};
 
 const MAX_BYTES: usize = 64 * 1024;
 const MAX_NAME: usize = 128;
+/// Most names returned by one listing.
+pub const MAX_LISTED: usize = 100;
 
 // Windows FILE_RENAME_INFORMATION with storage for the variable-length UTF-16 name.
 #[repr(C)]
@@ -76,6 +80,64 @@ impl LocalFiles {
         };
         core.audit(task.as_deref(), kind, code).map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
         result
+    }
+
+    /// Agent tool: lists the text files of the dedicated folder for `task`.
+    /// The broker decides with `policy` under the agent identity, and the outcome is audited.
+    pub fn agent_list(&self, core: &mut Core, task: &str, policy: Policy) -> Result<Vec<String>, &'static str> {
+        let command = core.agent_command(task, Operation::ListLocalText(ListLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.list", || self.list_names())
+    }
+
+    /// Agent tool: reads one text file of the dedicated folder for `task`.
+    pub fn agent_read(
+        &self, core: &mut Core, task: &str, policy: Policy, name: &str,
+    ) -> Result<String, &'static str> {
+        let command = core.agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.preview", || {
+            let text = self.read(self.resolve(name)?, name)?;
+            Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+        })
+    }
+
+    fn observe<T>(
+        &self, core: &mut Core, command: &aiwin11_contracts::v1::Command, policy: Policy, event: &str,
+        execute: impl FnOnce() -> Result<T, &'static str>,
+    ) -> Result<T, &'static str> {
+        let task = core.authorize_dispatch(policy, Peer::Agent, command)
+            .map_err(|error| match error {
+                ExecutionError::Denied(_) => "FILE_ACCESS_DENIED",
+                _ => "FILE_AUDIT_UNAVAILABLE",
+            })?;
+        let result = execute();
+        let (suffix, code) = match &result {
+            Ok(_) => ("completed", "success"),
+            Err(code) => ("failed", *code),
+        };
+        core.audit(task.as_deref(), &format!("{event}.{suffix}"), code)
+            .map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
+        result
+    }
+
+    /// Valid `.txt` names of regular files directly in the folder, sorted, at most `MAX_LISTED`.
+    fn list_names(&self) -> Result<Vec<String>, &'static str> {
+        // Checks that the folder itself is the expected, non-redirected directory.
+        drop(self.open_root()?);
+        let mut names = Vec::new();
+        for entry in fs::read_dir(&self.root).map_err(|_| "FILE_UNAVAILABLE")? {
+            let entry = entry.map_err(|_| "FILE_UNAVAILABLE")?;
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
+            // DirEntry metadata does not follow links on Windows.
+            let Ok(meta) = entry.metadata() else { continue };
+            if valid_name(&name) && meta.is_file() && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+                names.push(name);
+            }
+        }
+        names.sort_by_key(|name| name.to_ascii_lowercase());
+        names.truncate(MAX_LISTED);
+        Ok(names)
     }
 
     pub fn copy(&self, core: &mut Core, name: &str, destination: &str) -> Result<(), &'static str> {
@@ -351,6 +413,38 @@ mod tests {
         for path in [source, destination] { fs::remove_file(path).unwrap(); }
         fs::remove_dir(files.root()).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn agent_reads_need_the_grant_and_list_only_plain_text_files() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-file-test-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let files = LocalFiles::open(&directory).unwrap();
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        fs::write(files.root().join("b note.txt"), "\u{feff}Deuxième").unwrap();
+        fs::write(files.root().join("A.txt"), "Premier").unwrap();
+        fs::write(files.root().join("image.png"), "x").unwrap();
+        fs::write(files.root().join(".aiwin11-staging.tmp"), "x").unwrap();
+        fs::create_dir(files.root().join("dossier.txt")).unwrap();
+        fs::write(directory.join("outside.txt"), "outside").unwrap();
+        fs::hard_link(directory.join("outside.txt"), files.root().join("lien.txt")).unwrap();
+
+        let denied = Policy::default();
+        assert_eq!(files.agent_list(&mut core, &task, denied), Err("FILE_ACCESS_DENIED"));
+        assert_eq!(files.agent_read(&mut core, &task, denied, "A.txt"), Err("FILE_ACCESS_DENIED"));
+
+        let reads = Policy { allow_agent_file_reads: true, ..Default::default() };
+        // Hard links are listed by name but refused when read, like in the preview.
+        assert_eq!(files.agent_list(&mut core, &task, reads), Ok(vec!["A.txt".into(), "b note.txt".into(), "lien.txt".into()]));
+        assert_eq!(files.agent_read(&mut core, &task, reads, "b note.txt"), Ok("Deuxième".into()));
+        assert_eq!(files.agent_read(&mut core, &task, reads, "lien.txt"), Err("FILE_OUTSIDE_SCOPE"));
+        assert_eq!(files.agent_read(&mut core, &task, reads, "../outside.txt"), Err("INVALID_FILE_NAME"));
+        let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert_eq!(&kinds[..4], ["file.preview.failed", "policy.allowed", "file.preview.failed", "policy.allowed"]);
+        assert!(kinds.contains(&"file.list.completed".to_owned()));
+        assert_eq!(kinds.iter().filter(|kind| *kind == "policy.denied").count(), 2);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

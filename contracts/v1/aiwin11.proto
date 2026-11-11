@@ -20,8 +20,11 @@ message Command {
     CopyLocalText copy_local_text = 15;
     MoveLocalText move_local_text = 16;
     DeleteLocalText delete_local_text = 17;
+    ListLocalText list_local_text = 18;
   }
 }
+
+message ListLocalText {}
 
 message InspectForeground {}
 message CaptureForeground {}

@@ -29,6 +29,9 @@ const activityNames: Record<string, string> = {
   "model.cloud.denied": "Requête OpenAI refusée",
   "agent.tool.requested": "Action demandée par l’agent",
   "agent.reply": "Réponse de l’agent",
+  "agent.observation": "Résultat transmis à l’agent",
+  "file.list.completed": "Fichiers listés par l’agent",
+  "file.list.failed": "Liste des fichiers impossible",
   "policy.approval.required": "Approbation demandée",
   "policy.approval.granted": "Action approuvée par toi",
   "policy.approval.declined": "Action refusée par toi",
@@ -74,6 +77,8 @@ const taskErrors: Record<string, string> = {
   APPROVAL_EXPIRED: "La proposition a expiré sans réponse. Rien n’a été exécuté.",
   APPROVAL_NOT_PENDING: "Cette proposition n’est plus en attente.",
   TASK_BUSY: "Une demande est déjà en cours.",
+  AGENT_STEP_LIMIT: "L’agent n’a pas conclu dans le nombre d’étapes autorisé. Reformule ou précise ta demande.",
+  FILE_UNAVAILABLE: "Le dossier de fichiers d’AiWin11 est indisponible.",
   TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
   WINDOW_UNVERIFIED: "Windows a reçu la demande. Aucune nouvelle fenêtre du Bloc-notes n’a pu être confirmée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
@@ -195,6 +200,8 @@ function App() {
         return;
       }
       if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
+      // Text streamed before a tool call is superseded by the next step.
+      if (update.stage === "agent.tool.requested") setDraftReply("");
       setTaskProgress(activityNames[update.stage] ?? "");
       refresh();
     });

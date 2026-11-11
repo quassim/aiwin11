@@ -45,6 +45,21 @@ class AgentProtocolTest(unittest.TestCase):
             },
         )
 
+    def test_file_read_tools_are_registered_with_validated_names(self):
+        for proposal, arguments in [
+            (call("list_text_files", {}), {}),
+            (call("read_text_file", {"name": "Notes 1.TXT"}), {"name": "Notes 1.TXT"}),
+        ]:
+            with self.subTest(proposal=proposal):
+                result = self.invoke({"version": 2, "proposal": {"calls": [proposal]}})
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(json.loads(result.stdout)["arguments"], arguments)
+        for name in ["../x.txt", "C:\\x.txt", "x.txt:stream", "dir/x.txt", "NUL.txt", "COM1.txt",
+                     "x.txt ", "x..txt", "x.exe", "é.txt", "a" * 125 + ".txt", 42, None]:
+            with self.subTest(name=name):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
+        self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_text_files", {"path": "C:\\"})]}})
+
     def test_text_proposal_returns_trimmed_reply(self):
         result = self.invoke({"version": 2, "proposal": {"text": "  Bonjour, été ! \n"}})
         self.assertEqual(result.returncode, 0)
