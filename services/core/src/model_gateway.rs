@@ -73,6 +73,31 @@ Ne remplace jamais un fichier existant. L’utilisateur doit l’approuver.",
                 "additionalProperties": false
             }
         }));
+        functions.push(json!({
+            "name": "move_text_file",
+            "description": "Renomme un fichier .txt du dossier d’AiWin11. Ne remplace jamais un fichier existant. \
+Selon le profil de sécurité, l’utilisateur doit l’approuver.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Nom exact du fichier à renommer" },
+                    "destination": { "type": "string", "description": "Nouveau nom, se terminant par .txt" }
+                },
+                "required": ["source", "destination"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
+            "name": "trash_text_file",
+            "description": "Place un fichier .txt du dossier d’AiWin11 dans la corbeille d’AiWin11 (récupérable, \
+pas de suppression définitive). L’utilisateur doit toujours l’approuver.",
+            "parameters": {
+                "type": "object",
+                "properties": { "name": { "type": "string", "description": "Nom exact du fichier" } },
+                "required": ["name"],
+                "additionalProperties": false
+            }
+        }));
     }
     if include_windows {
         functions.push(json!({
@@ -618,7 +643,8 @@ mod tests {
         assert_eq!(names(tool_catalog(true, false, false)), ["launch_application"]);
         assert_eq!(
             names(tool_catalog(false, true, true)),
-            ["launch_application", "list_text_files", "read_text_file", "copy_text_file", "inspect_window"]
+            ["launch_application", "list_text_files", "read_text_file", "copy_text_file", "move_text_file",
+             "trash_text_file", "inspect_window"]
         );
         assert_eq!(names(tool_catalog(false, false, true)), ["launch_application", "inspect_window"]);
         let catalog = tool_catalog(true, false, false);

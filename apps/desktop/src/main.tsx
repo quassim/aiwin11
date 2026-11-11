@@ -24,7 +24,11 @@ const statusNames: Record<ActionStatus, string> = {
 };
 type ApprovalAction =
   | { kind: "launch"; application: "notepad" }
+  | { kind: "listFiles" }
+  | { kind: "readFile"; name: string }
   | { kind: "copyFile"; source: string; destination: string; characters: number }
+  | { kind: "moveFile"; source: string; destination: string; characters: number }
+  | { kind: "trashFile"; name: string; characters: number }
   | { kind: "inspectWindow"; application: string; title: string };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
@@ -39,6 +43,26 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "listFiles") {
+    return { title: "L’agent demande à lister tes fichiers", detail: "Action : lister les fichiers .txt du dossier de Fichiers." };
+  }
+  if (action.kind === "readFile") {
+    return { title: "L’agent demande à lire un fichier", detail: `Action : lire « ${action.name} » dans le dossier de Fichiers.` };
+  }
+  if (action.kind === "moveFile") {
+    return {
+      title: "L’agent propose de renommer un fichier",
+      detail: `Action : renommer « ${action.source} » (${action.characters} caractères) en « ${action.destination} », `
+        + "dans le dossier de Fichiers. Aucun fichier existant ne sera remplacé.",
+    };
+  }
+  if (action.kind === "trashFile") {
+    return {
+      title: "L’agent propose de mettre un fichier à la corbeille",
+      detail: `Action : déplacer « ${action.name} » (${action.characters} caractères) dans la corbeille d’AiWin11. `
+        + "Le fichier n’est pas supprimé : il reste récupérable dans le dossier trash d’AiWin11.",
     };
   }
   if (action.kind === "inspectWindow") {
@@ -102,6 +126,10 @@ const activityNames: Record<string, string> = {
   "file.preview.failed": "Aperçu de fichier indisponible",
   "file.copy.completed": "Fichier copié",
   "file.copy.failed": "Échec de la copie",
+  "file.move.completed": "Fichier renommé",
+  "file.move.failed": "Échec du renommage",
+  "file.trash.completed": "Fichier mis à la corbeille d’AiWin11",
+  "file.trash.failed": "Échec de la mise à la corbeille",
 };
 
 const taskErrors: Record<string, string> = {

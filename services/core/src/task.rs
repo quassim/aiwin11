@@ -90,6 +90,8 @@ pub enum ApprovalAction {
     ReadFile { name: String },
     Launch { application: &'static str },
     CopyFile { source: String, destination: String, characters: usize },
+    MoveFile { source: String, destination: String, characters: usize },
+    TrashFile { name: String, characters: usize },
     InspectWindow { application: String, title: String },
 }
 
@@ -124,6 +126,8 @@ enum PlannedAction {
     /// The host's file store validates the name again before any access.
     ReadFile(String),
     CopyFile { source: String, destination: String },
+    MoveFile { source: String, destination: String },
+    TrashFile(String),
     /// No argument: the host decides which window (the one used before AiWin11).
     InspectWindow,
     Reply(String),
@@ -181,6 +185,12 @@ impl<F: Fn(TaskUpdate)> Run<'_, F> {
     fn report(&mut self, action: AgentAction, summary: &str, status: ActionStatus, code: Option<&'static str>) {
         self.actions.push(ActionReport { action, summary: summary.to_owned(), status, code });
     }
+}
+
+#[derive(Clone, Copy)]
+enum Transfer {
+    Copy,
+    Move,
 }
 
 /// Outcome of the policy gate for one action.
@@ -403,8 +413,16 @@ impl TaskSlot {
                 ("read_text_file", json!({ "name": name }), observation)
             }
             PlannedAction::CopyFile { source, destination } => {
-                let observation = self.copy(run, &source, &destination)?;
+                let observation = self.transfer(run, Transfer::Copy, &source, &destination)?;
                 ("copy_text_file", json!({ "source": source, "destination": destination }), observation)
+            }
+            PlannedAction::MoveFile { source, destination } => {
+                let observation = self.transfer(run, Transfer::Move, &source, &destination)?;
+                ("move_text_file", json!({ "source": source, "destination": destination }), observation)
+            }
+            PlannedAction::TrashFile(name) => {
+                let observation = self.trash(run, &name)?;
+                ("trash_text_file", json!({ "name": name }), observation)
             }
             PlannedAction::InspectWindow => ("inspect_window", json!({}), self.inspect_window(run)?),
         })
@@ -577,20 +595,25 @@ impl TaskSlot {
         })
     }
 
-    /// Dry-runs the copy (read-only), then copies if the policy allows it.
-    fn copy<F: Fn(TaskUpdate)>(
-        &self, run: &mut Run<'_, F>, source: &str, destination: &str,
+    /// Dry-runs a copy or rename (read-only), then performs it if the policy allows it.
+    fn transfer<F: Fn(TaskUpdate)>(
+        &self, run: &mut Run<'_, F>, kind: Transfer, source: &str, destination: &str,
     ) -> Result<String, &'static str> {
-        let action = AgentAction::CopyFile;
-        let summary = format!("Copier « {source} » vers « {destination} »");
+        let (action, capability, summary, noun) = match kind {
+            Transfer::Copy => (AgentAction::CopyFile, Capability::FileCopy,
+                format!("Copier « {source} » vers « {destination} »"), "Copie"),
+            Transfer::Move => (AgentAction::MoveFile, Capability::FileMove,
+                format!("Renommer « {source} » en « {destination} »"), "Renommage"),
+        };
         let effect = match self.decide(run, action, &summary)? {
             Err(observation) => return Ok(observation),
             Ok(effect) => effect,
         };
         let Some(files) = run.files else {
             run.report(action, &summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
-            return Ok("Copie impossible : FILE_UNAVAILABLE. Rien n’a été modifié.".into());
+            return Ok(format!("{noun} impossible : FILE_UNAVAILABLE. Rien n’a été modifié."));
         };
+        // The dry run is the same for both: readable source, free destination name.
         let reads = Policy::granting(&[Capability::FileRead]);
         let preview = files.agent_copy_preview(&mut *lock(run.core)?, run.task, reads, source, destination);
         let characters = match preview {
@@ -598,24 +621,71 @@ impl TaskSlot {
             // A failed dry run asks nothing: the model gets the reason and may adapt.
             Err(code) => {
                 run.report(action, &summary, ActionStatus::Failed, Some(code));
-                return Ok(format!("Copie impossible : {code}. Rien n’a été modifié et aucune approbation n’a été demandée."));
+                return Ok(format!(
+                    "{noun} impossible : {code}. Rien n’a été modifié et aucune approbation n’a été demandée."
+                ));
             }
         };
-        let approval = ApprovalAction::CopyFile {
-            source: source.to_owned(), destination: destination.to_owned(), characters,
+        let (source_owned, destination_owned) = (source.to_owned(), destination.to_owned());
+        let approval = match kind {
+            Transfer::Copy => ApprovalAction::CopyFile { source: source_owned, destination: destination_owned, characters },
+            Transfer::Move => ApprovalAction::MoveFile { source: source_owned, destination: destination_owned, characters },
         };
-        let grant = match self.authorize(run, effect, action, &summary, Capability::FileCopy, approval)? {
+        let grant = match self.authorize(run, effect, action, &summary, capability, approval)? {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
         let result = self.dispatching(|| -> Result<(), &'static str> {
-            files.agent_copy(&mut *lock(run.core)?, run.task, grant, source, destination)
+            let mut core = lock(run.core)?;
+            match kind {
+                Transfer::Copy => files.agent_copy(&mut core, run.task, grant, source, destination),
+                Transfer::Move => files.agent_move(&mut core, run.task, grant, source, destination),
+            }
         })?;
         let (status, code) = status_of(&result);
         run.report(action, &summary, status, code);
         Ok(match result {
-            Ok(()) => format!("Copie effectuée : « {source} » vers « {destination} »."),
-            Err(code) => format!("Copie impossible : {code}. Rien n’a été remplacé."),
+            Ok(()) => format!("{noun} effectué : « {source} » → « {destination} »."),
+            Err(code) => format!("{noun} impossible : {code}. Rien n’a été remplacé."),
+        })
+    }
+
+    /// Checks the file (read-only), then moves it to AiWin11's trash if the policy allows it.
+    /// The policy engine always asks the user for this action.
+    fn trash<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, name: &str) -> Result<String, &'static str> {
+        let action = AgentAction::TrashFile;
+        let summary = format!("Mettre « {name} » à la corbeille d’AiWin11");
+        let effect = match self.decide(run, action, &summary)? {
+            Err(observation) => return Ok(observation),
+            Ok(effect) => effect,
+        };
+        let Some(files) = run.files else {
+            run.report(action, &summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
+            return Ok("Mise à la corbeille impossible : FILE_UNAVAILABLE. Rien n’a été modifié.".into());
+        };
+        let reads = Policy::granting(&[Capability::FileRead]);
+        let characters = match files.agent_trash_preview(&mut *lock(run.core)?, run.task, reads, name) {
+            Ok(characters) => characters,
+            Err(code) => {
+                run.report(action, &summary, ActionStatus::Failed, Some(code));
+                return Ok(format!(
+                    "Mise à la corbeille impossible : {code}. Rien n’a été modifié et aucune approbation n’a été demandée."
+                ));
+            }
+        };
+        let approval = ApprovalAction::TrashFile { name: name.to_owned(), characters };
+        let grant = match self.authorize(run, effect, action, &summary, Capability::FileTrash, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = self.dispatching(|| -> Result<PathBuf, &'static str> {
+            files.agent_trash(&mut *lock(run.core)?, run.task, grant, name)
+        })?;
+        let (status, code) = status_of(&result);
+        run.report(action, &summary, status, code);
+        Ok(match result {
+            Ok(_) => format!("« {name} » a été placé dans la corbeille d’AiWin11 (récupérable)."),
+            Err(code) => format!("Mise à la corbeille impossible : {code}. Rien n’a été modifié."),
         })
     }
 
@@ -859,6 +929,12 @@ struct AgentReply {
     text: Option<String>,
 }
 
+/// A non-empty file name argument of at most 128 bytes. The file store checks it fully.
+fn file_argument(arguments: &Map<String, Value>, key: &str) -> Option<String> {
+    arguments.get(key).and_then(Value::as_str)
+        .filter(|name| !name.is_empty() && name.len() <= 128).map(str::to_owned)
+}
+
 /// Validates the agent decision again on the trusted side.
 fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
     let reply: AgentReply = serde_json::from_slice(bytes).map_err(|_| "AGENT_REJECTED")?;
@@ -884,15 +960,21 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         ("tool", Some("inspect_window"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::InspectWindow)
         }
-        ("tool", Some("copy_text_file"), Some(arguments), None) if arguments.len() == 2 => {
-            let name = |key| arguments.get(key).and_then(Value::as_str)
-                .filter(|name| !name.is_empty() && name.len() <= 128).map(str::to_owned);
+        ("tool", Some(tool @ ("copy_text_file" | "move_text_file")), Some(arguments), None) if arguments.len() == 2 => {
+            let name = |key| file_argument(&arguments, key);
             match (name("source"), name("destination")) {
                 (Some(source), Some(destination)) if !source.eq_ignore_ascii_case(&destination) => {
-                    Ok(PlannedAction::CopyFile { source, destination })
+                    Ok(if tool == "copy_text_file" {
+                        PlannedAction::CopyFile { source, destination }
+                    } else {
+                        PlannedAction::MoveFile { source, destination }
+                    })
                 }
                 _ => Err("AGENT_REJECTED"),
             }
+        }
+        ("tool", Some("trash_text_file"), Some(arguments), None) if arguments.len() == 1 => {
+            file_argument(&arguments, "name").map(PlannedAction::TrashFile).ok_or("AGENT_REJECTED")
         }
         ("reply", None, None, Some(text))
             if !text.trim().is_empty() && text.chars().count() <= MAX_REPLY_CHARS =>
@@ -1009,7 +1091,19 @@ mod tests {
             accept(json!({"version":2,"action":"tool","tool":"inspect_window","arguments":{}})),
             Ok(PlannedAction::InspectWindow)
         );
+        assert_eq!(
+            accept(json!({"version":2,"action":"tool","tool":"move_text_file",
+                "arguments":{"source":"a.txt","destination":"b.txt"}})),
+            Ok(PlannedAction::MoveFile { source: "a.txt".into(), destination: "b.txt".into() })
+        );
+        assert_eq!(
+            accept(json!({"version":2,"action":"tool","tool":"trash_text_file","arguments":{"name":"a.txt"}})),
+            Ok(PlannedAction::TrashFile("a.txt".into()))
+        );
         for invalid in [
+            json!({"version":2,"action":"tool","tool":"move_text_file","arguments":{"source":"a.txt","destination":"A.TXT"}}),
+            json!({"version":2,"action":"tool","tool":"trash_text_file","arguments":{"name":"a.txt","permanent":true}}),
+            json!({"version":2,"action":"tool","tool":"delete_text_file","arguments":{"name":"a.txt"}}),
             json!({"version":2,"action":"tool","tool":"inspect_window","arguments":{"window":1}}),
             json!({"version":2,"action":"tool","tool":"copy_text_file","arguments":{"source":"a.txt","destination":"A.TXT"}}),
             json!({"version":2,"action":"tool","tool":"copy_text_file","arguments":{"source":"a.txt"}}),
@@ -1385,6 +1479,29 @@ mod tests {
         for expected in ["file.copy.completed", "policy.approval.granted", "policy.approval.declined"] {
             assert!(kinds.contains(&expected.to_owned()), "{expected} in {kinds:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "requires Ollama and the installed agent companion"]
+    fn renames_then_trashes_with_approval_and_keeps_the_file_recoverable() {
+        let (directory, files) = temp_files(&[("brouillon.txt", "Idées pour le week-end.")]);
+        let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
+        let task = TaskSlot::default();
+        let stages = Mutex::new(Vec::new());
+        let renamed = run_with_files(&core, Some(&files), &task,
+            "Renomme brouillon.txt en idees.txt.", true, &stages).unwrap();
+        let after_rename = (files.root().join("brouillon.txt").exists(), files.root().join("idees.txt").exists());
+        let trashed = run_with_files(&core, Some(&files), &task,
+            "Mets le fichier idees.txt à la corbeille.", true, &stages).unwrap();
+        let in_folder = files.root().join("idees.txt").exists();
+        let recovered: Vec<_> = std::fs::read_dir(files.trash()).unwrap()
+            .filter_map(|entry| std::fs::read_to_string(entry.unwrap().path().join("idees.txt")).ok()).collect();
+        std::fs::remove_dir_all(directory).unwrap();
+        assert_eq!(statuses(&renamed, AgentAction::MoveFile), [ActionStatus::Done], "{renamed:?}");
+        assert_eq!(after_rename, (false, true));
+        assert_eq!(statuses(&trashed, AgentAction::TrashFile), [ActionStatus::Done], "{trashed:?}");
+        assert!(!in_folder);
+        assert_eq!(recovered, ["Idées pour le week-end."], "the trashed file is kept");
     }
 
     #[test]

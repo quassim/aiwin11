@@ -41,8 +41,13 @@ TOOLS = {
     "list_text_files": {},
     "read_text_file": {"name": is_text_file_name},
     "copy_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
+    "move_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
+    "trash_text_file": {"name": is_text_file_name},
     "inspect_window": {},
 }
+
+# Tools whose two file names must differ (ignoring case).
+TRANSFERS = {"copy_text_file", "move_text_file"}
 
 
 def _tool_request(calls):
@@ -64,8 +69,8 @@ def _tool_request(calls):
         valid = rule(value) if callable(rule) else isinstance(value, str) and value in rule
         if not valid:
             raise ValueError("argument outside schema")
-    if name == "copy_text_file" and arguments["source"].lower() == arguments["destination"].lower():
-        raise ValueError("copy onto itself")
+    if name in TRANSFERS and arguments["source"].lower() == arguments["destination"].lower():
+        raise ValueError("transfer onto itself")
     return {"version": VERSION, "action": "tool", "tool": name, "arguments": dict(arguments)}
 
 

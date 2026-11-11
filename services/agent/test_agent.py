@@ -60,6 +60,23 @@ class AgentProtocolTest(unittest.TestCase):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
         self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_text_files", {"path": "C:\\"})]}})
 
+    def test_move_and_trash_tools_validate_names(self):
+        for proposal in [
+            call("move_text_file", {"source": "a.txt", "destination": "b.txt"}),
+            call("trash_text_file", {"name": "a.txt"}),
+        ]:
+            with self.subTest(proposal=proposal):
+                self.assertEqual(self.invoke({"version": 2, "proposal": {"calls": [proposal]}}).returncode, 0)
+        for proposal in [
+            call("move_text_file", {"source": "a.txt", "destination": "A.txt"}),
+            call("move_text_file", {"source": "a.txt", "destination": "..\\b.txt"}),
+            call("trash_text_file", {"name": "*.txt"}),
+            call("trash_text_file", {"name": "a.txt", "permanent": True}),
+            call("delete_text_file", {"name": "a.txt"}),
+        ]:
+            with self.subTest(proposal=proposal):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [proposal]}})
+
     def test_window_inspection_takes_no_target_from_the_model(self):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("inspect_window", {})]}})
         self.assertEqual(result.returncode, 0)

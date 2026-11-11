@@ -8,6 +8,7 @@ use std::{
 
 use aiwin11_contracts::v1::{
     command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, MoveLocalText, PreviewLocalText,
+    TrashLocalText,
 };
 use windows_sys::Wdk::{Foundation::OBJECT_ATTRIBUTES, Storage::FileSystem::{
     NtCreateFile, NtSetInformationFile, FileRenameInformation, FILE_CREATE,
@@ -44,6 +45,8 @@ struct RenameInfo {
 
 pub struct LocalFiles {
     root: PathBuf,
+    /// AiWin11's own trash, next to `files`: trashed files stay recoverable here.
+    trash: PathBuf,
 }
 
 impl LocalFiles {
@@ -55,16 +58,80 @@ impl LocalFiles {
             return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "local drive required"));
         }
         let root = canonical.join("files");
-        match fs::create_dir(&root) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
+        let trash = canonical.join("trash");
+        for directory in [&root, &trash] {
+            match fs::create_dir(directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
         }
-        Ok(Self { root })
+        Ok(Self { root, trash })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn trash(&self) -> &Path {
+        &self.trash
+    }
+
+    /// Agent tool: renames one text file inside the folder, never replacing an existing file.
+    /// The host grants `Capability::FileMove` only when the policy engine or the user allowed it.
+    pub fn agent_move(
+        &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
+    ) -> Result<(), &'static str> {
+        let command = core.agent_command(task, Operation::MoveLocalText(MoveLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.move", || self.move_text(source, destination))
+    }
+
+    /// Agent tool: moves one text file into its own new folder of AiWin11's trash, keeping its
+    /// name. Nothing is deleted. Returns the folder that now holds the file.
+    pub fn agent_trash(
+        &self, core: &mut Core, task: &str, policy: Policy, name: &str,
+    ) -> Result<PathBuf, &'static str> {
+        let command = core.agent_command(task, Operation::TrashLocalText(TrashLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.trash", || self.trash_text(name))
+    }
+
+    /// Read-only check before a trash: the file is readable and in scope.
+    pub fn agent_trash_preview(
+        &self, core: &mut Core, task: &str, policy: Policy, name: &str,
+    ) -> Result<usize, &'static str> {
+        let command = core.agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.preview", || {
+            let text = self.read(self.resolve(name)?, name)?;
+            Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).chars().count())
+        })
+    }
+
+    fn move_text(&self, name: &str, destination: &str) -> Result<(), &'static str> {
+        if !valid_name(destination) {
+            return Err("INVALID_FILE_NAME");
+        }
+        if name.eq_ignore_ascii_case(destination) {
+            return Err("FILE_SAME_NAME");
+        }
+        let root = self.open_root()?;
+        let source = self.open_for_mutation(&root, name)?;
+        rename_in_directory(&source, &root, destination, "FILE_MOVE_FAILED")
+    }
+
+    fn trash_text(&self, name: &str) -> Result<PathBuf, &'static str> {
+        let root = self.open_root()?;
+        let source = self.open_for_mutation(&root, name)?;
+        let folder = self.trash.join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir(&folder).map_err(|_| "FILE_TRASH_FAILED")?;
+        let result = open_checked_directory(&folder)
+            .and_then(|directory| rename_in_directory(&source, &directory, name, "FILE_TRASH_FAILED"));
+        if result.is_err() {
+            let _ = fs::remove_dir(&folder);
+        }
+        result.map(|()| folder)
     }
 
     pub fn preview(&self, core: &mut Core, name: &str) -> Result<String, &'static str> {
@@ -181,17 +248,7 @@ impl LocalFiles {
     }
 
     pub fn move_file(&self, core: &mut Core, name: &str, destination: &str) -> Result<(), &'static str> {
-        self.mutate(core, Operation::MoveLocalText(MoveLocalText {}), "file.move", || {
-            if !valid_name(destination) {
-                return Err("INVALID_FILE_NAME");
-            }
-            if name.eq_ignore_ascii_case(destination) {
-                return Err("FILE_SAME_NAME");
-            }
-            let root = self.open_root()?;
-            let source = self.open_for_mutation(&root, name)?;
-            rename_in_directory(&source, &root, destination, "FILE_MOVE_FAILED")
-        })
+        self.mutate(core, Operation::MoveLocalText(MoveLocalText {}), "file.move", || self.move_text(name, destination))
     }
 
     pub fn delete(&self, core: &mut Core, name: &str, confirmed: bool) -> Result<(), &'static str> {
@@ -240,17 +297,7 @@ impl LocalFiles {
     }
 
     fn open_root(&self) -> Result<File, &'static str> {
-        let root = OpenOptions::new().read(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(&self.root).map_err(|_| "FILE_UNAVAILABLE")?;
-        let attributes = root.metadata().map_err(|_| "FILE_UNAVAILABLE")?.file_attributes();
-        if attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
-            != FILE_ATTRIBUTE_DIRECTORY || final_path(&root)? != self.root
-        {
-            return Err("FILE_OUTSIDE_SCOPE");
-        }
-        Ok(root)
+        open_checked_directory(&self.root)
     }
 
     fn open_for_mutation(&self, root: &File, name: &str) -> Result<File, &'static str> {
@@ -321,6 +368,22 @@ impl LocalFiles {
         }
         String::from_utf8(bytes).map_err(|_| "FILE_NOT_UTF8")
     }
+}
+
+/// Opens a directory by handle and checks that it is a real directory (no junction or link)
+/// whose final path is exactly `path`.
+fn open_checked_directory(path: &Path) -> Result<File, &'static str> {
+    let directory = OpenOptions::new().read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path).map_err(|_| "FILE_UNAVAILABLE")?;
+    let attributes = directory.metadata().map_err(|_| "FILE_UNAVAILABLE")?.file_attributes();
+    if attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
+        != FILE_ATTRIBUTE_DIRECTORY || final_path(&directory)? != path
+    {
+        return Err("FILE_OUTSIDE_SCOPE");
+    }
+    Ok(directory)
 }
 
 fn create_staging(root: &File) -> Result<File, &'static str> {
@@ -446,8 +509,7 @@ mod tests {
         assert_eq!(events[0].kind, "file.copy.failed");
         assert_eq!(events[4].kind, "file.copy.completed");
         for path in [source, destination] { fs::remove_file(path).unwrap(); }
-        fs::remove_dir(files.root()).unwrap();
-        fs::remove_dir(directory).unwrap();
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -514,6 +576,41 @@ mod tests {
     }
 
     #[test]
+    fn agent_move_and_trash_need_their_own_grants_and_never_replace_or_delete() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-file-test-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let files = LocalFiles::open(&directory).unwrap();
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        fs::write(files.root().join("brouillon.txt"), "Texte").unwrap();
+        fs::write(files.root().join("pris.txt"), "garder").unwrap();
+        let reads = Policy::granting(&[Capability::FileRead]);
+        let moves = Policy::granting(&[Capability::FileMove]);
+        let trashes = Policy::granting(&[Capability::FileTrash]);
+
+        assert_eq!(files.agent_move(&mut core, &task, reads, "brouillon.txt", "final.txt"), Err("FILE_ACCESS_DENIED"));
+        assert_eq!(files.agent_move(&mut core, &task, trashes, "brouillon.txt", "final.txt"), Err("FILE_ACCESS_DENIED"));
+        assert_eq!(files.agent_move(&mut core, &task, moves, "brouillon.txt", "pris.txt"), Err("FILE_DESTINATION_EXISTS"));
+        assert_eq!(fs::read_to_string(files.root().join("pris.txt")).unwrap(), "garder");
+        assert_eq!(files.agent_move(&mut core, &task, moves, "brouillon.txt", "../final.txt"), Err("INVALID_FILE_NAME"));
+        assert_eq!(files.agent_move(&mut core, &task, moves, "brouillon.txt", "final.txt"), Ok(()));
+        assert!(!files.root().join("brouillon.txt").exists());
+        assert_eq!(fs::read_to_string(files.root().join("final.txt")).unwrap(), "Texte");
+
+        assert_eq!(files.agent_trash_preview(&mut core, &task, reads, "final.txt"), Ok(5));
+        assert_eq!(files.agent_trash(&mut core, &task, moves, "final.txt"), Err("FILE_ACCESS_DENIED"));
+        let folder = files.agent_trash(&mut core, &task, trashes, "final.txt").unwrap();
+        assert!(!files.root().join("final.txt").exists());
+        assert_eq!(folder.parent(), Some(files.trash()));
+        assert_eq!(fs::read_to_string(folder.join("final.txt")).unwrap(), "Texte", "trashed, not deleted");
+        assert_eq!(files.agent_trash(&mut core, &task, trashes, "absent.txt"), Err("FILE_UNAVAILABLE"));
+        assert_eq!(fs::read_dir(files.trash()).unwrap().count(), 1, "a failed trash leaves no empty folder");
+        let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert!(kinds.contains(&"file.trash.completed".to_owned()) && kinds.contains(&"file.move.completed".to_owned()));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn rejects_hard_links_and_preserves_normal_preview() {
         let directory = std::env::temp_dir().join(format!("aiwin11-file-test-{}", Uuid::new_v4()));
         fs::create_dir(&directory).unwrap();
@@ -531,7 +628,6 @@ mod tests {
         assert_eq!(events[0].kind, "file.preview.failed");
         assert_eq!(events[2].kind, "file.preview.completed");
         for path in [original, alias, outside] { fs::remove_file(path).unwrap(); }
-        fs::remove_dir(files.root()).unwrap();
-        fs::remove_dir(directory).unwrap();
+        fs::remove_dir_all(directory).unwrap();
     }
 }
