@@ -60,6 +60,21 @@ class AgentProtocolTest(unittest.TestCase):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
         self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_text_files", {"path": "C:\\"})]}})
 
+    def test_copy_tool_requires_two_distinct_valid_names(self):
+        copy = call("copy_text_file", {"source": "a.txt", "destination": "b copie.txt"})
+        result = self.invoke({"version": 2, "proposal": {"calls": [copy]}})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["arguments"], {"source": "a.txt", "destination": "b copie.txt"})
+        for arguments in [
+            {"source": "a.txt"},
+            {"source": "a.txt", "destination": "A.TXT"},
+            {"source": "a.txt", "destination": "../b.txt"},
+            {"source": "a.exe", "destination": "b.txt"},
+            {"source": "a.txt", "destination": "b.txt", "overwrite": True},
+        ]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("copy_text_file", arguments)]}})
+
     def test_text_proposal_returns_trimmed_reply(self):
         result = self.invoke({"version": 2, "proposal": {"text": "  Bonjour, été ! \n"}})
         self.assertEqual(result.returncode, 0)

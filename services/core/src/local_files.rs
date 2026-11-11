@@ -102,6 +102,39 @@ impl LocalFiles {
         })
     }
 
+    /// Agent tool, read-only dry run of a copy: reads the source and checks that the
+    /// destination name is free. Returns the source length in characters for the approval.
+    pub fn agent_copy_preview(
+        &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
+    ) -> Result<usize, &'static str> {
+        let command = core.agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.preview", || {
+            if !valid_name(destination) {
+                return Err("INVALID_FILE_NAME");
+            }
+            if source.eq_ignore_ascii_case(destination) {
+                return Err("FILE_SAME_NAME");
+            }
+            let text = self.read(self.resolve(source)?, source)?;
+            // Advisory only: the copy itself never replaces an existing file.
+            if fs::symlink_metadata(self.root.join(destination)).is_ok() {
+                return Err("FILE_DESTINATION_EXISTS");
+            }
+            Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).chars().count())
+        })
+    }
+
+    /// Agent tool: copies one text file inside the folder. The host passes a policy with
+    /// `allow_agent_file_copy` only after the user approved this exact copy.
+    pub fn agent_copy(
+        &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
+    ) -> Result<(), &'static str> {
+        let command = core.agent_command(task, Operation::CopyLocalText(CopyLocalText {}))
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.copy", || self.copy_text(source, destination))
+    }
+
     fn observe<T>(
         &self, core: &mut Core, command: &aiwin11_contracts::v1::Command, policy: Policy, event: &str,
         execute: impl FnOnce() -> Result<T, &'static str>,
@@ -444,6 +477,37 @@ mod tests {
         assert_eq!(&kinds[..4], ["file.preview.failed", "policy.allowed", "file.preview.failed", "policy.allowed"]);
         assert!(kinds.contains(&"file.list.completed".to_owned()));
         assert_eq!(kinds.iter().filter(|kind| *kind == "policy.denied").count(), 2);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn agent_copy_is_previewed_read_only_and_needs_its_own_grant() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-file-test-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let files = LocalFiles::open(&directory).unwrap();
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let original = "\u{feff}Données\r\n".as_bytes();
+        fs::write(files.root().join("source.txt"), original).unwrap();
+        fs::write(files.root().join("pris.txt"), "déjà là").unwrap();
+        let reads = Policy { allow_agent_file_reads: true, ..Default::default() };
+        let copy = Policy { allow_agent_file_copy: true, ..Default::default() };
+
+        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "copie.txt"), Ok(9));
+        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "PRIS.txt"), Err("FILE_DESTINATION_EXISTS"));
+        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "SOURCE.TXT"), Err("FILE_SAME_NAME"));
+        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "absent.txt", "copie.txt"), Err("FILE_UNAVAILABLE"));
+        assert_eq!(files.agent_copy_preview(&mut core, &task, Policy::default(), "source.txt", "copie.txt"), Err("FILE_ACCESS_DENIED"));
+        assert!(!files.root().join("copie.txt").exists(), "the preview writes nothing");
+
+        assert_eq!(files.agent_copy(&mut core, &task, reads, "source.txt", "copie.txt"), Err("FILE_ACCESS_DENIED"));
+        assert!(!files.root().join("copie.txt").exists());
+        assert_eq!(files.agent_copy(&mut core, &task, copy, "source.txt", "copie.txt"), Ok(()));
+        assert_eq!(fs::read(files.root().join("copie.txt")).unwrap(), original);
+        assert_eq!(files.agent_copy(&mut core, &task, copy, "source.txt", "pris.txt"), Err("FILE_DESTINATION_EXISTS"));
+        assert_eq!(fs::read_to_string(files.root().join("pris.txt")).unwrap(), "déjà là");
+        let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert_eq!(&kinds[..4], ["file.copy.failed", "policy.allowed", "file.copy.completed", "policy.allowed"]);
         fs::remove_dir_all(directory).unwrap();
     }
 

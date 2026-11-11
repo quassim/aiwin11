@@ -11,13 +11,32 @@ type Activity = { sequence: number; kind: string; timestamp: string };
 type Snapshot = { sessionId: string; events: Activity[] };
 type TaskOutcome =
   | { kind: "launched"; application: "notepad"; processId: number }
+  | { kind: "copied"; source: string; destination: string }
   | { kind: "reply"; text: string };
-type PendingApproval = { approvalId: string; tool: "launch_application"; application: "notepad"; expiresInMs: number };
+type ApprovalAction =
+  | { kind: "launch"; application: "notepad" }
+  | { kind: "copyFile"; source: string; destination: string; characters: number };
+type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   | { type: "stage"; stage: string }
   | { type: "delta"; text: string }
   | ({ type: "approvalRequired" } & PendingApproval);
-const applicationNames: Record<PendingApproval["application"], string> = { notepad: "le Bloc-notes" };
+const applicationNames: Record<"notepad", string> = { notepad: "le Bloc-notes" };
+
+function describeApproval(action: ApprovalAction): { title: string; detail: string } {
+  if (action.kind === "launch") {
+    const name = applicationNames[action.application];
+    return {
+      title: `L’agent propose d’ouvrir ${name}`,
+      detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  return {
+    title: "L’agent propose de copier un fichier",
+    detail: `Action : copier « ${action.source} » (${action.characters} caractères) vers le nouveau fichier `
+      + `« ${action.destination} », dans le dossier de Fichiers. Aucun fichier existant ne sera remplacé.`,
+  };
+}
 const MAX_PROMPT_CHARS = 2000;
 
 const pages: Page[] = ["Accueil", "Modèles", "Inspecteur", "Fichiers", "Activité"];
@@ -78,7 +97,15 @@ const taskErrors: Record<string, string> = {
   APPROVAL_NOT_PENDING: "Cette proposition n’est plus en attente.",
   TASK_BUSY: "Une demande est déjà en cours.",
   AGENT_STEP_LIMIT: "L’agent n’a pas conclu dans le nombre d’étapes autorisé. Reformule ou précise ta demande.",
-  FILE_UNAVAILABLE: "Le dossier de fichiers d’AiWin11 est indisponible.",
+  FILE_UNAVAILABLE: "Le fichier ou le dossier de fichiers d’AiWin11 est indisponible.",
+  FILE_DESTINATION_EXISTS: "Un fichier porte déjà ce nom. Rien n’a été remplacé.",
+  FILE_COPY_FAILED: "La copie a échoué. Aucun fichier partiel n’a été conservé.",
+  FILE_COPY_CLEANUP_FAILED: "La copie a échoué et un fichier temporaire n’a pas pu être supprimé.",
+  FILE_OUTSIDE_SCOPE: "Le fichier se trouve hors du dossier autorisé ou n’est pas un fichier simple.",
+  FILE_TOO_LARGE: "Le fichier dépasse 64 Kio.",
+  FILE_NOT_UTF8: "Le fichier n’est pas un texte UTF-8.",
+  INVALID_FILE_NAME: "Le nom de fichier n’est pas valide.",
+  FILE_AUDIT_UNAVAILABLE: "Le journal local est indisponible ; l’opération n’a pas été effectuée ou n’a pas pu être journalisée.",
   TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
   WINDOW_UNVERIFIED: "Windows a reçu la demande. Aucune nouvelle fenêtre du Bloc-notes n’a pu être confirmée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
@@ -213,6 +240,8 @@ function App() {
       if (outcome.kind === "reply") {
         setAgentReply(outcome.text);
         setTaskStatus("");
+      } else if (outcome.kind === "copied") {
+        setTaskStatus(`« ${outcome.source} » a été copié vers « ${outcome.destination} ».`);
       } else {
         setTaskStatus("Le Bloc-notes est ouvert. Une nouvelle fenêtre a été vérifiée.");
       }
@@ -270,9 +299,9 @@ function App() {
             {pendingApproval && (
               <div className="approval-request" role="group" aria-labelledby="approval-heading"
                 aria-describedby="approval-detail">
-                <h3 id="approval-heading">L’agent propose d’ouvrir {applicationNames[pendingApproval.application]}</h3>
+                <h3 id="approval-heading">{describeApproval(pendingApproval.action).title}</h3>
                 <p id="approval-detail">
-                  Action : lancer une nouvelle fenêtre de {applicationNames[pendingApproval.application]}, sans argument.
+                  {describeApproval(pendingApproval.action).detail}{" "}
                   Ton accord vaut pour cette action uniquement. Sans réponse, la proposition expire
                   dans {Math.round(pendingApproval.expiresInMs / 1000)} secondes.
                 </p>

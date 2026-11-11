@@ -58,6 +58,20 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool) -> Value {
                 "additionalProperties": false
             }
         }));
+        functions.push(json!({
+            "name": "copy_text_file",
+            "description": "Copie un fichier .txt du dossier d’AiWin11 vers un nouveau nom dans le même dossier. \
+Ne remplace jamais un fichier existant. L’utilisateur doit l’approuver.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Nom exact du fichier à copier" },
+                    "destination": { "type": "string", "description": "Nouveau nom, se terminant par .txt" }
+                },
+                "required": ["source", "destination"],
+                "additionalProperties": false
+            }
+        }));
     }
     Value::Array(functions.into_iter().map(|mut function| {
         if strict {
@@ -593,7 +607,10 @@ mod tests {
                 .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned()).collect()
         };
         assert_eq!(names(tool_catalog(true, false)), ["launch_application"]);
-        assert_eq!(names(tool_catalog(false, true)), ["launch_application", "list_text_files", "read_text_file"]);
+        assert_eq!(
+            names(tool_catalog(false, true)),
+            ["launch_application", "list_text_files", "read_text_file", "copy_text_file"]
+        );
         let catalog = tool_catalog(true, false);
         assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));
         assert_eq!(catalog[0]["function"]["strict"], true);

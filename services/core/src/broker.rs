@@ -23,6 +23,9 @@ pub struct Policy {
     /// Lets the agent list and read text files in the dedicated local folder.
     /// The host grants it only for tasks served by a local model.
     pub allow_agent_file_reads: bool,
+    /// Lets the agent copy one text file inside the dedicated folder. The host grants it
+    /// only after the user approved that exact copy.
+    pub allow_agent_file_copy: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -85,7 +88,11 @@ impl Policy {
             {
                 Ok("list_local_text")
             }
-            Some(Operation::CopyLocalText(_)) if peer == Peer::DesktopInspector => Ok("copy_local_text"),
+            Some(Operation::CopyLocalText(_))
+                if peer == Peer::DesktopInspector || (peer == Peer::Agent && self.allow_agent_file_copy) =>
+            {
+                Ok("copy_local_text")
+            }
             Some(Operation::MoveLocalText(_)) if peer == Peer::DesktopInspector => Ok("move_local_text"),
             Some(Operation::DeleteLocalText(input)) if peer == Peer::DesktopInspector => {
                 if input.confirmed { Ok("delete_local_text") } else { Err("confirmation_required") }
@@ -320,6 +327,33 @@ mod tests {
             core.authorize_dispatch(reads_only, Peer::Other, &command),
             Err(ExecutionError::Denied("invalid_scope"))
         );
+    }
+
+    #[test]
+    fn agent_copy_grant_covers_copy_only() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let copy_only = Policy { allow_agent_file_copy: true, ..Default::default() };
+        let mut command = request(&core);
+        command.operation = Some(Operation::CopyLocalText(Default::default()));
+        assert_eq!(
+            core.authorize_dispatch(Policy { allow_agent_file_reads: true, ..Default::default() }, Peer::Agent, &command),
+            Err(ExecutionError::Denied("default_deny")),
+            "reading does not imply copying"
+        );
+        command.idempotency_key = Uuid::new_v4().to_string();
+        assert!(core.authorize_dispatch(copy_only, Peer::Agent, &command).is_ok());
+        for other in [
+            Operation::MoveLocalText(Default::default()),
+            Operation::DeleteLocalText(aiwin11_contracts::v1::DeleteLocalText { confirmed: true }),
+            Operation::PreviewLocalText(Default::default()),
+        ] {
+            let mut command = request(&core);
+            command.operation = Some(other);
+            assert_eq!(
+                core.authorize_dispatch(copy_only, Peer::Agent, &command),
+                Err(ExecutionError::Denied("default_deny"))
+            );
+        }
     }
 
     #[test]

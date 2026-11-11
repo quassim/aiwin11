@@ -123,6 +123,15 @@ File tools cover the dedicated `files` folder under the app's local data directo
 - **Untrusted data.** Observations reach the model framed as untrusted data (`<<<DEBUT … FIN>>>`), with at most 16 000 characters per file. Tool failures return only a stable error code. Instructions inside a file cannot do more than the user's own request: any side effect still requires the user's approval and the broker.
 - **Context.** Local requests use `num_ctx` 16384 and `num_predict` 1024 so that observations fit.
 
+### Agent file copy
+
+`copy_text_file(source, destination)` is offered with the file tools (local models only). Both names follow the file rules and must differ, ignoring case.
+
+1. **Dry run.** Under the read grant, the host reads the source and checks that no entry named `destination` exists (`file.preview.*` audit). If that fails (`FILE_UNAVAILABLE`, `FILE_DESTINATION_EXISTS`, `FILE_SAME_NAME`…), no approval is requested: the failure code goes back to the model as an observation and the loop continues.
+2. **Approval.** `approvalRequired.action` is `{ "kind": "copyFile", "source", "destination", "characters" }`, shown to the user as is. Launch approvals use `{ "kind": "launch", "application": "notepad" }`.
+3. **Broker.** The host submits a v1 `CopyLocalText` command under the agent identity with `Policy.allow_agent_file_copy` set only if the user approved. That grant covers copy only. A refusal is audited as `policy.denied` and ends with `ACTION_DECLINED` or `APPROVAL_EXPIRED`.
+4. **Copy.** The existing copy runs: staging file, flush, same-folder rename with replacement disabled, cleanup on failure. The task ends with `TaskOutcome { "kind": "copied", "source", "destination" }` or the file error code; the model does not narrate the result.
+
 ## Streaming and progress (AW-011)
 
 Both providers are called with `stream: true`. The gateway folds Ollama's NDJSON chunks or OpenAI's SSE `data:` events into the same proposal as above, with the same bounds (2 MiB body, 4000 reply characters, one tool call). Every Ollama chunk is checked for remote metadata. Tool-call fragments are assembled silently and never forwarded.

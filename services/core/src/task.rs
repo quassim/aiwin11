@@ -48,7 +48,16 @@ pub struct TaskRequest {
 pub enum TaskOutcome {
     #[serde(rename_all = "camelCase")]
     Launched { application: &'static str, process_id: u32 },
+    Copied { source: String, destination: String },
     Reply { text: String },
+}
+
+/// The exact action an approval covers, as shown to the user.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ApprovalAction {
+    Launch { application: &'static str },
+    CopyFile { source: String, destination: String, characters: usize },
 }
 
 /// Live progress sent to the requesting window while a task runs.
@@ -63,8 +72,7 @@ pub enum TaskUpdate {
     #[serde(rename_all = "camelCase")]
     ApprovalRequired {
         approval_id: String,
-        tool: &'static str,
-        application: &'static str,
+        action: ApprovalAction,
         expires_in_ms: u64,
     },
 }
@@ -82,6 +90,7 @@ enum PlannedAction {
     ListFiles,
     /// The host's file store validates the name again before any access.
     ReadFile(String),
+    CopyFile { source: String, destination: String },
     Reply(String),
 }
 
@@ -291,8 +300,31 @@ impl TaskSlot {
                     return self.launch(core, task, application, progress);
                 }
                 // Defense in depth: these tools are never offered without `file_tools`.
-                PlannedAction::ListFiles | PlannedAction::ReadFile(_) if !file_tools => {
+                PlannedAction::ListFiles | PlannedAction::ReadFile(_) | PlannedAction::CopyFile { .. }
+                    if !file_tools =>
+                {
                     return Err("AGENT_REJECTED");
+                }
+                PlannedAction::CopyFile { source, destination } => {
+                    record(core, task, "agent.tool.requested")?;
+                    progress(TaskUpdate::stage("agent.tool.requested"));
+                    let files = files.ok_or("FILE_UNAVAILABLE")?;
+                    let reads = Policy { allow_agent_file_reads: true, ..Policy::default() };
+                    let preview = {
+                        let mut guard = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+                        files.agent_copy_preview(&mut guard, task, reads, &source, &destination)
+                    };
+                    match preview {
+                        Ok(characters) => {
+                            return self.copy(core, files, task, source, destination, characters, progress);
+                        }
+                        // A failed dry run asks nothing: the model gets the reason and may adapt.
+                        Err(code) => (
+                            "copy_text_file",
+                            json!({ "source": source, "destination": destination }),
+                            format!("Copie impossible : {code}. Rien n’a été modifié et aucune approbation n’a été demandée."),
+                        ),
+                    }
                 }
                 action => {
                     record(core, task, "agent.tool.requested")?;
@@ -323,26 +355,22 @@ impl TaskSlot {
         Err("AGENT_STEP_LIMIT")
     }
 
-    /// Asks the user to approve the launch, then submits the decision to the broker.
-    fn launch(
+    /// AWAITING_APPROVAL: the user decides on this exact action, now that it is known.
+    fn approve(
         &self,
         core: &Mutex<Core>,
         task: &str,
-        application: Application,
+        action: ApprovalAction,
         progress: &impl Fn(TaskUpdate),
-    ) -> Result<TaskOutcome, &'static str> {
-        record(core, task, "agent.tool.requested")?;
-        progress(TaskUpdate::stage("agent.tool.requested"));
+    ) -> Result<Decision, &'static str> {
         if self.phase.load(Ordering::Acquire) == CANCELLED {
             return Err("TASK_CANCELLED");
         }
-        // AWAITING_APPROVAL: the user decides on this exact action, now that it is known.
         record(core, task, "policy.approval.required")?;
         let decision = self.await_approval(APPROVAL_TIMEOUT, |approval_id| {
             progress(TaskUpdate::ApprovalRequired {
                 approval_id,
-                tool: "launch_application",
-                application: "notepad",
+                action,
                 expires_in_ms: APPROVAL_TIMEOUT.as_millis() as u64,
             });
         })?;
@@ -353,6 +381,50 @@ impl TaskSlot {
         };
         record(core, task, decided)?;
         progress(TaskUpdate::stage(decided));
+        Ok(decision)
+    }
+
+    /// Asks the user to approve this exact copy, then submits the decision to the broker.
+    #[allow(clippy::too_many_arguments)]
+    fn copy(
+        &self,
+        core: &Mutex<Core>,
+        files: &LocalFiles,
+        task: &str,
+        source: String,
+        destination: String,
+        characters: usize,
+        progress: &impl Fn(TaskUpdate),
+    ) -> Result<TaskOutcome, &'static str> {
+        let action = ApprovalAction::CopyFile {
+            source: source.clone(), destination: destination.clone(), characters,
+        };
+        let decision = self.approve(core, task, action, progress)?;
+        self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "TASK_CANCELLED")?;
+        // Every decision goes through the broker, so a refusal is audited as policy.denied.
+        let policy = Policy { allow_agent_file_copy: decision == Decision::Approved, ..Policy::default() };
+        let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+        match (files.agent_copy(&mut core, task, policy, &source, &destination), decision) {
+            (Ok(()), _) => Ok(TaskOutcome::Copied { source, destination }),
+            (Err("FILE_ACCESS_DENIED"), Decision::Declined) => Err("ACTION_DECLINED"),
+            (Err("FILE_ACCESS_DENIED"), Decision::Expired) => Err("APPROVAL_EXPIRED"),
+            (Err("FILE_ACCESS_DENIED"), Decision::Approved) => Err("ACTION_DENIED"),
+            (Err(code), _) => Err(code),
+        }
+    }
+
+    /// Asks the user to approve the launch, then submits the decision to the broker.
+    fn launch(
+        &self,
+        core: &Mutex<Core>,
+        task: &str,
+        application: Application,
+        progress: &impl Fn(TaskUpdate),
+    ) -> Result<TaskOutcome, &'static str> {
+        record(core, task, "agent.tool.requested")?;
+        progress(TaskUpdate::stage("agent.tool.requested"));
+        let decision = self.approve(core, task, ApprovalAction::Launch { application: "notepad" }, progress)?;
         // The command and its deadline are built only after the decision.
         let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
         let deadline_ms = SystemTime::now().duration_since(UNIX_EPOCH)
@@ -480,6 +552,16 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
                 _ => Err("AGENT_REJECTED"),
             }
         }
+        ("tool", Some("copy_text_file"), Some(arguments), None) if arguments.len() == 2 => {
+            let name = |key| arguments.get(key).and_then(Value::as_str)
+                .filter(|name| !name.is_empty() && name.len() <= 128).map(str::to_owned);
+            match (name("source"), name("destination")) {
+                (Some(source), Some(destination)) if !source.eq_ignore_ascii_case(&destination) => {
+                    Ok(PlannedAction::CopyFile { source, destination })
+                }
+                _ => Err("AGENT_REJECTED"),
+            }
+        }
         ("reply", None, None, Some(text))
             if !text.trim().is_empty() && text.chars().count() <= MAX_REPLY_CHARS =>
         {
@@ -586,7 +668,15 @@ mod tests {
             accept(json!({"version":2,"action":"tool","tool":"read_text_file","arguments":{"name":"notes.txt"}})),
             Ok(PlannedAction::ReadFile("notes.txt".into()))
         );
+        assert_eq!(
+            accept(json!({"version":2,"action":"tool","tool":"copy_text_file",
+                "arguments":{"source":"a.txt","destination":"b.txt"}})),
+            Ok(PlannedAction::CopyFile { source: "a.txt".into(), destination: "b.txt".into() })
+        );
         for invalid in [
+            json!({"version":2,"action":"tool","tool":"copy_text_file","arguments":{"source":"a.txt","destination":"A.TXT"}}),
+            json!({"version":2,"action":"tool","tool":"copy_text_file","arguments":{"source":"a.txt"}}),
+            json!({"version":2,"action":"tool","tool":"copy_text_file","arguments":{"source":"a.txt","destination":3}}),
             json!({"version":2,"action":"tool","tool":"list_text_files","arguments":{"path":"C:\\"}}),
             json!({"version":2,"action":"tool","tool":"read_text_file","arguments":{}}),
             json!({"version":2,"action":"tool","tool":"read_text_file","arguments":{"name":""}}),
@@ -710,12 +800,19 @@ mod tests {
     #[test]
     fn approval_requests_serialize_for_the_desktop() {
         let update = TaskUpdate::ApprovalRequired {
-            approval_id: "id".into(), tool: "launch_application", application: "notepad", expires_in_ms: 60_000,
+            approval_id: "id".into(), action: ApprovalAction::Launch { application: "notepad" }, expires_in_ms: 60_000,
         };
         assert_eq!(serde_json::to_value(update).unwrap(), json!({
-            "type":"approvalRequired","approvalId":"id","tool":"launch_application",
-            "application":"notepad","expiresInMs":60000
+            "type":"approvalRequired","approvalId":"id",
+            "action":{"kind":"launch","application":"notepad"},"expiresInMs":60000
         }));
+        let copy = ApprovalAction::CopyFile { source: "a.txt".into(), destination: "b.txt".into(), characters: 12 };
+        assert_eq!(serde_json::to_value(copy).unwrap(),
+            json!({"kind":"copyFile","source":"a.txt","destination":"b.txt","characters":12}));
+        assert_eq!(
+            serde_json::to_value(TaskOutcome::Copied { source: "a.txt".into(), destination: "b.txt".into() }).unwrap(),
+            json!({"kind":"copied","source":"a.txt","destination":"b.txt"})
+        );
     }
 
     fn live_request(prompt: &str) -> TaskRequest {
@@ -820,6 +917,32 @@ mod tests {
         assert!(kinds.contains(&"file.preview.completed".to_owned()), "{kinds:?}");
         assert!(kinds.contains(&"agent.observation".to_owned()));
         assert!(!kinds.iter().any(|kind| kind.starts_with("policy.approval")), "reads need no approval");
+    }
+
+    #[test]
+    #[ignore = "requires Ollama and the installed agent companion"]
+    fn copies_a_file_only_after_approval() {
+        let original = "Liste de courses : pommes, farine.\r\n";
+        let (directory, files) = temp_files(&[("courses.txt", original)]);
+        let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
+        let task = TaskSlot::default();
+        let stages = Mutex::new(Vec::new());
+        let prompt = "Copie le fichier courses.txt vers courses-sauvegarde.txt.";
+        let declined = run_with_files(&core, Some(&files), &task, prompt, false, &stages);
+        let copy = files.root().join("courses-sauvegarde.txt");
+        let created_on_decline = copy.exists();
+        let approved = run_with_files(&core, Some(&files), &task, prompt, true, &stages);
+        let copied = std::fs::read_to_string(&copy).ok();
+        std::fs::remove_dir_all(directory).unwrap();
+        assert_eq!(declined, Err("ACTION_DECLINED"));
+        assert!(!created_on_decline, "nothing is written before approval");
+        assert_eq!(approved, Ok(TaskOutcome::Copied {
+            source: "courses.txt".into(), destination: "courses-sauvegarde.txt".into(),
+        }));
+        assert_eq!(copied.as_deref(), Some(original));
+        let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert_eq!(&kinds[..4], ["task.completed", "file.copy.completed", "policy.allowed", "policy.approval.granted"]);
+        assert!(kinds.contains(&"policy.approval.declined".to_owned()));
     }
 
     #[test]
