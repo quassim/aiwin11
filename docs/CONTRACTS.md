@@ -91,7 +91,18 @@ The host accepts one task at a time. Cancellation wins only before dispatch. A s
 3. The Python child receives `{ "version": 2, "proposal": ... }` (at most 32 KiB) on stdin. It validates the proposal against its tool registry: exactly one call, a registered tool name, exactly the declared arguments, each within its allowed values. It returns `{ "version": 2, "action": "tool", "tool", "arguments" }` or `{ "version": 2, "action": "reply", "text" }` (at most 32 KiB), or exits with code 2. The host drains stdout concurrently and kills the child after four seconds.
 4. The host parses the decision with unknown fields denied and validates it again. A reply ends the task with the `agent.reply` event and no broker call. A tool request is mapped by the host to the Protobuf `LaunchApplication` operation and submitted to the broker under the agent peer identity.
 
-Model output is untrusted data. The registry bounds what the agent may request; the broker still decides what runs. Adding a tool requires a catalog entry, an agent registry entry, a host mapping, a Protobuf operation, a broker rule and bridge support.
+Model output is untrusted data. The registry bounds what the agent may request; the broker still decides what runs.
+
+## Streaming and progress (AW-011)
+
+Both providers are called with `stream: true`. The gateway folds Ollama's NDJSON chunks or OpenAI's SSE `data:` events into the same proposal as above, with the same bounds (2 MiB body, 4000 reply characters, one tool call). Every Ollama chunk is checked for remote metadata. Tool-call fragments are assembled silently and never forwarded.
+
+`run_task`'s `progress` channel carries `TaskUpdate` messages:
+
+- `{ "type": "stage", "stage": "<event kind>" }` after each persisted lifecycle event (`task.created`, `task.planning`, `agent.reply`, `agent.tool.requested`);
+- `{ "type": "delta", "text": "..." }` for each streamed text fragment.
+
+Deltas are unvalidated model output, shown as a draft and never journaled. The window discards the draft when the task ends and displays only the agent-validated reply from `TaskOutcome`. After each chunk the host checks the task phase: a cancellation requested while the model streams stops reading, which closes the provider connection, and the task ends as `TASK_CANCELLED` without dispatch. A provider that sends no chunk at all can still hold the task until its timeout (90 s local, 45 s OpenAI). Adding a tool requires a catalog entry, an agent registry entry, a host mapping, a Protobuf operation, a broker rule and bridge support.
 
 ## Optional OpenAI provider
 

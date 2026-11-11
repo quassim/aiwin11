@@ -12,6 +12,9 @@ type Snapshot = { sessionId: string; events: Activity[] };
 type TaskOutcome =
   | { kind: "launched"; application: "notepad"; processId: number }
   | { kind: "reply"; text: string };
+type TaskUpdate =
+  | { type: "stage"; stage: string }
+  | { type: "delta"; text: string };
 const MAX_PROMPT_CHARS = 2000;
 
 const pages: Page[] = ["Accueil", "Modèles", "Inspecteur", "Fichiers", "Activité"];
@@ -61,7 +64,7 @@ const taskErrors: Record<string, string> = {
   AGENT_REJECTED: "L’agent a rejeté la proposition du modèle : outil inconnu ou arguments invalides.",
   ACTION_DENIED: "L’agent a proposé d’ouvrir le Bloc-notes, mais tu ne l’as pas autorisé pour cette demande.",
   TASK_BUSY: "Une demande est déjà en cours.",
-  TASK_CANCELLED: "Demande annulée avant l’ouverture.",
+  TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
   WINDOW_UNVERIFIED: "Windows a reçu la demande. Aucune nouvelle fenêtre du Bloc-notes n’a pu être confirmée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
   OUTCOME_UNRECORDED: "Le résultat de l’action n’a pas pu être journalisé.",
@@ -89,6 +92,7 @@ function App() {
   const [taskStatus, setTaskStatus] = useState("");
   const [taskProgress, setTaskProgress] = useState("");
   const [agentReply, setAgentReply] = useState("");
+  const [draftReply, setDraftReply] = useState("");
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
   const canSend = !running && !!selectedModel && !!prompt.trim()
     && (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
@@ -153,8 +157,13 @@ function App() {
     setTaskStatus("Demande en cours…");
     setTaskProgress("");
     setAgentReply("");
-    const progress = new Channel<string>((stage) => {
-      setTaskProgress(activityNames[stage] ?? "");
+    setDraftReply("");
+    const progress = new Channel<TaskUpdate>((update) => {
+      if (update.type === "delta") {
+        setDraftReply((current) => current + update.text);
+        return;
+      }
+      setTaskProgress(activityNames[update.stage] ?? "");
       refresh();
     });
     try {
@@ -172,6 +181,8 @@ function App() {
     } catch (failure) {
       setTaskStatus(taskErrors[String(failure)] ?? "Le cœur local n’a pas pu terminer la demande.");
     } finally {
+      // The streamed draft is unvalidated: only the agent-approved reply stays on screen.
+      setDraftReply("");
       setRunning(false);
       refresh();
     }
@@ -211,6 +222,8 @@ function App() {
             </div>
             {lastPrompt && <p className="user-message">{lastPrompt}</p>}
             {agentReply && <p className="agent-message" aria-label="Réponse de l’agent">{agentReply}</p>}
+            {running && draftReply && <p className="agent-message draft" aria-busy="true"
+              aria-label="Réponse en cours de rédaction, non encore validée">{draftReply}</p>}
             {taskStatus && <p role="status">
               {running && taskStatus === "Demande en cours…" && taskProgress ? taskProgress : taskStatus}
             </p>}

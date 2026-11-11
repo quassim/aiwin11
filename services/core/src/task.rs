@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::{
     broker::{ExecutionError, Peer, Policy},
-    model_gateway::{Ollama, Proposal, MAX_REPLY_CHARS},
+    model_gateway::{GatewayError, Ollama, Proposal, MAX_REPLY_CHARS},
     openai, Core,
 };
 
@@ -49,6 +49,22 @@ pub enum TaskOutcome {
     #[serde(rename_all = "camelCase")]
     Launched { application: &'static str, process_id: u32 },
     Reply { text: String },
+}
+
+/// Live progress sent to the requesting window while a task runs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TaskUpdate {
+    /// A persisted lifecycle event (same name as the journal entry).
+    Stage { stage: &'static str },
+    /// Unvalidated model text, for display only. The final reply replaces it.
+    Delta { text: String },
+}
+
+impl TaskUpdate {
+    fn stage(stage: &'static str) -> Self {
+        Self::Stage { stage }
+    }
 }
 
 /// A decision accepted by both the Python agent and the host.
@@ -81,7 +97,7 @@ impl TaskSlot {
         &self,
         core: &Mutex<Core>,
         request: &TaskRequest,
-        progress: impl Fn(&'static str),
+        progress: impl Fn(TaskUpdate),
     ) -> Result<TaskOutcome, &'static str> {
         let prompt = validate_prompt(&request.prompt)?;
         if request.model.is_empty() || request.model.len() > 256 {
@@ -93,7 +109,7 @@ impl TaskSlot {
         let _reset = ResetSlot(self);
         let task = Uuid::new_v4().to_string();
         record(core, &task, "task.created")?;
-        progress("task.created");
+        progress(TaskUpdate::stage("task.created"));
         let outcome = self.plan_and_execute(core, &task, prompt, request, &progress);
         // Arbitrate cancellation even when the provider or agent returns an error.
         let outcome = match self.phase.compare_exchange(
@@ -117,14 +133,24 @@ impl TaskSlot {
         task: &str,
         prompt: &str,
         request: &TaskRequest,
-        progress: &impl Fn(&'static str),
+        progress: &impl Fn(TaskUpdate),
     ) -> Result<TaskOutcome, &'static str> {
         record(core, task, "task.planning")?;
-        progress("task.planning");
+        progress(TaskUpdate::stage("task.planning"));
+        // Forward text as it streams in; stop reading as soon as the task is cancelled.
+        let mut sink = |delta: Option<&str>| {
+            if let Some(text) = delta {
+                progress(TaskUpdate::Delta { text: text.to_owned() });
+            }
+            self.phase.load(Ordering::Acquire) != CANCELLED
+        };
         let proposal = match request.provider {
             Provider::Ollama => Ollama::connect()
-                .and_then(|provider| provider.propose(&request.model, prompt))
-                .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?,
+                .and_then(|provider| provider.propose(&request.model, prompt, &mut sink))
+                .map_err(|error| match error {
+                    GatewayError::Cancelled => "TASK_CANCELLED",
+                    _ => "MODEL_UNAVAILABLE_OR_INVALID",
+                })?,
             Provider::OpenAi => {
                 if !request.cloud_approved {
                     record(core, task, "model.cloud.denied")?;
@@ -134,7 +160,7 @@ impl TaskSlot {
                 if self.phase.load(Ordering::Acquire) == CANCELLED {
                     return Err("TASK_CANCELLED");
                 }
-                openai::propose(&request.model, prompt)?
+                openai::propose(&request.model, prompt, &mut sink)?
             }
         };
         if self.phase.load(Ordering::Acquire) == CANCELLED {
@@ -144,13 +170,13 @@ impl TaskSlot {
             PlannedAction::Reply(text) => {
                 // The reply text stays out of the journal, like prompts.
                 record(core, task, "agent.reply")?;
-                progress("agent.reply");
+                progress(TaskUpdate::stage("agent.reply"));
                 return Ok(TaskOutcome::Reply { text });
             }
             PlannedAction::Launch(application) => application,
         };
         record(core, task, "agent.tool.requested")?;
-        progress("agent.tool.requested");
+        progress(TaskUpdate::stage("agent.tool.requested"));
         let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
         let deadline_ms = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(|_| "CLOCK_UNAVAILABLE")?.as_millis() as i64 + 8_000;
@@ -352,6 +378,14 @@ mod tests {
             serde_json::to_value(TaskOutcome::Reply { text: "ok".into() }).unwrap(),
             json!({"kind":"reply","text":"ok"})
         );
+        assert_eq!(
+            serde_json::to_value(TaskUpdate::stage("task.planning")).unwrap(),
+            json!({"type":"stage","stage":"task.planning"})
+        );
+        assert_eq!(
+            serde_json::to_value(TaskUpdate::Delta { text: "Bon".into() }).unwrap(),
+            json!({"type":"delta","text":"Bon"})
+        );
     }
 
     #[test]
@@ -393,8 +427,10 @@ mod tests {
         assert!(!denied.iter().any(|event| event.kind.starts_with("tool.execution.")));
 
         let stages = Mutex::new(Vec::new());
-        let outcome = task.run(&core, &live_request("Peux-tu ouvrir le Bloc-notes ?", true), |stage| {
-            stages.lock().unwrap().push(stage)
+        let outcome = task.run(&core, &live_request("Peux-tu ouvrir le Bloc-notes ?", true), |update| {
+            if let TaskUpdate::Stage { stage } = update {
+                stages.lock().unwrap().push(stage);
+            }
         }).unwrap();
         assert!(matches!(outcome, TaskOutcome::Launched { application: "notepad", process_id } if process_id > 0));
         assert_eq!(
@@ -412,8 +448,14 @@ mod tests {
     fn answers_without_side_effects_when_no_tool_applies() {
         let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
         let task = TaskSlot::default();
-        let outcome = task.run(&core, &live_request("Combien font deux plus trois ?", true), |_| {}).unwrap();
-        assert!(matches!(outcome, TaskOutcome::Reply { ref text } if !text.is_empty()));
+        let streamed = Mutex::new(String::new());
+        let outcome = task.run(&core, &live_request("Combien font deux plus trois ?", true), |update| {
+            if let TaskUpdate::Delta { text } = update {
+                streamed.lock().unwrap().push_str(&text);
+            }
+        }).unwrap();
+        let TaskOutcome::Reply { text } = outcome else { panic!("expected a reply") };
+        assert_eq!(streamed.lock().unwrap().trim(), text, "the final reply is the streamed text, trimmed");
         let activity = core.lock().unwrap().activity().unwrap();
         assert_eq!(activity[0].kind, "task.completed");
         assert_eq!(activity[1].kind, "agent.reply");

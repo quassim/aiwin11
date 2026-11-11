@@ -6,7 +6,7 @@ use aiwin11_core::{
     local_files::LocalFiles,
     model_gateway::{LocalModelProvider, Ollama},
     openai,
-    task::{TaskOutcome, TaskRequest, TaskSlot},
+    task::{TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
     Core,
 };
@@ -145,12 +145,12 @@ async fn analyze_capture(
 async fn run_task(
     state: State<'_, Arc<AppState>>,
     request: TaskRequest,
-    progress: Channel<&'static str>,
+    progress: Channel<TaskUpdate>,
 ) -> Result<TaskOutcome, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        state.task.run(&state.core, &request, |stage| {
-            let _ = progress.send(stage);
+        state.task.run(&state.core, &request, |update| {
+            let _ = progress.send(update);
         })
     })
         .await.map_err(|_| "CORE_UNAVAILABLE")?

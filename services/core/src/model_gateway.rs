@@ -1,4 +1,7 @@
-use std::{io::Read, time::Duration};
+use std::{
+    io::{BufRead, BufReader, Read},
+    time::Duration,
+};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::{blocking::Client, redirect::Policy};
@@ -80,6 +83,45 @@ pub enum GatewayError {
     NonLocalModel,
     CloudNotDisabled,
     VisionUnsupported,
+    Cancelled,
+}
+
+/// Receives each streamed chunk's text delta, if any, as it arrives.
+/// Returning `false` stops reading, which closes the provider connection.
+pub(crate) type StreamSink<'a> = dyn FnMut(Option<&str>) -> bool + 'a;
+
+/// Accumulates streamed text within the reply bound.
+#[derive(Default)]
+pub(crate) struct StreamedText {
+    text: String,
+    chars: usize,
+}
+
+impl StreamedText {
+    /// Appends a delta; fails once the reply exceeds `MAX_REPLY_CHARS`.
+    pub(crate) fn push(&mut self, delta: &str) -> Result<(), ()> {
+        self.chars += delta.chars().count();
+        if self.chars > MAX_REPLY_CHARS {
+            return Err(());
+        }
+        self.text.push_str(delta);
+        Ok(())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.text
+    }
+}
+
+/// Opens a streamed response body, bounded like non-streamed replies.
+pub(crate) fn open_stream(
+    request: reqwest::blocking::RequestBuilder,
+) -> Result<impl BufRead, GatewayError> {
+    let response = request.send().map_err(|_| GatewayError::Unavailable)?;
+    if !response.status().is_success() {
+        return Err(GatewayError::Unavailable);
+    }
+    Ok(BufReader::new(response.take(MAX_CATALOG_BYTES as u64)))
 }
 
 impl GatewayError {
@@ -238,18 +280,20 @@ impl Ollama {
         Ok(Self { client })
     }
 
-    /// Sends the user's request with the tool catalog to a local model.
-    pub(crate) fn propose(&self, model: &str, prompt: &str) -> Result<Proposal, GatewayError> {
+    /// Streams the user's request with the tool catalog to a local model.
+    pub(crate) fn propose(
+        &self, model: &str, prompt: &str, sink: &mut StreamSink<'_>,
+    ) -> Result<Proposal, GatewayError> {
         if !self.describe(model)?.tool_calling_advertised {
             return Err(GatewayError::InvalidResponse);
         }
-        let reply: Value = Self::receive(
+        let stream = open_stream(
             self.client
                 .post(format!("{OLLAMA}/api/chat"))
                 .timeout(LOCAL_INFERENCE_TIMEOUT)
                 .json(&json!({
                     "model": model,
-                    "stream": false,
+                    "stream": true,
                     "think": false,
                     "options": { "temperature": 0, "num_predict": 512 },
                     "messages": [
@@ -259,7 +303,7 @@ impl Ollama {
                     "tools": tool_catalog(false)
                 })),
         )?;
-        ollama_proposal(model, &reply)
+        fold_ollama_stream(model, stream, sink)
     }
 
     pub(crate) fn receive<T: DeserializeOwned>(
@@ -326,21 +370,48 @@ impl LocalModelProvider for Ollama {
     }
 }
 
-fn ollama_proposal(model: &str, reply: &Value) -> Result<Proposal, GatewayError> {
-    let location: Location = serde_json::from_value(reply.clone())
-        .map_err(|_| GatewayError::InvalidResponse)?;
-    if !location.is_local(model) {
-        return Err(GatewayError::NonLocalModel);
+/// Folds Ollama's NDJSON chat stream into one proposal. Every chunk must come from
+/// the local model; tool calls are collected silently and only text reaches the sink.
+fn fold_ollama_stream(
+    model: &str, reader: impl BufRead, sink: &mut StreamSink<'_>,
+) -> Result<Proposal, GatewayError> {
+    let invalid = GatewayError::InvalidResponse;
+    let mut text = StreamedText::default();
+    let mut calls = Vec::new();
+    for line in reader.lines() {
+        let line = line.map_err(|_| GatewayError::InvalidResponse)?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let chunk: Value = serde_json::from_str(&line).map_err(|_| GatewayError::InvalidResponse)?;
+        if chunk.get("error").is_some() {
+            return Err(GatewayError::Unavailable);
+        }
+        let location: Location = serde_json::from_value(chunk.clone())
+            .map_err(|_| GatewayError::InvalidResponse)?;
+        if !location.is_local(model) {
+            return Err(GatewayError::NonLocalModel);
+        }
+        if let Some(message) = chunk.get("message") {
+            if message.get("role").and_then(Value::as_str) != Some("assistant") {
+                return Err(invalid);
+            }
+            if let Some(list) = message.get("tool_calls").and_then(Value::as_array) {
+                calls.extend(list.iter().cloned());
+            }
+        }
+        let delta = chunk.pointer("/message/content").and_then(Value::as_str).filter(|delta| !delta.is_empty());
+        if let Some(delta) = delta {
+            text.push(delta).map_err(|()| GatewayError::InvalidResponse)?;
+        }
+        if !sink(delta) {
+            return Err(GatewayError::Cancelled);
+        }
+        if chunk.get("done") == Some(&Value::Bool(true)) {
+            return Proposal::from_parts(Some(&Value::Array(calls)), Some(text.as_str())).ok_or(invalid);
+        }
     }
-    if reply.get("done") != Some(&Value::Bool(true))
-        || reply.pointer("/message/role").and_then(Value::as_str) != Some("assistant")
-    {
-        return Err(GatewayError::InvalidResponse);
-    }
-    Proposal::from_parts(
-        reply.pointer("/message/tool_calls"),
-        reply.pointer("/message/content").and_then(Value::as_str),
-    ).ok_or(GatewayError::InvalidResponse)
+    Err(invalid)
 }
 
 fn verify_probe(model: &str, reply: ProbeReply) -> Result<bool, GatewayError> {
@@ -427,32 +498,69 @@ mod tests {
         assert!(!model.vision_advertised);
     }
 
-    #[test]
-    fn ollama_proposals_prefer_tool_calls_and_bound_text() {
-        let call = json!([{ "function": { "name": "launch_application", "arguments": { "application": "notepad" } } }]);
-        let reply = |calls: Value, content: Value| json!({
-            "done": true,
-            "message": { "role": "assistant", "tool_calls": calls, "content": content }
+    fn ndjson(chunks: &[Value]) -> std::io::Cursor<String> {
+        std::io::Cursor::new(chunks.iter().map(|chunk| format!("{chunk}\n")).collect())
+    }
+
+    fn text_chunk(content: &str, done: bool) -> Value {
+        json!({ "done": done, "message": { "role": "assistant", "content": content } })
+    }
+
+    fn fold(chunks: &[Value]) -> (Result<Proposal, GatewayError>, Vec<String>) {
+        let mut deltas = Vec::new();
+        let result = fold_ollama_stream("local:latest", ndjson(chunks), &mut |delta: Option<&str>| {
+            deltas.extend(delta.map(str::to_owned));
+            true
         });
-        assert_eq!(
-            ollama_proposal("local:latest", &reply(call.clone(), json!(""))),
-            Ok(Proposal::Calls(call.clone()))
-        );
-        assert_eq!(
-            ollama_proposal("local:latest", &reply(json!([]), json!("  Bonjour  "))),
-            Ok(Proposal::Text("Bonjour".into()))
-        );
-        for invalid in [
-            reply(json!([]), json!("   ")),
-            reply(json!(null), json!("é".repeat(MAX_REPLY_CHARS + 1))),
-            json!({ "done": false, "message": { "role": "assistant", "content": "x" } }),
-            json!({ "done": true, "message": { "role": "user", "content": "x" } }),
+        (result, deltas)
+    }
+
+    #[test]
+    fn ollama_stream_forwards_text_deltas_and_folds_a_reply() {
+        let (result, deltas) = fold(&[
+            text_chunk("  Bon", false), text_chunk("jour", false), text_chunk("", true),
+        ]);
+        assert_eq!(result, Ok(Proposal::Text("Bonjour".into())));
+        assert_eq!(deltas, ["  Bon", "jour"]);
+    }
+
+    #[test]
+    fn ollama_stream_collects_tool_calls_without_forwarding_them() {
+        let call = json!([{ "function": { "name": "launch_application", "arguments": { "application": "notepad" } } }]);
+        let (result, deltas) = fold(&[
+            json!({ "done": false, "message": { "role": "assistant", "content": "", "tool_calls": call } }),
+            text_chunk("", true),
+        ]);
+        assert_eq!(result, Ok(Proposal::Calls(call)));
+        assert!(deltas.is_empty());
+    }
+
+    #[test]
+    fn ollama_stream_rejects_incomplete_oversized_foreign_or_remote_streams() {
+        let long = "é".repeat(MAX_REPLY_CHARS);
+        for (chunks, expected) in [
+            (vec![text_chunk("Bonjour", false)], GatewayError::InvalidResponse),
+            (vec![text_chunk("   ", true)], GatewayError::InvalidResponse),
+            (vec![text_chunk(&long, false), text_chunk("x", true)], GatewayError::InvalidResponse),
+            (vec![json!({ "done": true, "message": { "role": "user", "content": "x" } })], GatewayError::InvalidResponse),
+            (vec![json!({ "error": "model failed" })], GatewayError::Unavailable),
+            (vec![json!({ "done": true, "remote_host": "https://example.test",
+                "message": { "role": "assistant", "content": "x" } })], GatewayError::NonLocalModel),
         ] {
-            assert_eq!(ollama_proposal("local:latest", &invalid), Err(GatewayError::InvalidResponse));
+            assert_eq!(fold(&chunks).0, Err(expected));
         }
-        let mut remote = reply(call, json!(""));
-        remote["remote_host"] = json!("https://example.test");
-        assert_eq!(ollama_proposal("local:latest", &remote), Err(GatewayError::NonLocalModel));
+    }
+
+    #[test]
+    fn ollama_stream_stops_when_the_sink_cancels() {
+        let mut seen = 0;
+        let result = fold_ollama_stream(
+            "local:latest",
+            ndjson(&[text_chunk("a", false), text_chunk("b", false), text_chunk("", true)]),
+            &mut |_| { seen += 1; false },
+        );
+        assert_eq!(result, Err(GatewayError::Cancelled));
+        assert_eq!(seen, 1);
     }
 
     #[test]

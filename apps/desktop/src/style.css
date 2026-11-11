@@ -43,6 +43,7 @@ li { padding: 12px 0; border-top: 1px solid #344646; }
 .approval input { accent-color: #83e8c6; }
 .user-message { background: #25403b; border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; }
 .agent-message { background: #2a2f3a; border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.agent-message.draft { opacity: 0.75; border-left: 3px solid #7aa2f7; }
 button:disabled { opacity: .55; cursor: default; }
 @media (max-width: 640px) {
   .workspace { grid-template-columns: 1fr; }
