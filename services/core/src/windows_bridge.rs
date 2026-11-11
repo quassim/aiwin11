@@ -30,6 +30,8 @@ const REPLY_GRACE: Duration = Duration::from_secs(2);
 const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(25);
 const MAX_MESSAGE_BYTES: usize = 1024;
 const MAX_JPEG_BYTES: usize = 256 * 1024;
+/// Deadline of agent tool commands (see `Core::agent_command`).
+const AGENT_DEADLINE_MS: i64 = 15_000;
 /// Largest command sent to the bridge: room for 2000 characters of Notepad text.
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_TREE_REPLY_BYTES: usize = 32 * 1024;
@@ -147,11 +149,14 @@ impl Core {
 
     /// A command issued for an agent tool call within a chat task. Each call gets its own
     /// request ID and idempotency key; the task ID ties it to the task's audit trail.
+    /// The 15-second deadline leaves room for a bridge that is still starting (the operations
+    /// themselves return as soon as they finish).
     pub(crate) fn agent_command(&self, task: &str, operation: Operation) -> Result<Command, ExecutionError> {
         let mut command = self.desktop_command(operation)?;
         command.task_id = task.into();
         command.correlation_id = task.into();
         command.authenticated_actor_id = "agent".into();
+        command.deadline_ms = unix_millis().ok_or(ExecutionError::ExecutionFailed)? + AGENT_DEADLINE_MS;
         Ok(command)
     }
 

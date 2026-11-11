@@ -1623,8 +1623,10 @@ mod tests {
         let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
         let task = TaskSlot::default();
         let located = Mutex::new(Vec::new());
-        let ask = |approve: bool| task.run(&core, None,
-            &live_request("Lis la fenêtre que j'utilisais juste avant AiWin11 et dis-moi à quoi elle sert."),
+        // Without a vision model, inspect_window is the only window tool offered.
+        let mut request = live_request("Lis la fenêtre que j'utilisais juste avant AiWin11 et dis-moi à quoi elle sert.");
+        request.vision_model = None;
+        let ask = |approve: bool| task.run(&core, None, &request,
             |update| {
                 if let TaskUpdate::ApprovalRequired { approval_id, action, .. } = update {
                     let application = match action {
