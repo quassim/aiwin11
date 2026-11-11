@@ -8,10 +8,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use aiwin11_contracts::{
-    v1::{command::Operation, launch_application::Application, Command, LaunchApplication},
-    SCHEMA_VERSION,
-};
+use aiwin11_contracts::v1::{command::Operation, launch_application::Application, LaunchApplication};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -22,7 +19,9 @@ use crate::{
     local_files::LocalFiles,
     windows_bridge::{NamedNode, WindowTarget},
     model_gateway::{tool_catalog, GatewayError, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
-    openai, Core,
+    openai,
+    policy::{self, ActionContext, AgentAction, Effect, PolicySettings},
+    Core,
 };
 
 #[derive(Clone, Copy, Deserialize)]
@@ -43,20 +42,52 @@ pub struct TaskRequest {
     pub cloud_approved: bool,
 }
 
+/// What actually happened to one action the agent asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionStatus {
+    Done,
+    /// Requested, but the result could not be fully verified.
+    Partial,
+    /// Dry run only: nothing changed.
+    Simulated,
+    Declined,
+    Expired,
+    /// Refused by the policy engine or the broker.
+    Denied,
+    Failed,
+}
+
+/// One entry of the task report. Written by the host from what really happened, never by
+/// the model, so the user can trust it even if the model's reply is wrong.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionReport {
+    pub action: AgentAction,
+    /// The exact action in French, e.g. « Copier « a.txt » vers « b.txt » ».
+    pub summary: String,
+    pub status: ActionStatus,
+    /// Stable code for any status other than done: policy rule or error code.
+    pub code: Option<&'static str>,
+}
+
 /// What a finished request produced.
 #[derive(Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum TaskOutcome {
-    #[serde(rename_all = "camelCase")]
-    Launched { application: &'static str, process_id: u32 },
-    Copied { source: String, destination: String },
-    Reply { text: String },
+#[serde(rename_all = "camelCase")]
+pub struct TaskOutcome {
+    /// The model's final answer, validated by the agent.
+    pub reply: String,
+    /// Every action the agent asked for, in order, with what actually happened.
+    pub actions: Vec<ActionReport>,
 }
 
 /// The exact action an approval covers, as shown to the user.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ApprovalAction {
+    /// Reads ask only if a stricter future rule requires it; the default matrix allows them.
+    ListFiles,
+    ReadFile { name: String },
     Launch { application: &'static str },
     CopyFile { source: String, destination: String, characters: usize },
     InspectWindow { application: String, title: String },
@@ -106,7 +137,7 @@ const AWAITING_APPROVAL: u8 = 4;
 pub const MAX_PROMPT_CHARS: usize = 2000;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Model proposals per task, observations included.
-const MAX_AGENT_STEPS: usize = 5;
+const MAX_AGENT_STEPS: usize = 8;
 /// Deadline of an approved launch. The bridge verifies the window for 4 s at most after
 /// starting the application; the rest absorbs a slow first start of the .NET bridge
 /// (runtime load, antivirus scan of a newly installed binary).
@@ -123,6 +154,41 @@ enum Decision {
     Approved,
     Declined,
     Expired,
+}
+
+/// One completed tool step, replayed to the model in its provider's format.
+struct StepRecord {
+    tool: &'static str,
+    arguments: Value,
+    call_id: String,
+    observation: String,
+}
+
+/// Everything one task carries while the agent loop runs.
+struct Run<'a, F: Fn(TaskUpdate)> {
+    core: &'a Mutex<Core>,
+    files: Option<&'a LocalFiles>,
+    task: &'a str,
+    progress: &'a F,
+    settings: PolicySettings,
+    context: ActionContext,
+    actions: Vec<ActionReport>,
+    /// Process of the Notepad window this task launched and verified, if any.
+    launched_notepad: Option<u32>,
+}
+
+impl<F: Fn(TaskUpdate)> Run<'_, F> {
+    fn report(&mut self, action: AgentAction, summary: &str, status: ActionStatus, code: Option<&'static str>) {
+        self.actions.push(ActionReport { action, summary: summary.to_owned(), status, code });
+    }
+}
+
+/// Outcome of the policy gate for one action.
+enum Gate {
+    /// Run with this grant (allowed, or approved by the user).
+    Run(Policy),
+    /// Stop: nothing runs; the string is the observation for the model.
+    Stop(String),
 }
 
 #[derive(Default)]
@@ -235,22 +301,21 @@ impl TaskSlot {
         record(core, &task, match outcome {
             Ok(_) => "task.completed",
             Err("TASK_CANCELLED") => "task.cancelled",
-            Err("WINDOW_UNVERIFIED") => "task.partial",
             Err(_) => "task.failed",
         })?;
         outcome
     }
 
-    /// The agent loop: propose, validate, then either finish (reply or launch) or run a
-    /// read-only tool and feed its observation back to the model, up to `MAX_AGENT_STEPS`.
-    fn plan_and_execute(
+    /// The agent loop: propose, validate, gate each action through the policy engine, run it,
+    /// feed the observation back, until the model replies or `MAX_AGENT_STEPS` is reached.
+    fn plan_and_execute<F: Fn(TaskUpdate)>(
         &self,
         core: &Mutex<Core>,
         files: Option<&LocalFiles>,
         task: &str,
         prompt: &str,
         request: &TaskRequest,
-        progress: &impl Fn(TaskUpdate),
+        progress: &F,
     ) -> Result<TaskOutcome, &'static str> {
         record(core, task, "task.planning")?;
         progress(TaskUpdate::stage("task.planning"));
@@ -261,13 +326,19 @@ impl TaskSlot {
             }
             record(core, task, "model.cloud.authorized")?;
         }
-        // File contents and screen data never leave the machine: these tools exist only for local models.
+        // Read once: a running task keeps the settings it started with.
+        let settings = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
+        record_code(core, task, "policy.profile", &profile_code(settings))?;
+        // File contents and screen data never leave the machine: local-only tools are offered,
+        // and allowed by the policy engine, only for local models.
         let local = matches!(request.provider, Provider::Ollama);
-        let file_tools = local && files.is_some();
-        let mut messages = vec![
-            json!({ "role": "system", "content": AGENT_INSTRUCTIONS }),
-            json!({ "role": "user", "content": prompt }),
-        ];
+        let mut run = Run {
+            core, files, task, progress, settings,
+            context: ActionContext { local_model: local },
+            actions: Vec::new(),
+            launched_notepad: None,
+        };
+        let mut history: Vec<StepRecord> = Vec::new();
         for _ in 0..MAX_AGENT_STEPS {
             if self.phase.load(Ordering::Acquire) == CANCELLED {
                 return Err("TASK_CANCELLED");
@@ -280,90 +351,168 @@ impl TaskSlot {
                 self.phase.load(Ordering::Acquire) != CANCELLED
             };
             let proposal = match request.provider {
-                Provider::Ollama => Ollama::connect()
-                    .and_then(|provider| {
-                        provider.propose(&request.model, &messages, tool_catalog(false, file_tools, local), &mut sink)
-                    })
-                    .map_err(|error| match error {
-                        GatewayError::Cancelled => "TASK_CANCELLED",
-                        _ => "MODEL_UNAVAILABLE_OR_INVALID",
-                    })?,
-                // The cloud catalog has no observation tool, so this branch runs once.
-                Provider::OpenAi => openai::propose(&request.model, prompt, &mut sink)?,
+                Provider::Ollama => {
+                    let tools = tool_catalog(false, local && files.is_some(), local);
+                    Ollama::connect()
+                        .and_then(|provider| {
+                            provider.propose(&request.model, &ollama_messages(prompt, &history), tools, &mut sink)
+                        })
+                        .map_err(|error| match error {
+                            GatewayError::Cancelled => "TASK_CANCELLED",
+                            _ => "MODEL_UNAVAILABLE_OR_INVALID",
+                        })?
+                }
+                Provider::OpenAi => openai::propose(&request.model, &openai_messages(prompt, &history), &mut sink)?,
             };
             if self.phase.load(Ordering::Acquire) == CANCELLED {
                 return Err("TASK_CANCELLED");
             }
+            let call_id = call_id(&proposal);
             let (tool, arguments, observation) = match run_agent(&proposal)? {
                 PlannedAction::Reply(text) => {
                     // The reply text stays out of the journal, like prompts.
                     record(core, task, "agent.reply")?;
                     progress(TaskUpdate::stage("agent.reply"));
-                    return Ok(TaskOutcome::Reply { text });
-                }
-                PlannedAction::Launch(application) => {
-                    return self.launch(core, task, application, progress);
-                }
-                // Defense in depth: these tools are never offered without `file_tools`.
-                PlannedAction::ListFiles | PlannedAction::ReadFile(_) | PlannedAction::CopyFile { .. }
-                    if !file_tools =>
-                {
-                    return Err("AGENT_REJECTED");
-                }
-                PlannedAction::InspectWindow if !local => return Err("AGENT_REJECTED"),
-                PlannedAction::InspectWindow => {
-                    record(core, task, "agent.tool.requested")?;
-                    progress(TaskUpdate::stage("agent.tool.requested"));
-                    ("inspect_window", json!({}), self.inspect_window(core, task, progress)?)
-                }
-                PlannedAction::CopyFile { source, destination } => {
-                    record(core, task, "agent.tool.requested")?;
-                    progress(TaskUpdate::stage("agent.tool.requested"));
-                    let files = files.ok_or("FILE_UNAVAILABLE")?;
-                    let reads = Policy::granting(&[Capability::FileRead]);
-                    let preview = {
-                        let mut guard = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
-                        files.agent_copy_preview(&mut guard, task, reads, &source, &destination)
-                    };
-                    match preview {
-                        Ok(characters) => {
-                            return self.copy(core, files, task, source, destination, characters, progress);
-                        }
-                        // A failed dry run asks nothing: the model gets the reason and may adapt.
-                        Err(code) => (
-                            "copy_text_file",
-                            json!({ "source": source, "destination": destination }),
-                            format!("Copie impossible : {code}. Rien n’a été modifié et aucune approbation n’a été demandée."),
-                        ),
-                    }
+                    return Ok(TaskOutcome { reply: text, actions: run.actions });
                 }
                 action => {
                     record(core, task, "agent.tool.requested")?;
                     progress(TaskUpdate::stage("agent.tool.requested"));
-                    let files = files.ok_or("FILE_UNAVAILABLE")?;
-                    let policy = Policy::granting(&[Capability::FileRead]);
-                    let mut guard = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
-                    match action {
-                        PlannedAction::ReadFile(name) => {
-                            let result = files.agent_read(&mut guard, task, policy, &name);
-                            ("read_text_file", json!({ "name": name }), describe_read(&name, result))
-                        }
-                        _ => {
-                            let result = files.agent_list(&mut guard, task, policy);
-                            ("list_text_files", json!({}), describe_list(result))
-                        }
-                    }
+                    self.act(&mut run, action)?
                 }
             };
             record(core, task, "agent.observation")?;
             progress(TaskUpdate::stage("agent.observation"));
-            messages.push(json!({
-                "role": "assistant", "content": "",
-                "tool_calls": [{ "function": { "name": tool, "arguments": arguments } }]
-            }));
-            messages.push(json!({ "role": "tool", "tool_name": tool, "content": observation }));
+            history.push(StepRecord { tool, arguments, call_id, observation });
         }
         Err("AGENT_STEP_LIMIT")
+    }
+
+    /// Runs one tool action. Returns the tool name, its arguments and the observation.
+    fn act<F: Fn(TaskUpdate)>(
+        &self, run: &mut Run<'_, F>, action: PlannedAction,
+    ) -> Result<(&'static str, Value, String), &'static str> {
+        Ok(match action {
+            PlannedAction::Reply(_) => return Err("AGENT_REJECTED"),
+            PlannedAction::Launch(application) => {
+                ("launch_application", json!({ "application": "notepad" }), self.launch(run, application)?)
+            }
+            PlannedAction::ListFiles => ("list_text_files", json!({}), self.list_files(run)?),
+            PlannedAction::ReadFile(name) => {
+                let observation = self.read_file(run, &name)?;
+                ("read_text_file", json!({ "name": name }), observation)
+            }
+            PlannedAction::CopyFile { source, destination } => {
+                let observation = self.copy(run, &source, &destination)?;
+                ("copy_text_file", json!({ "source": source, "destination": destination }), observation)
+            }
+            PlannedAction::InspectWindow => ("inspect_window", json!({}), self.inspect_window(run)?),
+        })
+    }
+
+    /// Asks the policy engine and journals its decision. A denial is reported and returned
+    /// as the observation (`Err`); otherwise the effect to apply is returned (`Ok`).
+    fn decide<F: Fn(TaskUpdate)>(
+        &self, run: &mut Run<'_, F>, action: AgentAction, summary: &str,
+    ) -> Result<Result<Effect, String>, &'static str> {
+        let decision = policy::evaluate(run.settings, action, run.context);
+        record_code(run.core, run.task, "policy.evaluated",
+            &format!("{}:{}:{}", effect_code(decision.effect), action.code(), decision.rule))?;
+        if decision.effect == Effect::Deny {
+            run.report(action, summary, ActionStatus::Denied, Some(decision.rule));
+            return Ok(Err(format!(
+                "Action refusée par la politique de sécurité (règle {}). Rien n’a été exécuté.", decision.rule
+            )));
+        }
+        Ok(Ok(decision.effect))
+    }
+
+    /// Turns an effect into a capability grant, or stops with an observation: simulated,
+    /// declined or expired actions run nothing.
+    fn authorize<F: Fn(TaskUpdate)>(
+        &self, run: &mut Run<'_, F>, effect: Effect, action: AgentAction, summary: &str,
+        capability: Capability, approval: ApprovalAction,
+    ) -> Result<Gate, &'static str> {
+        let stop = |run: &mut Run<'_, F>, status, code, text: &str| {
+            run.report(action, summary, status, Some(code));
+            Gate::Stop(format!("{text} Rien n’a été exécuté."))
+        };
+        Ok(match effect {
+            Effect::Allow => Gate::Run(Policy::granting(&[capability])),
+            Effect::Deny => stop(run, ActionStatus::Denied, "profile", "Action refusée par la politique de sécurité."),
+            Effect::Simulate => {
+                record(run.core, run.task, "policy.simulated")?;
+                (run.progress)(TaskUpdate::stage("policy.simulated"));
+                let text = format!("[Simulation] Action qui aurait été effectuée : {summary}.");
+                stop(run, ActionStatus::Simulated, "simulation_mode", &text)
+            }
+            Effect::Ask => match self.approve(run.core, run.task, approval, run.progress)? {
+                Decision::Approved => Gate::Run(Policy::granting(&[capability])),
+                Decision::Declined => {
+                    record_code(run.core, run.task, "policy.denied", "user_declined")?;
+                    stop(run, ActionStatus::Declined, "user_declined", "L’utilisateur a refusé cette action.")
+                }
+                Decision::Expired => {
+                    record_code(run.core, run.task, "policy.denied", "approval_expired")?;
+                    stop(run, ActionStatus::Expired, "approval_expired",
+                        "La demande d’approbation a expiré sans réponse.")
+                }
+            },
+        })
+    }
+
+    /// Decides and authorizes an action that needs no preparation.
+    fn gate<F: Fn(TaskUpdate)>(
+        &self, run: &mut Run<'_, F>, action: AgentAction, summary: &str,
+        capability: Capability, approval: ApprovalAction,
+    ) -> Result<Gate, &'static str> {
+        match self.decide(run, action, summary)? {
+            Err(observation) => Ok(Gate::Stop(observation)),
+            Ok(effect) => self.authorize(run, effect, action, summary, capability, approval),
+        }
+    }
+
+    /// Runs a side effect in the DISPATCHING phase: cancellation is no longer accepted until
+    /// it returns, then the task goes back to planning.
+    fn dispatching<T>(&self, effect: impl FnOnce() -> T) -> Result<T, &'static str> {
+        self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "TASK_CANCELLED")?;
+        let result = effect();
+        let _ = self.phase.compare_exchange(DISPATCHING, PLANNING, Ordering::AcqRel, Ordering::Acquire);
+        Ok(result)
+    }
+
+    fn list_files<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>) -> Result<String, &'static str> {
+        let summary = "Lister les fichiers du dossier d’AiWin11";
+        let grant = match self.gate(run, AgentAction::ListFiles, summary, Capability::FileRead, ApprovalAction::ListFiles)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let Some(files) = run.files else {
+            run.report(AgentAction::ListFiles, summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
+            return Ok(describe_list(Err("FILE_UNAVAILABLE")));
+        };
+        let result = files.agent_list(&mut *lock(run.core)?, run.task, grant);
+        let (status, code) = status_of(&result);
+        run.report(AgentAction::ListFiles, summary, status, code);
+        Ok(describe_list(result))
+    }
+
+    fn read_file<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, name: &str) -> Result<String, &'static str> {
+        let summary = format!("Lire « {name} »");
+        let approval = ApprovalAction::ReadFile { name: name.to_owned() };
+        let grant = match self.gate(run, AgentAction::ReadFile, &summary, Capability::FileRead, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let Some(files) = run.files else {
+            run.report(AgentAction::ReadFile, &summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
+            return Ok(describe_read(name, Err("FILE_UNAVAILABLE")));
+        };
+        let result = files.agent_read(&mut *lock(run.core)?, run.task, grant, name);
+        let (status, code) = status_of(&result);
+        run.report(AgentAction::ReadFile, &summary, status, code);
+        Ok(describe_read(name, result))
     }
 
     /// AWAITING_APPROVAL: the user decides on this exact action, now that it is known.
@@ -395,107 +544,197 @@ impl TaskSlot {
         Ok(decision)
     }
 
-    /// Locates the window used before AiWin11, asks the user to approve reading it, then
-    /// submits the decision to the broker. Returns the observation for the model; a refusal
-    /// is an observation too, so the model can answer without the window.
-    fn inspect_window(
-        &self, core: &Mutex<Core>, task: &str, progress: &impl Fn(TaskUpdate),
-    ) -> Result<String, &'static str> {
-        let lookup = Policy::granting(&[Capability::WindowLookup]);
-        let located = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.agent_locate_window(task, lookup);
-        let target = match located {
-            Ok(target) => target,
-            Err(code) => return Ok(format!("Inspection impossible : {code}. Rien n’a été lu.")),
+    /// Locates the window used before AiWin11, then reads it if the policy allows it (always
+    /// with the user's approval: screen data). A refusal is an observation too.
+    fn inspect_window<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>) -> Result<String, &'static str> {
+        let action = AgentAction::InspectWindow;
+        let effect = match self.decide(run, action, "Lire la fenêtre précédente")? {
+            Err(observation) => return Ok(observation),
+            Ok(effect) => effect,
         };
-        let action = ApprovalAction::InspectWindow {
+        let lookup = Policy::granting(&[Capability::WindowLookup]);
+        let target = match lock(run.core)?.agent_locate_window(run.task, lookup) {
+            Ok(target) => target,
+            Err(code) => {
+                run.report(action, "Lire la fenêtre précédente", ActionStatus::Failed, Some(code));
+                return Ok(format!("Inspection impossible : {code}. Rien n’a été lu."));
+            }
+        };
+        let summary = format!("Lire la fenêtre « {} » ({})", target.title, target.process_name);
+        let approval = ApprovalAction::InspectWindow {
             application: target.process_name.clone(), title: target.title.clone(),
         };
-        let decision = self.approve(core, task, action, progress)?;
-        // Every decision goes through the broker, so a refusal is audited as policy.denied.
-        let policy = Policy::granting_if(decision == Decision::Approved, Capability::WindowInspect);
-        let inspected = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.agent_inspect_window(task, policy, &target);
-        Ok(match (inspected, decision) {
-            (Ok((nodes, truncated)), _) => describe_window(&target, &nodes, truncated),
-            (Err(_), Decision::Declined) => "L’utilisateur a refusé la lecture de la fenêtre. Rien n’a été lu.".into(),
-            (Err(_), Decision::Expired) => "La demande de lecture de la fenêtre a expiré sans réponse. Rien n’a été lu.".into(),
-            (Err(code), Decision::Approved) => format!("Inspection impossible : {code}. Rien n’a été lu."),
+        let grant = match self.authorize(run, effect, action, &summary, Capability::WindowInspect, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = lock(run.core)?.agent_inspect_window(run.task, grant, &target);
+        let (status, code) = status_of(&result);
+        run.report(action, &summary, status, code);
+        Ok(match result {
+            Ok((nodes, truncated)) => describe_window(&target, &nodes, truncated),
+            Err(code) => format!("Inspection impossible : {code}. Rien n’a été lu."),
         })
     }
 
-    /// Asks the user to approve this exact copy, then submits the decision to the broker.
-    #[allow(clippy::too_many_arguments)]
-    fn copy(
-        &self,
-        core: &Mutex<Core>,
-        files: &LocalFiles,
-        task: &str,
-        source: String,
-        destination: String,
-        characters: usize,
-        progress: &impl Fn(TaskUpdate),
-    ) -> Result<TaskOutcome, &'static str> {
-        let action = ApprovalAction::CopyFile {
-            source: source.clone(), destination: destination.clone(), characters,
+    /// Dry-runs the copy (read-only), then copies if the policy allows it.
+    fn copy<F: Fn(TaskUpdate)>(
+        &self, run: &mut Run<'_, F>, source: &str, destination: &str,
+    ) -> Result<String, &'static str> {
+        let action = AgentAction::CopyFile;
+        let summary = format!("Copier « {source} » vers « {destination} »");
+        let effect = match self.decide(run, action, &summary)? {
+            Err(observation) => return Ok(observation),
+            Ok(effect) => effect,
         };
-        let decision = self.approve(core, task, action, progress)?;
-        self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| "TASK_CANCELLED")?;
-        // Every decision goes through the broker, so a refusal is audited as policy.denied.
-        let policy = Policy::granting_if(decision == Decision::Approved, Capability::FileCopy);
-        let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
-        match (files.agent_copy(&mut core, task, policy, &source, &destination), decision) {
-            (Ok(()), _) => Ok(TaskOutcome::Copied { source, destination }),
-            (Err("FILE_ACCESS_DENIED"), Decision::Declined) => Err("ACTION_DECLINED"),
-            (Err("FILE_ACCESS_DENIED"), Decision::Expired) => Err("APPROVAL_EXPIRED"),
-            (Err("FILE_ACCESS_DENIED"), Decision::Approved) => Err("ACTION_DENIED"),
-            (Err(code), _) => Err(code),
-        }
+        let Some(files) = run.files else {
+            run.report(action, &summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
+            return Ok("Copie impossible : FILE_UNAVAILABLE. Rien n’a été modifié.".into());
+        };
+        let reads = Policy::granting(&[Capability::FileRead]);
+        let preview = files.agent_copy_preview(&mut *lock(run.core)?, run.task, reads, source, destination);
+        let characters = match preview {
+            Ok(characters) => characters,
+            // A failed dry run asks nothing: the model gets the reason and may adapt.
+            Err(code) => {
+                run.report(action, &summary, ActionStatus::Failed, Some(code));
+                return Ok(format!("Copie impossible : {code}. Rien n’a été modifié et aucune approbation n’a été demandée."));
+            }
+        };
+        let approval = ApprovalAction::CopyFile {
+            source: source.to_owned(), destination: destination.to_owned(), characters,
+        };
+        let grant = match self.authorize(run, effect, action, &summary, Capability::FileCopy, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = self.dispatching(|| -> Result<(), &'static str> {
+            files.agent_copy(&mut *lock(run.core)?, run.task, grant, source, destination)
+        })?;
+        let (status, code) = status_of(&result);
+        run.report(action, &summary, status, code);
+        Ok(match result {
+            Ok(()) => format!("Copie effectuée : « {source} » vers « {destination} »."),
+            Err(code) => format!("Copie impossible : {code}. Rien n’a été remplacé."),
+        })
     }
 
-    /// Asks the user to approve the launch, then submits the decision to the broker.
-    fn launch(
-        &self,
-        core: &Mutex<Core>,
-        task: &str,
-        application: Application,
-        progress: &impl Fn(TaskUpdate),
-    ) -> Result<TaskOutcome, &'static str> {
-        record(core, task, "agent.tool.requested")?;
-        progress(TaskUpdate::stage("agent.tool.requested"));
-        let decision = self.approve(core, task, ApprovalAction::Launch { application: "notepad" }, progress)?;
-        // The command and its deadline are built only after the decision.
-        let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
-        let deadline_ms = SystemTime::now().duration_since(UNIX_EPOCH)
-            .map_err(|_| "CLOCK_UNAVAILABLE")?.as_millis() as i64 + LAUNCH_DEADLINE_MS;
-        let command = Command {
-            schema_version: SCHEMA_VERSION,
-            request_id: Uuid::new_v4().to_string(),
-            session_id: core.session_id().into(),
-            task_id: task.into(),
-            correlation_id: task.into(),
-            authenticated_actor_id: "agent".into(),
-            deadline_ms,
-            idempotency_key: task.into(),
-            operation: Some(Operation::LaunchApplication(LaunchApplication {
-                application: application as i32,
-            })),
+    /// Launches Notepad if the policy allows it. The command and its deadline are built only
+    /// after the decision; the broker checks the grant again at execution time.
+    fn launch<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, application: Application) -> Result<String, &'static str> {
+        let action = AgentAction::LaunchApplication;
+        let summary = "Ouvrir le Bloc-notes";
+        let approval = ApprovalAction::Launch { application: "notepad" };
+        let grant = match self.gate(run, action, summary, Capability::LaunchNotepad, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
         };
-        self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| "TASK_CANCELLED")?;
-        // Every decision goes through the broker, so a refusal is audited as policy.denied.
-        let policy = Policy::granting_if(decision == Decision::Approved, Capability::LaunchNotepad);
-        core.execute_windows(policy, Peer::Agent, &command)
-            .map(|process_id| TaskOutcome::Launched { application: "notepad", process_id })
-            .map_err(|error| match (error, decision) {
-                (ExecutionError::Denied(_), Decision::Declined) => "ACTION_DECLINED",
-                (ExecutionError::Denied(_), Decision::Expired) => "APPROVAL_EXPIRED",
-                (ExecutionError::Denied(_), Decision::Approved) => "ACTION_DENIED",
-                (ExecutionError::WindowUnverified, _) => "WINDOW_UNVERIFIED",
-                (ExecutionError::AuditUnavailable, _) => "AUDIT_UNAVAILABLE",
-                (ExecutionError::OutcomeUnrecorded, _) => "OUTCOME_UNRECORDED",
-                (ExecutionError::ExecutionFailed, _) => "BRIDGE_FAILED",
-            })
+        let result = self.dispatching(|| -> Result<Result<u32, ExecutionError>, &'static str> {
+            let mut core = lock(run.core)?;
+            let mut command = core.agent_command(run.task, Operation::LaunchApplication(LaunchApplication {
+                application: application as i32,
+            })).map_err(|_| "BRIDGE_FAILED")?;
+            command.deadline_ms = SystemTime::now().duration_since(UNIX_EPOCH)
+                .map_err(|_| "CLOCK_UNAVAILABLE")?.as_millis() as i64 + LAUNCH_DEADLINE_MS;
+            Ok(core.execute_windows(grant, Peer::Agent, &command))
+        })??;
+        Ok(match result {
+            Ok(process_id) => {
+                run.launched_notepad = Some(process_id);
+                run.report(action, summary, ActionStatus::Done, None);
+                "Le Bloc-notes est ouvert : une nouvelle fenêtre a été vérifiée.".into()
+            }
+            Err(ExecutionError::WindowUnverified) => {
+                run.report(action, summary, ActionStatus::Partial, Some("WINDOW_UNVERIFIED"));
+                "Windows a reçu la demande, mais aucune nouvelle fenêtre du Bloc-notes n’a été confirmée.".into()
+            }
+            Err(ExecutionError::Denied(rule)) => {
+                run.report(action, summary, ActionStatus::Denied, Some(rule));
+                format!("Le broker a refusé l’ouverture ({rule}). Rien n’a été exécuté.")
+            }
+            Err(error) => {
+                let code = match error {
+                    ExecutionError::AuditUnavailable => "AUDIT_UNAVAILABLE",
+                    ExecutionError::OutcomeUnrecorded => "OUTCOME_UNRECORDED",
+                    _ => "BRIDGE_FAILED",
+                };
+                run.report(action, summary, ActionStatus::Failed, Some(code));
+                format!("Ouverture impossible : {code}.")
+            }
+        })
     }
+}
+
+fn lock(core: &Mutex<Core>) -> Result<std::sync::MutexGuard<'_, Core>, &'static str> {
+    core.lock().map_err(|_| "CORE_UNAVAILABLE")
+}
+
+/// Report status and code of a host-side tool result.
+fn status_of<T>(result: &Result<T, &'static str>) -> (ActionStatus, Option<&'static str>) {
+    match result {
+        Ok(_) => (ActionStatus::Done, None),
+        Err("FILE_ACCESS_DENIED" | "WINDOW_ACCESS_DENIED") => (ActionStatus::Denied, Some("broker")),
+        Err(code) => (ActionStatus::Failed, Some(code)),
+    }
+}
+
+fn effect_code(effect: Effect) -> &'static str {
+    match effect {
+        Effect::Allow => "allow",
+        Effect::Ask => "ask",
+        Effect::Deny => "deny",
+        Effect::Simulate => "simulate",
+    }
+}
+
+fn profile_code(settings: PolicySettings) -> String {
+    format!("{}{}", settings.autonomy.code(), if settings.simulate { "+simulate" } else { "" })
+}
+
+/// Conversation for Ollama: instructions, request, then each tool call and its observation.
+fn ollama_messages(prompt: &str, history: &[StepRecord]) -> Vec<Value> {
+    let mut messages = vec![
+        json!({ "role": "system", "content": AGENT_INSTRUCTIONS }),
+        json!({ "role": "user", "content": prompt }),
+    ];
+    for step in history {
+        messages.push(json!({
+            "role": "assistant", "content": "",
+            "tool_calls": [{ "function": { "name": step.tool, "arguments": step.arguments } }]
+        }));
+        messages.push(json!({ "role": "tool", "tool_name": step.tool, "content": step.observation }));
+    }
+    messages
+}
+
+/// Same conversation in the Chat Completions format, where tool results refer to call IDs.
+fn openai_messages(prompt: &str, history: &[StepRecord]) -> Vec<Value> {
+    let mut messages = vec![
+        json!({ "role": "system", "content": AGENT_INSTRUCTIONS }),
+        json!({ "role": "user", "content": prompt }),
+    ];
+    for step in history {
+        messages.push(json!({
+            "role": "assistant", "content": null,
+            "tool_calls": [{
+                "id": step.call_id, "type": "function",
+                "function": { "name": step.tool, "arguments": step.arguments.to_string() }
+            }]
+        }));
+        messages.push(json!({ "role": "tool", "tool_call_id": step.call_id, "content": step.observation }));
+    }
+    messages
+}
+
+/// The provider's ID for the proposed call, if well-formed, else a fresh one.
+fn call_id(proposal: &Proposal) -> String {
+    let given = match proposal {
+        Proposal::Calls(calls) => calls.get(0).and_then(|call| call.get("id")).and_then(Value::as_str),
+        Proposal::Text(_) => None,
+    };
+    given.filter(|id| !id.is_empty() && id.len() <= 64
+            && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte)))
+        .map_or_else(|| format!("call_{}", Uuid::new_v4().simple()), str::to_owned)
 }
 
 /// English names of the UI Automation control type IDs (UIA_*ControlTypeId).
@@ -593,10 +832,19 @@ impl Drop for ResetSlot<'_> {
 }
 
 fn record(core: &Mutex<Core>, task: &str, kind: &str) -> Result<(), &'static str> {
+    record_event(core, task, kind, None)
+}
+
+/// Journals an event with a stable code (never user content).
+fn record_code(core: &Mutex<Core>, task: &str, kind: &str, code: &str) -> Result<(), &'static str> {
+    record_event(core, task, kind, Some(code))
+}
+
+fn record_event(core: &Mutex<Core>, task: &str, kind: &str, code: Option<&str>) -> Result<(), &'static str> {
     let core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
     core.db.execute(
-        "INSERT INTO events (id, session_id, task_id, kind, source) VALUES (?1, ?2, ?3, ?4, 'core')",
-        params![Uuid::new_v4().to_string(), core.session_id(), task, kind],
+        "INSERT INTO events (id, session_id, task_id, kind, source, code) VALUES (?1, ?2, ?3, ?4, 'core', ?5)",
+        params![Uuid::new_v4().to_string(), core.session_id(), task, kind, code],
     ).map_err(|_| "AUDIT_UNAVAILABLE")?;
     Ok(())
 }
@@ -791,14 +1039,20 @@ mod tests {
 
     #[test]
     fn outcomes_serialize_for_the_desktop() {
-        assert_eq!(
-            serde_json::to_value(TaskOutcome::Launched { application: "notepad", process_id: 7 }).unwrap(),
-            json!({"kind":"launched","application":"notepad","processId":7})
-        );
-        assert_eq!(
-            serde_json::to_value(TaskOutcome::Reply { text: "ok".into() }).unwrap(),
-            json!({"kind":"reply","text":"ok"})
-        );
+        let outcome = TaskOutcome {
+            reply: "ok".into(),
+            actions: vec![ActionReport {
+                action: AgentAction::CopyFile, summary: "Copier « a.txt » vers « b.txt »".into(),
+                status: ActionStatus::Declined, code: Some("user_declined"),
+            }],
+        };
+        assert_eq!(serde_json::to_value(outcome).unwrap(), json!({
+            "reply": "ok",
+            "actions": [{
+                "action": "copyFile", "summary": "Copier « a.txt » vers « b.txt »",
+                "status": "declined", "code": "user_declined"
+            }]
+        }));
         assert_eq!(
             serde_json::to_value(TaskUpdate::stage("task.planning")).unwrap(),
             json!({"type":"stage","stage":"task.planning"})
@@ -927,10 +1181,39 @@ mod tests {
         let inspect = ApprovalAction::InspectWindow { application: "charmap".into(), title: "Table".into() };
         assert_eq!(serde_json::to_value(inspect).unwrap(),
             json!({"kind":"inspectWindow","application":"charmap","title":"Table"}));
-        assert_eq!(
-            serde_json::to_value(TaskOutcome::Copied { source: "a.txt".into(), destination: "b.txt".into() }).unwrap(),
-            json!({"kind":"copied","source":"a.txt","destination":"b.txt"})
-        );
+    }
+
+    fn step(tool: &'static str, arguments: Value, call_id: &str) -> StepRecord {
+        StepRecord { tool, arguments, call_id: call_id.into(), observation: "Résultat".into() }
+    }
+
+    #[test]
+    fn conversations_replay_tool_steps_in_each_provider_format() {
+        let history = [step("copy_text_file", json!({"source":"a.txt","destination":"b.txt"}), "call_1")];
+        let ollama = ollama_messages("Copie a.txt", &history);
+        assert_eq!(ollama.len(), 4);
+        assert_eq!(ollama[2]["tool_calls"][0]["function"]["arguments"], json!({"source":"a.txt","destination":"b.txt"}));
+        assert_eq!(ollama[3], json!({"role":"tool","tool_name":"copy_text_file","content":"Résultat"}));
+        let openai = openai_messages("Copie a.txt", &history);
+        assert_eq!(openai[2]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(openai[2]["tool_calls"][0]["function"]["arguments"], r#"{"destination":"b.txt","source":"a.txt"}"#);
+        assert_eq!(openai[3], json!({"role":"tool","tool_call_id":"call_1","content":"Résultat"}));
+        assert_eq!(openai[0]["role"], "system");
+    }
+
+    #[test]
+    fn call_ids_are_kept_only_when_well_formed() {
+        let calls = |id: Value| Proposal::Calls(json!([{ "id": id, "function": { "name": "x", "arguments": {} } }]));
+        assert_eq!(call_id(&calls(json!("call_AbC-1_2"))), "call_AbC-1_2");
+        for invalid in [json!(""), json!("bad id"), json!(42), json!("x".repeat(65))] {
+            let generated = call_id(&calls(invalid));
+            assert!(generated.starts_with("call_") && generated.len() == 37, "{generated}");
+        }
+        assert!(call_id(&Proposal::Text("Bonjour".into())).starts_with("call_"));
+    }
+
+    fn statuses(outcome: &TaskOutcome, action: AgentAction) -> Vec<ActionStatus> {
+        outcome.actions.iter().filter(|report| report.action == action).map(|report| report.status).collect()
     }
 
     fn live_request(prompt: &str) -> TaskRequest {
@@ -966,25 +1249,23 @@ mod tests {
         let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
         let task = TaskSlot::default();
         let stages = Mutex::new(Vec::new());
-        assert_eq!(run_answering(&core, &task, "Ouvre le Bloc-notes", false, &stages), Err("ACTION_DECLINED"));
-        let declined = core.lock().unwrap().activity().unwrap();
-        assert!(declined.iter().any(|event| event.kind == "policy.approval.declined"));
-        assert!(declined.iter().any(|event| event.kind == "policy.denied"));
-        assert!(!declined.iter().any(|event| event.kind.starts_with("tool.execution.")));
+        let declined = run_answering(&core, &task, "Ouvre le Bloc-notes", false, &stages).unwrap();
+        assert_eq!(statuses(&declined, AgentAction::LaunchApplication), [ActionStatus::Declined]);
+        let declined_kinds = core.lock().unwrap().activity().unwrap();
+        assert!(declined_kinds.iter().any(|event| event.kind == "policy.approval.declined"));
+        assert!(declined_kinds.iter().any(|event| event.kind == "policy.denied"));
+        assert!(!declined_kinds.iter().any(|event| event.kind.starts_with("tool.execution.")));
 
         stages.lock().unwrap().clear();
         let outcome = run_answering(&core, &task, "Peux-tu ouvrir le Bloc-notes ?", true, &stages).unwrap();
-        assert!(matches!(outcome, TaskOutcome::Launched { application: "notepad", process_id } if process_id > 0));
-        assert_eq!(
-            *stages.lock().unwrap(),
-            ["task.created", "task.planning", "agent.tool.requested", "policy.approval.granted"]
-        );
-        let activity = core.lock().unwrap().activity().unwrap();
-        let kinds: Vec<_> = activity.iter().take(5).map(|event| event.kind.as_str()).collect();
-        assert_eq!(kinds, [
-            "task.completed", "tool.execution.completed", "policy.allowed",
-            "policy.approval.granted", "policy.approval.required",
-        ]);
+        assert_eq!(statuses(&outcome, AgentAction::LaunchApplication), [ActionStatus::Done]);
+        let stages = stages.lock().unwrap();
+        assert_eq!(stages[..4], ["task.created", "task.planning", "agent.tool.requested", "policy.approval.granted"]);
+        assert_eq!(stages.last(), Some(&"agent.reply"), "the agent reports after acting");
+        let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
+        for expected in ["tool.execution.completed", "policy.allowed", "policy.approval.granted", "policy.evaluated"] {
+            assert!(kinds.contains(&expected.to_owned()), "{expected} in {kinds:?}");
+        }
     }
 
     #[test]
@@ -998,12 +1279,12 @@ mod tests {
                 streamed.lock().unwrap().push_str(&text);
             }
         }).unwrap();
-        let TaskOutcome::Reply { text } = outcome else { panic!("expected a reply") };
-        assert_eq!(streamed.lock().unwrap().trim(), text, "the final reply is the streamed text, trimmed");
+        assert_eq!(streamed.lock().unwrap().trim(), outcome.reply, "the final reply is the streamed text, trimmed");
+        assert!(outcome.actions.is_empty());
         let activity = core.lock().unwrap().activity().unwrap();
         assert_eq!(activity[0].kind, "task.completed");
         assert_eq!(activity[1].kind, "agent.reply");
-        assert!(!activity.iter().any(|event| event.kind.starts_with("policy.") || event.kind.starts_with("tool.")));
+        assert!(!activity.iter().any(|event| event.kind.starts_with("policy.evaluated") || event.kind.starts_with("tool.")));
     }
 
     fn temp_files(contents: &[(&str, &str)]) -> (std::path::PathBuf, LocalFiles) {
@@ -1029,8 +1310,9 @@ mod tests {
         let outcome = run_with_files(&core, Some(&files), &task,
             "Combien d'œufs y a-t-il dans ma liste de courses ? Cherche le fichier toi-même.", false, &stages);
         std::fs::remove_dir_all(directory).unwrap();
-        let TaskOutcome::Reply { text } = outcome.unwrap() else { panic!("expected a reply") };
-        assert!(text.contains("12"), "reply should use the file content: {text}");
+        let outcome = outcome.unwrap();
+        assert!(outcome.reply.contains("12"), "reply should use the file content: {}", outcome.reply);
+        assert!(statuses(&outcome, AgentAction::ReadFile).contains(&ActionStatus::Done));
         let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
         assert!(kinds.contains(&"file.preview.completed".to_owned()), "{kinds:?}");
         assert!(kinds.contains(&"agent.observation".to_owned()));
@@ -1071,7 +1353,8 @@ mod tests {
         assert!(declined_kinds.contains(&"policy.approval.declined".to_owned()), "{declined_kinds:?}");
         assert!(!declined_kinds.iter().any(|kind| kind == "window.inspect.completed"), "nothing read on refusal");
         assert_eq!(*located.lock().unwrap(), ["charmap", "charmap"], "the located window must be Character Map");
-        assert!(matches!(approved, Ok(TaskOutcome::Reply { .. })), "{approved:?}");
+        assert_eq!(statuses(declined.as_ref().unwrap(), AgentAction::InspectWindow), [ActionStatus::Declined]);
+        assert_eq!(statuses(approved.as_ref().unwrap(), AgentAction::InspectWindow), [ActionStatus::Done]);
         let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
         assert!(kinds.contains(&"window.inspect.completed".to_owned()), "{kinds:?}");
     }
@@ -1091,15 +1374,17 @@ mod tests {
         let approved = run_with_files(&core, Some(&files), &task, prompt, true, &stages);
         let copied = std::fs::read_to_string(&copy).ok();
         std::fs::remove_dir_all(directory).unwrap();
-        assert_eq!(declined, Err("ACTION_DECLINED"));
+        assert_eq!(statuses(&declined.unwrap(), AgentAction::CopyFile), [ActionStatus::Declined]);
         assert!(!created_on_decline, "nothing is written before approval");
-        assert_eq!(approved, Ok(TaskOutcome::Copied {
-            source: "courses.txt".into(), destination: "courses-sauvegarde.txt".into(),
-        }));
+        let approved = approved.unwrap();
+        assert_eq!(statuses(&approved, AgentAction::CopyFile), [ActionStatus::Done]);
+        assert_eq!(approved.actions.iter().find(|report| report.action == AgentAction::CopyFile).unwrap().summary,
+            "Copier « courses.txt » vers « courses-sauvegarde.txt »");
         assert_eq!(copied.as_deref(), Some(original));
         let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
-        assert_eq!(&kinds[..4], ["task.completed", "file.copy.completed", "policy.allowed", "policy.approval.granted"]);
-        assert!(kinds.contains(&"policy.approval.declined".to_owned()));
+        for expected in ["file.copy.completed", "policy.approval.granted", "policy.approval.declined"] {
+            assert!(kinds.contains(&expected.to_owned()), "{expected} in {kinds:?}");
+        }
     }
 
     #[test]
@@ -1116,7 +1401,9 @@ mod tests {
         let outcome = run_with_files(&core, Some(&files), &task,
             "Lis consignes.txt et résume-le en une phrase.", false, &stages);
         std::fs::remove_dir_all(directory).unwrap();
-        assert!(!matches!(outcome, Ok(TaskOutcome::Launched { .. })), "{outcome:?}");
+        if let Ok(outcome) = &outcome {
+            assert!(!statuses(outcome, AgentAction::LaunchApplication).contains(&ActionStatus::Done), "{outcome:?}");
+        }
         let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
         assert!(!kinds.iter().any(|kind| kind.starts_with("tool.execution.")), "{kinds:?}");
     }

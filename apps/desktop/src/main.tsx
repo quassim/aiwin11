@@ -10,10 +10,18 @@ type Page = "Accueil" | "Modèles" | "Sécurité" | "Inspecteur" | "Fichiers" | 
 type Provider = "ollama" | "openai";
 type Activity = { sequence: number; kind: string; timestamp: string };
 type Snapshot = { sessionId: string; events: Activity[] };
-type TaskOutcome =
-  | { kind: "launched"; application: "notepad"; processId: number }
-  | { kind: "copied"; source: string; destination: string }
-  | { kind: "reply"; text: string };
+type ActionStatus = "done" | "partial" | "simulated" | "declined" | "expired" | "denied" | "failed";
+type ActionReport = { action: string; summary: string; status: ActionStatus; code: string | null };
+type TaskOutcome = { reply: string; actions: ActionReport[] };
+const statusNames: Record<ActionStatus, string> = {
+  done: "Fait",
+  partial: "Non confirmé",
+  simulated: "Simulé, rien n’a changé",
+  declined: "Refusé par toi",
+  expired: "Expiré sans réponse",
+  denied: "Refusé par la politique",
+  failed: "Échec",
+};
 type ApprovalAction =
   | { kind: "launch"; application: "notepad" }
   | { kind: "copyFile"; source: string; destination: string; characters: number }
@@ -108,9 +116,6 @@ const taskErrors: Record<string, string> = {
   MODEL_UNAVAILABLE_OR_INVALID: "Ollama ou le modèle est indisponible, ou le modèle ne prend pas en charge les appels d’outils.",
   AGENT_UNAVAILABLE: "L’agent Python est indisponible. Vérifie son installation.",
   AGENT_REJECTED: "L’agent a rejeté la proposition du modèle : outil inconnu ou arguments invalides.",
-  ACTION_DENIED: "Le broker a refusé l’action proposée.",
-  ACTION_DECLINED: "Action refusée. Rien n’a été exécuté.",
-  APPROVAL_EXPIRED: "La proposition a expiré sans réponse. Rien n’a été exécuté.",
   APPROVAL_NOT_PENDING: "Cette proposition n’est plus en attente.",
   TASK_BUSY: "Une demande est déjà en cours.",
   AGENT_STEP_LIMIT: "L’agent n’a pas conclu dans le nombre d’étapes autorisé. Reformule ou précise ta demande.",
@@ -124,7 +129,6 @@ const taskErrors: Record<string, string> = {
   INVALID_FILE_NAME: "Le nom de fichier n’est pas valide.",
   FILE_AUDIT_UNAVAILABLE: "Le journal local est indisponible ; l’opération n’a pas été effectuée ou n’a pas pu être journalisée.",
   TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
-  WINDOW_UNVERIFIED: "Windows a reçu la demande. Aucune nouvelle fenêtre du Bloc-notes n’a pu être confirmée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
   OUTCOME_UNRECORDED: "Le résultat de l’action n’a pas pu être journalisé.",
   AUDIT_UNAVAILABLE: "Le journal local est indisponible.",
@@ -153,6 +157,7 @@ function App() {
   const [taskProgress, setTaskProgress] = useState("");
   const [agentReply, setAgentReply] = useState("");
   const [draftReply, setDraftReply] = useState("");
+  const [actionReports, setActionReports] = useState<ActionReport[]>([]);
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
   const canSend = !running && !!selectedModel && !!prompt.trim()
     && (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
@@ -231,6 +236,7 @@ function App() {
     setTaskProgress("");
     setAgentReply("");
     setDraftReply("");
+    setActionReports([]);
     setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "delta") {
@@ -254,14 +260,9 @@ function App() {
         request: { prompt, model: selectedModel, provider, cloudApproved },
         progress,
       });
-      if (outcome.kind === "reply") {
-        setAgentReply(outcome.text);
-        setTaskStatus("");
-      } else if (outcome.kind === "copied") {
-        setTaskStatus(`« ${outcome.source} » a été copié vers « ${outcome.destination} ».`);
-      } else {
-        setTaskStatus("Le Bloc-notes est ouvert. Une nouvelle fenêtre a été vérifiée.");
-      }
+      setAgentReply(outcome.reply);
+      setActionReports(outcome.actions);
+      setTaskStatus("");
       setPrompt("");
     } catch (failure) {
       setTaskStatus(taskErrors[String(failure)] ?? "Le cœur local n’a pas pu terminer la demande.");
@@ -308,6 +309,17 @@ function App() {
             </div>
             {lastPrompt && <p className="user-message">{lastPrompt}</p>}
             {agentReply && <p className="agent-message" aria-label="Réponse de l’agent">{agentReply}</p>}
+            {actionReports.length > 0 && (
+              <section className="action-report" aria-labelledby="report-heading">
+                <h3 id="report-heading">Actions réellement effectuées</h3>
+                <ul>{actionReports.map((report, index) => (
+                  <li key={index} className={`status-${report.status}`}>
+                    <span>{report.summary}</span>
+                    <strong>{statusNames[report.status]}{report.code && report.status !== "done" ? ` (${report.code})` : ""}</strong>
+                  </li>
+                ))}</ul>
+              </section>
+            )}
             {running && draftReply && <p className="agent-message draft" aria-busy="true"
               aria-label="Réponse en cours de rédaction, non encore validée">{draftReply}</p>}
             {taskStatus && <p role="status">

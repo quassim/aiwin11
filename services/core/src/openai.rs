@@ -10,9 +10,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::model_gateway::{
-    open_stream, tool_catalog, Proposal, StreamSink, StreamedText, AGENT_INSTRUCTIONS,
-};
+use crate::model_gateway::{open_stream, tool_catalog, Proposal, StreamSink, StreamedText};
 
 const INVALID: &str = "CLOUD_PROPOSAL_INVALID";
 
@@ -80,9 +78,10 @@ fn read_entry() -> Result<Option<Credential>, &'static str> {
     Ok(Some(Credential(entry)))
 }
 
-/// Streams the user's request with the tool catalog. Callers must hold a cloud approval.
+/// Streams the conversation (instructions, request, tool calls and results, in the Chat
+/// Completions format) with the tool catalog. Callers must hold a cloud approval.
 pub(crate) fn propose(
-    model: &str, prompt: &str, sink: &mut StreamSink<'_>,
+    model: &str, messages: &[Value], sink: &mut StreamSink<'_>,
 ) -> Result<Proposal, &'static str> {
     if !model.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte)) {
         return Err("MODEL_REQUIRED");
@@ -108,10 +107,7 @@ pub(crate) fn propose(
         "stream": true,
         "max_completion_tokens": 1024,
         "parallel_tool_calls": false,
-        "messages": [
-            { "role": "system", "content": AGENT_INSTRUCTIONS },
-            { "role": "user", "content": prompt }
-        ],
+        "messages": messages,
         // No file or window tools: file contents and screen data never go to the cloud.
         "tools": tool_catalog(true, false, false)
     }));
@@ -123,6 +119,7 @@ pub(crate) fn propose(
 /// One streamed tool call, assembled from its fragments.
 #[derive(Default)]
 struct PartialCall {
+    id: String,
     kind: String,
     name: String,
     arguments: String,
@@ -156,6 +153,7 @@ fn fold_stream(reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Propos
                 }
                 let call = call.get_or_insert_with(PartialCall::default);
                 let piece = |pointer| fragment.pointer(pointer).and_then(Value::as_str).unwrap_or("");
+                call.id.push_str(piece("/id"));
                 call.kind.push_str(piece("/type"));
                 call.name.push_str(piece("/function/name"));
                 call.arguments.push_str(piece("/function/arguments"));
@@ -183,7 +181,7 @@ fn finish_proposal(finish: Option<&str>, call: Option<PartialCall>, text: &str) 
     match (finish, call) {
         (Some("tool_calls"), Some(call)) if call.kind == "function" && !call.name.is_empty() => {
             let arguments: Value = serde_json::from_str(&call.arguments).map_err(|_| INVALID)?;
-            Ok(Proposal::Calls(json!([{ "function": { "name": call.name, "arguments": arguments } }])))
+            Ok(Proposal::Calls(json!([{ "id": call.id, "function": { "name": call.name, "arguments": arguments } }])))
         }
         (Some("stop"), None) => Proposal::from_parts(None, Some(text)).ok_or(INVALID),
         _ => Err(INVALID),
@@ -228,8 +226,9 @@ mod tests {
             tool_fragment(json!({"function":{"arguments":"tion\":\"notepad\"}"}})),
             delta(json!({}), json!("tool_calls")),
         ]);
+        // The call ID is kept: the tool result sent back later must refer to it.
         assert_eq!(result, Ok(Proposal::Calls(
-            json!([{"function":{"name":"launch_application","arguments":{"application":"notepad"}}}]))));
+            json!([{"id":"call_1","function":{"name":"launch_application","arguments":{"application":"notepad"}}}]))));
         assert!(deltas.is_empty());
     }
 

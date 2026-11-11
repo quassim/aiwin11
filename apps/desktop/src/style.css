@@ -43,6 +43,13 @@ li { padding: 12px 0; border-top: 1px solid #344646; }
 .approval input { accent-color: #83e8c6; }
 .user-message { background: #25403b; border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; }
 .agent-message { background: #2a2f3a; border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.action-report h3 { margin: 8px 0 4px; font-size: 0.95rem; }
+.action-report ul { list-style: none; padding: 0; margin: 0; }
+.action-report li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid #333a45; }
+.action-report .status-done strong { color: #9ece6a; }
+.action-report .status-simulated strong { color: #7aa2f7; }
+.action-report .status-declined strong, .action-report .status-expired strong, .action-report .status-partial strong { color: #e0af68; }
+.action-report .status-denied strong, .action-report .status-failed strong { color: #f7768e; }
 .table-scroll { overflow-x: auto; }
 .table-scroll table { border-collapse: collapse; width: 100%; }
 .table-scroll th, .table-scroll td { padding: 6px 8px; border-bottom: 1px solid #333a45; text-align: left; }
