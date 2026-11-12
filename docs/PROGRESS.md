@@ -11,6 +11,7 @@ Périmètre fixé avec l’utilisateur : terminer la ligne, y compris arrêt de 
 - 🧪 `inspect_process` : détail en lecture seule d’un processus de la dernière liste (exécutable, éditeur, parent, démarrage, mémoire, threads), jamais la ligne de commande ni les titres de fenêtres.
 - 🧪 `describe_screen` : capture de l’écran principal décrite par le modèle de vision local, toujours sur accord, refusée si une fenêtre protégée est visible. Pas de test réel automatique (il capturerait l’écran de l’utilisateur).
 - 🧪 Plusieurs dossiers : jusqu’à quatre dossiers supplémentaires (page Fichiers), noms `alias/nom.txt` pour l’agent, jamais de copie ou de renommage entre dossiers.
+- 🧪 `list_applications` : état de la liste fermée d’applications (installée, interdite, processus et fenêtres ouverts) ; test réel du pont passé.
 
 ## 2026-11-13, statut « test utilisateur à faire »
 

@@ -79,6 +79,7 @@ type ApprovalAction =
   | { kind: "listProcesses" }
   | { kind: "inspectProcess"; name: string; process_id: number }
   | { kind: "describeScreen"; model: string }
+  | { kind: "listApplications" }
   | { kind: "systemStatus" }
   | { kind: "readClipboard" }
   | { kind: "writeClipboard"; text: string; characters: number }
@@ -253,6 +254,13 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       detail: "Action : lire la mémoire, la charge du processeur et l’espace libre des disques. Rien n’est modifié.",
     };
   }
+  if (action.kind === "listApplications") {
+    return {
+      title: "L’agent demande à lister les applications qu’il peut ouvrir",
+      detail:
+        "Action : vérifier si le Bloc-notes, la Table des caractères et Paint sont installés et ouverts. Rien n’est ouvert ni fermé.",
+    };
+  }
   if (action.kind === "describeScreen") {
     return {
       title: "L’agent demande à capturer tout l’écran principal",
@@ -380,6 +388,8 @@ const activityNames: Record<string, string> = {
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
   "history.exported": "Journal d’audit exporté",
+  "application.list.completed": "Applications listées",
+  "application.list.failed": "Liste des applications impossible",
   "process.inspect.completed": "Processus détaillé",
   "process.inspect.failed": "Détail du processus impossible",
   "process.list.completed": "Processus listés par l’agent",

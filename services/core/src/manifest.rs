@@ -108,7 +108,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 33] = [
+pub const MANIFESTS: [ToolManifest; 34] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -584,6 +584,20 @@ pub const MANIFESTS: [ToolManifest; 33] = [
         reversibility: R::NoEffect,
         timeout_ms: 105_000,
         capabilities: &[C::ScreenCapture],
+    },
+    ToolManifest {
+        action: AgentAction::ListApplications,
+        tool: "list_applications",
+        version: 1,
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 10_000,
+        capabilities: &[C::ProcessList],
     },
 ];
 

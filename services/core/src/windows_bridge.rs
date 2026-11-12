@@ -250,6 +250,21 @@ impl Core {
         Ok(located)
     }
 
+    /// Agent tool: status of the closed list of applications (installed, processes, windows).
+    pub(crate) fn agent_list_applications(
+        &mut self,
+        task: &str,
+        policy: Policy,
+    ) -> Result<Vec<ApplicationState>, &'static str> {
+        let operation = Operation::ListApplications(Default::default());
+        self.agent_bridge_call(task, policy, operation, "application.list", |reply| {
+            if reply.ui_tree.is_some() || reply.process_list.is_some() || reply.window_list.is_some() {
+                return None;
+            }
+            accept_application_list(reply.application_list?)
+        })
+    }
+
     /// Agent tool: read-only details of one process the same task listed.
     pub(crate) fn agent_inspect_process(
         &mut self,
@@ -863,6 +878,36 @@ pub(crate) struct ProcessInfo {
     pub working_set_bytes: u64,
     pub cpu_time_ms: u64,
     pub has_window: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ApplicationState {
+    /// Code of the closed list: `notepad`, `charmap`, `paint`.
+    pub code: &'static str,
+    pub installed: bool,
+    pub processes: u32,
+    pub windows: u32,
+}
+
+/// Exactly the closed list, once each, with coherent counts.
+fn accept_application_list(list: aiwin11_contracts::v1::ApplicationList) -> Option<Vec<ApplicationState>> {
+    let mut states = Vec::new();
+    for status in list.applications {
+        let code = crate::broker::application_code(status.application)?;
+        if states.iter().any(|state: &ApplicationState| state.code == code)
+            || status.windows > status.processes
+            || status.processes > 512
+        {
+            return None;
+        }
+        states.push(ApplicationState {
+            code,
+            installed: status.installed,
+            processes: status.processes,
+            windows: status.windows,
+        });
+    }
+    (states.len() == crate::APPLICATION_CODES.len()).then_some(states)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1483,6 +1528,56 @@ mod tests {
         assert!(status.memory_available_bytes > 0 && !status.drives.is_empty(), "{status:?}");
         let settings = status.settings.expect("Windows settings read");
         assert!(!settings.ui_language.is_empty() && !settings.time_zone.is_empty(), "{settings:?}");
+    }
+
+    #[test]
+    fn application_lists_from_the_bridge_are_validated() {
+        use aiwin11_contracts::v1::{launch_application::Application, ApplicationList, ApplicationStatus};
+        let status = |application: Application, processes, windows| ApplicationStatus {
+            application: application as i32,
+            installed: true,
+            processes,
+            windows,
+        };
+        let good = ApplicationList {
+            applications: vec![
+                status(Application::Notepad, 2, 1),
+                status(Application::CharacterMap, 0, 0),
+                status(Application::Paint, 0, 0),
+            ],
+        };
+        let states = accept_application_list(good.clone()).unwrap();
+        assert_eq!((states[0].code, states[0].processes, states[0].windows), ("notepad", 2, 1));
+        for bad in [
+            ApplicationList { applications: good.applications[..2].to_vec() },
+            ApplicationList {
+                applications: vec![
+                    status(Application::Notepad, 0, 0),
+                    status(Application::Notepad, 0, 0),
+                    status(Application::Paint, 0, 0),
+                ],
+            },
+            ApplicationList {
+                applications: vec![
+                    status(Application::Notepad, 0, 1),
+                    status(Application::CharacterMap, 0, 0),
+                    status(Application::Paint, 0, 0),
+                ],
+            },
+        ] {
+            assert_eq!(accept_application_list(bad), None);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn lists_the_applications_through_the_broker_and_the_bridge() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let grant = Policy::granting(&[crate::broker::Capability::ProcessList]);
+        let states = core.agent_list_applications(&task, grant).unwrap();
+        assert_eq!(states.iter().map(|state| state.code).collect::<Vec<_>>(), ["notepad", "charmap", "paint"]);
+        assert!(states.iter().find(|state| state.code == "charmap").unwrap().installed);
     }
 
     #[test]

@@ -77,6 +77,11 @@ class AgentProtocolTest(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("find_control", arguments)]}})
 
+    def test_list_applications_takes_no_argument(self):
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("list_applications", {})]}})
+        self.assertEqual(result.returncode, 0)
+        self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_applications", {"all": True})]}})
+
     def test_describe_screen_takes_no_argument(self):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("describe_screen", {})]}})
         self.assertEqual(result.returncode, 0)

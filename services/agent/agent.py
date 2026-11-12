@@ -172,6 +172,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "admin_clean_temp": {},
     "find_control": {"query": is_search_query},
     "inspect_process": {"process_id": is_process_id},
+    "list_applications": {},
     "click_control": {"control": is_control_number},
     "remember": {"text": is_note},
     "recall": {},

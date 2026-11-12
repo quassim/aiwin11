@@ -60,7 +60,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 |---|---|
 | Socle (lots A et B : AW-001 à AW-012) | ✅ Application Tauri, contrats Protobuf, broker, pont .NET, passerelle Ollama/OpenAI, agent, streaming, scénario « Ouvre le Bloc-notes » validé en réel |
 | Moteur de politiques, profils d’autonomie, approbations, simulation | ✅ |
-| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers texte/Markdown/CSV du dossier dédié ou choisi, lecture UIA de la fenêtre précédente avec clic et saisie sur un contrôle, recherche de contrôle 🧪, vision locale, opérations administrateur via l’assistant élevé ; redimensionnement 🧪, détail d’un processus 🧪, capture de l’écran pour l’agent 🧪, plusieurs dossiers 🧪 ; manquent (périmètre fixé le 13/11) : découverte des applications, arrêt d’un processus approuvé, souris/clavier en dernier recours, PowerShell depuis une liste fermée |
+| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers texte/Markdown/CSV du dossier dédié ou choisi, lecture UIA de la fenêtre précédente avec clic et saisie sur un contrôle, recherche de contrôle 🧪, vision locale, opérations administrateur via l’assistant élevé ; redimensionnement 🧪, détail d’un processus 🧪, capture de l’écran pour l’agent 🧪, plusieurs dossiers 🧪, découverte des applications 🧪 ; manquent (périmètre fixé le 13/11) : arrêt d’un processus approuvé, souris/clavier en dernier recours, PowerShell depuis une liste fermée |
 | Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | 🔷 Décision ADR-011 : Protobuf sur stdio, un processus par commande (pont, agent, assistant, MCP) ; cœur et broker dans le processus Tauri ; retour à gRPC prévu si un service permanent devient nécessaire |
@@ -191,7 +191,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Chemins canoniques, jonctions, liens | ✅ Fichiers | — |
 | Invariants : action inconnue refusée ✅, pas d’auto-attribution ✅, confirmation précise ✅, pas de transmission entre agents (N/A), LLM jamais autorité ✅, erreur → refus ✅, contournement = défaillance ✅, révocation effective ✅ (autorisations relues à chaque évaluation), vérification juste avant exécution ✅ | 🟡 | R2 |
 | Windows Bridge — WindowService (List ✅, Focus ✅, Minimize/Restore/Maximize ✅, Resize 🧪 moitié gauche/droite ou centrée aux deux tiers de l’écran de la fenêtre, Close ❌ volontairement absent) | 🟡 | R2 |
-| ApplicationService (Launch ✅ liste fermée : Bloc-notes, Table des caractères, Paint ; Discover ❌, GetStatus ❌) | 🟡 | R2 |
+| ApplicationService (Launch ✅ liste fermée : Bloc-notes, Table des caractères, Paint ; Discover et GetStatus 🧪 `list_applications` : installée, interdite, processus et fenêtres ouverts) | 🧪 | R2 |
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ✅ nom et contenu, pour l’agent et dans la page Fichiers) | 🟡 | R2 |
 | ProcessService (List ✅ lecture seule, Inspect 🧪 `inspect_process` sur un processus de la dernière liste, Terminate ❌) | 🟡 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre ✅ ; écran principal pour l’agent 🧪 (`describe_screen`, vision locale, refus si une fenêtre protégée est visible) ; écrans et capture d’un écran choisi dans l’Inspecteur | R2 |
@@ -314,7 +314,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - ✅ Risque formel par outil et **manifeste d’outil** (risque, dry-run, réversible, timeout, capacités).
 - Règles critiques explicites (toujours demandées ou refusées) : suppression massive, élévation, sécurité Windows, transactions financières, envoi de données confidentielles, installation de logiciel.
 - Pont Windows :
-  - ApplicationService : découverte et lancement d’applications autorisées ;
+  - 🧪 ApplicationService : découverte et état (`list_applications`) et lancement ✅ des applications autorisées ;
   - 🟡 WindowService : lister ✅, focus ✅, réduire/restaurer/agrandir ✅ ; redimensionner 🧪 (dispositions sur l’écran de la fenêtre) ; fermer ❌ (risque de perte de données, à décider) ;
   - 🟡 ProcessService : lister ✅, inspecter 🧪, arrêter (avec approbation) ❌ ;
   - UIAutomationService : FindElement, Invoke, SetValue ;

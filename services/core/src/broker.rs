@@ -216,6 +216,7 @@ impl Policy {
             {
                 Ok("list_processes")
             }
+            Some(Operation::ListApplications(_)) if agent(Capability::ProcessList) => Ok("list_applications"),
             Some(Operation::InspectProcess(inspect)) if agent(Capability::ProcessList) && inspect.process_id != 0 => {
                 Ok("inspect_process")
             }

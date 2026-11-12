@@ -30,8 +30,8 @@ use crate::{
     openai,
     policy::{self, ActionContext, AgentAction, AgentProfile, Effect, PolicySettings},
     windows_bridge::{
-        ListedWindow, NamedNode, ProcessDetails, ProcessSnapshot, SystemSnapshot, WindowTarget, WindowsSettings,
-        MAX_LISTED_WINDOWS,
+        ApplicationState, ListedWindow, NamedNode, ProcessDetails, ProcessSnapshot, SystemSnapshot, WindowTarget,
+        WindowsSettings, MAX_LISTED_WINDOWS,
     },
     Core, ToolCalling,
 };
@@ -157,6 +157,7 @@ pub enum ApprovalAction {
     DescribeScreen {
         model: String,
     },
+    ListApplications,
     /// Read-only; allowed in every profile by the default matrix.
     SystemStatus,
     /// Always asks: the clipboard may hold private data.
@@ -291,6 +292,8 @@ enum PlannedAction {
     FindControl(String),
     /// PID from this task's last `list_processes`.
     InspectProcess(u32),
+    /// Status of the closed list of applications.
+    ListApplications,
     /// Primary screen, described by the local vision model.
     DescribeScreen,
     SetControlValue(usize, String),
@@ -1123,6 +1126,7 @@ impl TaskSlot {
             }
             PlannedAction::DescribeWindow => ("describe_window", json!({}), self.describe_window(run)?),
             PlannedAction::DescribeScreen => ("describe_screen", json!({}), self.describe_screen(run)?),
+            PlannedAction::ListApplications => ("list_applications", json!({}), self.list_applications(run)?),
         })
     }
 
@@ -1457,6 +1461,23 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    /// Status of the applications the agent may open, with the user's blocks. Read-only.
+    fn list_applications<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>) -> Result<String, &'static str> {
+        let action = AgentAction::ListApplications;
+        let summary = "Lister les applications que l’agent peut ouvrir";
+        let grant = match self.gate(run, action, summary, Capability::ProcessList, ApprovalAction::ListApplications)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = self.read_with_recovery(run.core, run.task, run.progress, |core| {
+            core.agent_list_applications(run.task, grant)
+        })?;
+        let (status, code) = status_of(&result);
+        run.report(action, summary, status, code);
+        let blocked = lock(run.core)?.blocked_applications();
+        Ok(describe_applications(result, &blocked))
     }
 
     /// Read-only details of one process of this task's last list.
@@ -2614,6 +2635,38 @@ fn describe_system(result: Result<SystemSnapshot, &'static str>) -> String {
     }
 }
 
+/// Model-facing status of the closed list of applications.
+fn describe_applications(result: Result<Vec<ApplicationState>, &'static str>, blocked: &[&str]) -> String {
+    let states = match result {
+        Ok(states) => states,
+        Err(code) => return format!("Liste des applications indisponible : {code}. Rien n’a été modifié."),
+    };
+    let names = |code: &str| match code {
+        "notepad" => "Bloc-notes",
+        "charmap" => "Table des caractères",
+        _ => "Paint",
+    };
+    let lines: Vec<String> = states
+        .iter()
+        .map(|state| {
+            let availability = if blocked.contains(&state.code) {
+                "interdite par l’utilisateur".to_owned()
+            } else if !state.installed {
+                "non installée".to_owned()
+            } else {
+                format!("disponible (launch_application {})", state.code)
+            };
+            format!(
+                "- {} : {availability} ; {} processus ouvert(s), {} fenêtre(s)",
+                names(state.code),
+                state.processes,
+                state.windows
+            )
+        })
+        .collect();
+    format!("Applications que l’agent peut ouvrir (lecture seule, rien n’a été modifié) :\n{}", lines.join("\n"))
+}
+
 /// Model-facing details of one process, framed as untrusted data (texts come from the program).
 fn describe_process_details(result: Result<ProcessDetails, &'static str>) -> String {
     let details = match result {
@@ -3091,6 +3144,9 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
                 (Some(control), Some(text)) => Ok(PlannedAction::SetControlValue(control as usize, text.to_owned())),
                 _ => Err("AGENT_REJECTED"),
             }
+        }
+        ("tool", Some("list_applications"), Some(arguments), None) if arguments.is_empty() => {
+            Ok(PlannedAction::ListApplications)
         }
         ("tool", Some("describe_screen"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::DescribeScreen)

@@ -49,6 +49,7 @@ message Command {
     ListDisplays list_displays = 44;
     CaptureDisplay capture_display = 45;
     InspectProcess inspect_process = 46;
+    ListApplications list_applications = 47;
   }
 }
 
@@ -74,6 +75,19 @@ message ListLocalText {}
 
 // Read-only snapshot of the processes using the most memory (at most 25).
 message ListProcesses { uint32 limit = 1; }
+
+// Status of the closed list of applications the agent may open (ApplicationService Discover /
+// GetStatus): installed or not, and how many of its processes and windows are open. Read-only.
+message ListApplications {}
+
+message ApplicationList { repeated ApplicationStatus applications = 1; }
+
+message ApplicationStatus {
+  LaunchApplication.Application application = 1;
+  bool installed = 2;
+  uint32 processes = 3;
+  uint32 windows = 4;
+}
 
 // Read-only details of one process (no window title, no command line, nothing opened for writing).
 message InspectProcess { uint32 process_id = 1; }
@@ -406,6 +420,7 @@ message Result {
   DictationResult dictation = 16;
   DisplayList display_list = 17;
   ProcessDetails process_details = 18;
+  ApplicationList application_list = 19;
 }
 
 message Error {

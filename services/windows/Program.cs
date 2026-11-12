@@ -40,6 +40,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
         && command.InvokeControl is null && command.RunDiagnostic is null && command.Dictate is null
         && command.ListDisplays is null && command.CaptureDisplay is null && command.InspectProcess is null
+        && command.ListApplications is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -86,6 +87,11 @@ else if (command.CaptureWindow is { } captureTarget)
     {
         Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the window.");
     }
+}
+else if (command.ListApplications is not null)
+{
+    result.ApplicationList = AppLauncher.Status();
+    result.Status = Protocol.Result.Types.Status.Success;
 }
 else if (command.InspectProcess is { } inspectProcess)
 {

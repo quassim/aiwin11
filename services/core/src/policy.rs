@@ -107,10 +107,12 @@ pub enum AgentAction {
     InspectProcess,
     /// Describes the primary screen with the local vision model (always asks).
     DescribeScreen,
+    /// Lists the status of the closed list of applications (read-only).
+    ListApplications,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -144,6 +146,7 @@ impl AgentAction {
         Self::FindControl,
         Self::InspectProcess,
         Self::DescribeScreen,
+        Self::ListApplications,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -185,6 +188,7 @@ impl AgentAction {
             Self::FindControl => "find_control",
             Self::InspectProcess => "inspect_process",
             Self::DescribeScreen => "describe_screen",
+            Self::ListApplications => "list_applications",
         }
     }
 
@@ -262,6 +266,7 @@ impl AgentProfile {
             Self::Office => matches!(
                 action,
                 A::LaunchApplication
+                    | A::ListApplications
                     | A::ListFiles
                     | A::ReadFile
                     | A::SearchFiles
@@ -280,6 +285,7 @@ impl AgentProfile {
             Self::WindowsAdmin => matches!(
                 action,
                 A::SystemStatus
+                    | A::ListApplications
                     | A::InspectProcess
                     | A::ListProcesses
                     | A::ListServices
@@ -316,7 +322,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 33] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 34] = [
+    (A::ListApplications, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::DescribeScreen, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::InspectProcess, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::FindControl, [E::Allow, E::Allow, E::Allow, E::Allow]),

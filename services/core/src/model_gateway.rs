@@ -313,6 +313,13 @@ nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’un
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
+            "name": "list_applications",
+            "description": "Liste, en lecture seule, les applications que tu peux ouvrir avec launch_application \
+(Bloc-notes, Table des caractères, Paint) : installée ou non, interdite ou non par l’utilisateur, et combien de \
+processus et de fenêtres sont déjà ouverts. N’ouvre ni ne ferme rien.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
             "name": "inspect_process",
             "description": "Détaille, en lecture seule, un processus de la dernière liste obtenue avec list_processes \
         dans cette demande, désigné par son PID : exécutable, éditeur, processus parent, heure de démarrage, mémoire, \
@@ -1334,6 +1341,7 @@ mod tests {
                 "list_services",
                 "get_system_status",
                 "list_processes",
+                "list_applications",
                 "inspect_process",
                 "inspect_window",
                 "find_control",
@@ -1365,6 +1373,7 @@ mod tests {
                 "list_services",
                 "get_system_status",
                 "list_processes",
+                "list_applications",
                 "inspect_process",
                 "inspect_window",
                 "find_control",

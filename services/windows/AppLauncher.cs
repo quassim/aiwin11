@@ -50,4 +50,32 @@ internal static class AppLauncher
         }
         return windows;
     }
+
+    /// <summary>Status of each application of the closed list (Notepad included). Read-only.</summary>
+    internal static Protocol.ApplicationList Status()
+    {
+        var list = new Protocol.ApplicationList();
+        foreach (var application in new[]
+        {
+            Protocol.LaunchApplication.Types.Application.Notepad,
+            Protocol.LaunchApplication.Types.Application.CharacterMap,
+            Protocol.LaunchApplication.Types.Application.Paint,
+        })
+        {
+            var (path, processName) = application == Protocol.LaunchApplication.Types.Application.Notepad
+                ? (Path.Combine(Environment.SystemDirectory, "notepad.exe"), "Notepad")
+                : Target(application)!.Value;
+            var running = Process.GetProcessesByName(processName);
+            uint processes = (uint)running.Length;
+            foreach (var process in running) process.Dispose();
+            list.Applications.Add(new Protocol.ApplicationStatus
+            {
+                Application = application,
+                Installed = File.Exists(path),
+                Processes = processes,
+                Windows = (uint)Windows(processName).Count,
+            });
+        }
+        return list;
+    }
 }
