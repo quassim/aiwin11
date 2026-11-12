@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command as Process, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Condvar, Mutex,
     },
     thread,
@@ -316,6 +316,10 @@ const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_AGENT_STEPS: usize = 16;
 /// Longest a task may plan and act (ROADMAP §2.5, `max_runtime_seconds`).
 const MAX_TASK_RUNTIME: Duration = Duration::from_secs(900);
+/// Longest pause before the task stops by itself, so a paused task cannot hold AiWin11 forever.
+const MAX_PAUSE: Duration = Duration::from_secs(1800);
+/// Wait before the single retry of a failed read-only bridge call.
+const RECOVERY_DELAY: Duration = Duration::from_millis(1000);
 /// Deadline of an approved launch. The bridge verifies the window for 4 s at most after
 /// starting the application; the rest absorbs a slow first start of the .NET bridge
 /// (runtime load, antivirus scan of a newly installed binary).
@@ -409,6 +413,10 @@ pub struct TaskSlot {
     signal: Condvar,
     /// Set by `stop_all` while an action is dispatching: the task stops as soon as it returns.
     stop_after_dispatch: AtomicBool,
+    /// Set by `pause`: the task waits at the next safe point (before the next model step).
+    pause_requested: AtomicBool,
+    /// Time spent paused in the running task, excluded from its runtime limit.
+    paused_ms: AtomicU64,
 }
 
 /// Result of the global stop ("Stoppe toutes les tâches").
@@ -453,6 +461,101 @@ impl TaskSlot {
                 _ => continue,
             }
         }
+    }
+
+    /// Asks the running task to pause at the next safe point: before its next model step,
+    /// never in the middle of an action. Returns false when nothing is running.
+    pub fn pause(&self) -> bool {
+        if matches!(self.phase.load(Ordering::Acquire), PLANNING | DISPATCHING | AWAITING_APPROVAL) {
+            self.pause_requested.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Resumes a paused task, or withdraws a pause that was not reached yet.
+    /// Returns whether a pause was pending.
+    pub fn resume(&self) -> bool {
+        let was_paused = self.pause_requested.swap(false, Ordering::AcqRel);
+        if was_paused {
+            drop(self.approval.lock());
+            self.signal.notify_all();
+        }
+        was_paused
+    }
+
+    /// Time this task spent paused, excluded from `MAX_TASK_RUNTIME`.
+    fn paused_for(&self) -> Duration {
+        Duration::from_millis(self.paused_ms.load(Ordering::Acquire))
+    }
+
+    /// Safe point: if a pause was requested, the task is marked `paused` and waits until it is
+    /// resumed, cancelled, or `MAX_PAUSE` elapses (the task then stops: `PAUSE_EXPIRED`).
+    fn pause_point(&self, core: &Mutex<Core>, task: &str, progress: &impl Fn(TaskUpdate)) -> Result<(), &'static str> {
+        if !self.pause_requested.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        set_state(core, task, "paused", None)?;
+        record(core, task, "task.paused")?;
+        progress(TaskUpdate::stage("task.paused"));
+        let since = Instant::now();
+        let outcome = {
+            let mut state = self.approval.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+            loop {
+                if self.phase.load(Ordering::Acquire) == CANCELLED {
+                    break Err("TASK_CANCELLED");
+                }
+                if !self.pause_requested.load(Ordering::Acquire) {
+                    break Ok(());
+                }
+                let waited = since.elapsed();
+                if waited >= MAX_PAUSE {
+                    break Err("PAUSE_EXPIRED");
+                }
+                state = self.signal.wait_timeout(state, MAX_PAUSE - waited).map_err(|_| "CORE_UNAVAILABLE")?.0;
+            }
+        };
+        let paused = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.paused_ms.fetch_add(paused, Ordering::AcqRel);
+        match outcome {
+            Ok(()) => {
+                set_state(core, task, "planning", None)?;
+                record(core, task, "task.resumed")?;
+                progress(TaskUpdate::stage("task.resumed"));
+                Ok(())
+            }
+            Err("PAUSE_EXPIRED") => {
+                self.pause_requested.store(false, Ordering::Release);
+                record_code(core, task, "task.limit.reached", "pause")?;
+                Err("PAUSE_EXPIRED")
+            }
+            Err(code) => Err(code),
+        }
+    }
+
+    /// RECOVERING: a read-only bridge call that failed with `WINDOW_UNAVAILABLE` (bridge
+    /// starting, unreachable or empty reply) is retried once after a short delay. Only used for
+    /// reads that never ask the user, so a retry repeats neither a side effect nor an approval.
+    fn read_with_recovery<T>(
+        &self,
+        core: &Mutex<Core>,
+        task: &str,
+        progress: &impl Fn(TaskUpdate),
+        call: impl Fn(&mut Core) -> Result<T, &'static str>,
+    ) -> Result<Result<T, &'static str>, &'static str> {
+        let first = call(&mut *lock(core)?);
+        if !matches!(first, Err("WINDOW_UNAVAILABLE")) || self.phase.load(Ordering::Acquire) == CANCELLED {
+            return Ok(first);
+        }
+        set_state(core, task, "recovering", None)?;
+        record_code(core, task, "task.recovering", "retry_once")?;
+        progress(TaskUpdate::stage("task.recovering"));
+        thread::sleep(RECOVERY_DELAY);
+        let second = call(&mut *lock(core)?);
+        set_state(core, task, "planning", None)?;
+        record_code(core, task, "task.recovery.finished", if second.is_ok() { "recovered" } else { "failed" })?;
+        Ok(second)
     }
 
     /// True while a task is running (any phase but idle).
@@ -744,12 +847,14 @@ impl TaskSlot {
         let mut cloud_tokens: u64 = 0;
         let mut history: Vec<StepRecord> = Vec::new();
         for step in 1..=MAX_AGENT_STEPS {
-            if started.elapsed() > MAX_TASK_RUNTIME {
-                record_code(core, task, "task.limit.reached", "runtime")?;
-                return Err("AGENT_TIME_LIMIT");
-            }
             if self.phase.load(Ordering::Acquire) == CANCELLED {
                 return Err("TASK_CANCELLED");
+            }
+            self.pause_point(core, task, progress)?;
+            // Time spent paused does not count against the runtime limit.
+            if started.elapsed().saturating_sub(self.paused_for()) > MAX_TASK_RUNTIME {
+                record_code(core, task, "task.limit.reached", "runtime")?;
+                return Err("AGENT_TIME_LIMIT");
             }
             // Payload: step number only, never content.
             record_code(core, task, "task.progress", &format!("step:{step}/{MAX_AGENT_STEPS}"))?;
@@ -1210,7 +1315,8 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = lock(run.core)?.agent_list_processes(run.task, grant);
+        let result = self
+            .read_with_recovery(run.core, run.task, run.progress, |core| core.agent_list_processes(run.task, grant))?;
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
@@ -1620,7 +1726,8 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = lock(run.core)?.agent_list_services(run.task, grant);
+        let result = self
+            .read_with_recovery(run.core, run.task, run.progress, |core| core.agent_list_services(run.task, grant))?;
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(match result {
@@ -1658,7 +1765,8 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = lock(run.core)?.agent_list_windows(run.task, grant);
+        let result =
+            self.read_with_recovery(run.core, run.task, run.progress, |core| core.agent_list_windows(run.task, grant))?;
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(match result {
@@ -1805,7 +1913,8 @@ impl TaskSlot {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
-        let result = lock(run.core)?.agent_system_status(run.task, grant);
+        let result = self
+            .read_with_recovery(run.core, run.task, run.progress, |core| core.agent_system_status(run.task, grant))?;
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_system(result))
@@ -2460,6 +2569,8 @@ impl Drop for ResetSlot<'_> {
             *state = ApprovalState::Idle;
         }
         self.0.stop_after_dispatch.store(false, Ordering::Release);
+        self.0.pause_requested.store(false, Ordering::Release);
+        self.0.paused_ms.store(0, Ordering::Release);
         self.0.phase.store(IDLE, Ordering::Release);
     }
 }
@@ -3070,6 +3181,97 @@ mod tests {
         let slot = TaskSlot::default();
         slot.phase.store(PLANNING, Ordering::Release);
         slot
+    }
+
+    fn core_with_task() -> (Mutex<Core>, String) {
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        core.task_created(&task).unwrap();
+        (Mutex::new(core), task)
+    }
+
+    #[test]
+    fn a_paused_task_waits_at_the_safe_point_and_resumes_without_losing_time() {
+        let slot = planning_slot();
+        let (core, task) = core_with_task();
+        assert!(slot.pause_point(&core, &task, &|_| {}).is_ok(), "no pause requested: nothing to do");
+        assert!(slot.pause());
+        let stages = Mutex::new(Vec::new());
+        let result = thread::scope(|scope| {
+            let waiter = scope.spawn(|| {
+                slot.pause_point(&core, &task, &|update| {
+                    if let TaskUpdate::Stage { stage } = update {
+                        stages.lock().unwrap().push(stage);
+                    }
+                })
+            });
+            while lock(&core).unwrap().recent_tasks(1).unwrap()[0].state != "paused" {
+                thread::sleep(Duration::from_millis(5));
+            }
+            thread::sleep(Duration::from_millis(50));
+            assert!(slot.resume());
+            waiter.join().unwrap()
+        });
+        assert_eq!(result, Ok(()));
+        assert_eq!(*stages.lock().unwrap(), ["task.paused", "task.resumed"]);
+        assert!(slot.paused_for() >= Duration::from_millis(50), "paused time is tracked");
+        assert_eq!(lock(&core).unwrap().recent_tasks(1).unwrap()[0].state, "planning");
+        let kinds: Vec<_> = lock(&core).unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert!(kinds.contains(&"task.paused".to_owned()) && kinds.contains(&"task.resumed".to_owned()));
+    }
+
+    #[test]
+    fn transient_read_failures_are_retried_once_and_other_errors_are_not() {
+        let slot = planning_slot();
+        let (core, task) = core_with_task();
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let flaky = |_: &mut Core| -> Result<u32, &'static str> {
+            match attempts.fetch_add(1, Ordering::AcqRel) {
+                0 => Err("WINDOW_UNAVAILABLE"),
+                n => Ok(n),
+            }
+        };
+        assert_eq!(slot.read_with_recovery(&core, &task, &|_| {}, flaky), Ok(Ok(1)));
+        assert_eq!(attempts.load(Ordering::Acquire), 2, "one retry");
+        assert_eq!(lock(&core).unwrap().recent_tasks(1).unwrap()[0].state, "planning");
+        let codes: Vec<_> =
+            lock(&core).unwrap().activity().unwrap().into_iter().filter_map(|event| event.code).collect();
+        assert!(codes.contains(&"retry_once".to_owned()) && codes.contains(&"recovered".to_owned()), "{codes:?}");
+
+        attempts.store(0, Ordering::Release);
+        let denied = |_: &mut Core| -> Result<u32, &'static str> {
+            attempts.fetch_add(1, Ordering::AcqRel);
+            Err("WINDOW_ACCESS_DENIED")
+        };
+        assert_eq!(slot.read_with_recovery(&core, &task, &|_| {}, denied), Ok(Err("WINDOW_ACCESS_DENIED")));
+        assert_eq!(attempts.load(Ordering::Acquire), 1, "a denial is never retried");
+
+        attempts.store(0, Ordering::Release);
+        let down = |_: &mut Core| -> Result<u32, &'static str> {
+            attempts.fetch_add(1, Ordering::AcqRel);
+            Err("WINDOW_UNAVAILABLE")
+        };
+        assert_eq!(slot.read_with_recovery(&core, &task, &|_| {}, down), Ok(Err("WINDOW_UNAVAILABLE")));
+        assert_eq!(attempts.load(Ordering::Acquire), 2, "at most one retry");
+    }
+
+    #[test]
+    fn cancelling_wakes_a_paused_task_and_idle_slots_cannot_pause() {
+        let idle = TaskSlot::default();
+        assert!(!idle.pause(), "nothing running");
+        assert!(!idle.resume());
+        let slot = planning_slot();
+        let (core, task) = core_with_task();
+        assert!(slot.pause());
+        let result = thread::scope(|scope| {
+            let waiter = scope.spawn(|| slot.pause_point(&core, &task, &|_| {}));
+            while lock(&core).unwrap().recent_tasks(1).unwrap()[0].state != "paused" {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(slot.cancel(), "a paused task is in the planning phase: cancellable");
+            waiter.join().unwrap()
+        });
+        assert_eq!(result, Err("TASK_CANCELLED"));
     }
 
     #[test]

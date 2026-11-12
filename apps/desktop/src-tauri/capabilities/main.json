@@ -3,7 +3,7 @@
   "description": "The local desktop window can read activity and request the supported task.",
   "windows": ["main"],
   "permissions": [
-    "allow-get-snapshot", "allow-discover-models", "allow-run-task", "allow-cancel-task", "allow-resolve-approval",
+    "allow-get-snapshot", "allow-discover-models", "allow-run-task", "allow-cancel-task", "allow-pause-task", "allow-resume-task", "allow-resolve-approval",
     "allow-get-policy-overview", "allow-set-policy-settings", "allow-get-tasks",
     "allow-openai-key-configured", "allow-save-openai-key", "allow-delete-openai-key",
     "allow-inspect-foreground", "allow-capture-foreground", "allow-discover-vision-models", "allow-analyze-capture",

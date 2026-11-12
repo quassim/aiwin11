@@ -10,7 +10,9 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Choix du modèle local en quatre stratégies (`manual`, `adaptive`, `quality_first`, `cost_optimized`), remplaçant l’interrupteur adaptatif (repris automatiquement) ; vérifié par `verify.ps1` (106 tests Rust), non testé avec Ollama réel.
 
-**Prochaine étape** : états PAUSED/RECOVERING et étape Recover (R2), test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
+- Pause et reprise d’une demande (état `paused`, au prochain point sûr, temps de pause exclu de la limite, arrêt après 30 minutes) ; étape Recover : un nouvel essai unique des lectures système après un échec passager du pont (état `recovering`). Vérifié par `verify.ps1` (109 tests Rust), non testé à la main.
+
+**Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub
 

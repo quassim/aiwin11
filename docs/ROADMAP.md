@@ -93,7 +93,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Installateur signé, MSIX selon besoins | ✅ Décidé : installateur **classique** ; réalisation ❌ | R9 |
 | M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto ❌ | 🟡 | R3 |
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
-| M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ✅, vérification 🟡, interruption ✅, **reprise** 🟡 (reprise manuelle des workflows) | 🟡 | R2, R8 |
+| M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ✅, vérification 🟡, interruption ✅ (pause, reprise, annulation), **reprise** 🟡 (pause/reprise, reprise manuelle des workflows) | 🟡 | R2, R8 |
 | M04 Sécurité : règles par ressource ❌, permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
 | M05 Mémoire de session, préférences durables, indexation sélective, historique ✅, recherche sémantique | 🟡 | R6 |
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
@@ -145,8 +145,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Aucun repli local → cloud en mode privé strict | ✅ Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
 | HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | ❌ | R3 |
 | Agent défini en YAML (rôle, profil de modèle, capacités, limites, vérification, `retry_limit`, profil de politique) | ❌ Limites fixes dans le code | R8 |
-| États : CREATED ✅, PLANNING ✅, RUNNING ✅ (`dispatching`), AWAITING_APPROVAL ✅, COMPLETED ✅, FAILED ✅, CANCELLED ✅, **PAUSED**, **CANCELLING**, **RECOVERING** ❌ (`interrupted` à la place) | 🟡 | R2 |
-| Cycle Understand → Plan → Authorize ✅ → Execute ✅ → Observe ✅ → **Verify** 🟡 → **Recover** ❌ → Report ✅ | 🟡 | R2 |
+| États : CREATED ✅, PLANNING ✅, RUNNING ✅ (`dispatching`), AWAITING_APPROVAL ✅, COMPLETED ✅, FAILED ✅, CANCELLED ✅, **PAUSED** ✅, **RECOVERING** ✅ (nouvel essai unique des lectures système), CANCELLING 🟡 (arrêt « demandé » pendant une action, confirmé à sa fin) ; `interrupted` après un plantage | ✅ | — |
+| Cycle Understand → Plan → Authorize ✅ → Execute ✅ → Observe ✅ → **Verify** 🟡 → **Recover** 🟡 (un nouvel essai des lectures système après un échec passager du pont ; jamais d’effet rejoué) → Report ✅ | 🟡 | R2 |
 | Contrat d’exécution d’outil avec `dry_run`, `timeout`, `idempotency_key` ; retour avec décision, effets, observations, statut de vérification | 🟡 Interne ; à formaliser | R2 |
 | Broker : EvaluateAction ✅, RequestApproval ✅, GrantCapability / RevokeCapability temporaires ✅ (table `grants`), ExecuteAuthorized ✅, CancelExecution 🟡, GetAuditTrail ✅ (export) | 🟡 | R2 |
 | Politique JSON (sujet, actions, **ressources/chemins**, contraintes `max_files`, `require_backup`, `expires_after`) | ❌ | R2 |

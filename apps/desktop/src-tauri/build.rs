@@ -5,6 +5,8 @@ fn main() {
         "probe_local_model",
         "run_task",
         "cancel_task",
+        "pause_task",
+        "resume_task",
         "resolve_approval",
         "get_policy_overview",
         "set_policy_settings",

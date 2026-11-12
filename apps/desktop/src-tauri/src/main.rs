@@ -433,6 +433,18 @@ fn cancel_task(state: State<'_, Arc<AppState>>) -> bool {
     state.task.cancel()
 }
 
+/// Pauses the running task at its next safe point (before the next model step).
+#[tauri::command]
+fn pause_task(state: State<'_, Arc<AppState>>) -> bool {
+    state.task.pause()
+}
+
+/// Resumes a paused task, or withdraws a pause not reached yet.
+#[tauri::command]
+fn resume_task(state: State<'_, Arc<AppState>>) -> bool {
+    state.task.resume()
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HistorySettings {
@@ -970,6 +982,8 @@ fn main() {
             discover_models,
             run_task,
             cancel_task,
+            pause_task,
+            resume_task,
             stop_all_tasks,
             get_grants,
             get_admin_helper,

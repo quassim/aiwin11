@@ -86,7 +86,7 @@ Ce que l’agent peut faire :
 | « Que montre la fenêtre que j’utilisais ? » | Lit la structure (types et noms des contrôles, jamais les champs de mot de passe) de la fenêtre utilisée juste avant AiWin11 |
 | « Décris la fenêtre que j’utilisais » | Fait décrire cette fenêtre par le modèle de vision **local** ; l’agent ne reçoit que la description |
 
-Quand une action demande ton accord, un encadré la décrit exactement (fichiers, nombre de caractères, texte complet à écrire, titre de la fenêtre…). Choisis **Autoriser** ou **Refuser** ; le focus clavier commence sur **Refuser**. Sans réponse sous 60 secondes, la proposition expire. **Annuler** arrête la génération en cours ou une demande en attente d’accord ; une action déjà en cours d’exécution n’est plus annulable.
+Quand une action demande ton accord, un encadré la décrit exactement (fichiers, nombre de caractères, texte complet à écrire, titre de la fenêtre…). Choisis **Autoriser** ou **Refuser** ; le focus clavier commence sur **Refuser**. Sans réponse sous 60 secondes, la proposition expire. **Annuler** arrête la génération en cours ou une demande en attente d’accord ; une action déjà en cours d’exécution n’est plus annulable. **Pause** suspend la demande avant sa prochaine étape (jamais au milieu d’une action) ; **Reprendre** la relance là où elle était. Le temps de pause ne compte pas dans la limite de 15 minutes, et une pause de plus de 30 minutes arrête la demande.
 
 ### Agents spécialisés
 

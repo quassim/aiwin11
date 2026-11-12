@@ -282,7 +282,11 @@ Strategies: `manual` (default: the chosen model, nothing else) and `local_first`
 
 ## Tasks and recovery
 
-Each chat task has a row in `tasks` (`id`, `session_id`, `state`, `outcome`, timestamps), updated at each step: `created`, `planning`, `awaiting_approval`, `dispatching`, then `completed` (outcome `ok`), `failed` (error code) or `cancelled`. Final states never change.
+Each chat task has a row in `tasks` (`id`, `session_id`, `state`, `outcome`, timestamps), updated at each step: `created`, `planning`, `awaiting_approval`, `dispatching`, `paused`, `recovering`, then `completed` (outcome `ok`), `failed` (error code) or `cancelled`. Final states never change.
+
+**Pause.** `pause_task` (main window only) asks the running task to pause at its next safe point: before its next model step, never in the middle of an action or an approval. The task then records `task.paused`, waits, and records `task.resumed` when `resume_task` is called. A paused task can be cancelled or stopped. Paused time does not count against the 15-minute runtime limit; after 30 minutes of pause the task stops with `PAUSE_EXPIRED` (`task.limit.reached`, code `pause`).
+
+**Recover.** The read-only system tools that never ask the user (`list_processes`, `get_system_status`, `list_windows`, `list_services`) are retried **once**, after one second, when the bridge call fails with `WINDOW_UNAVAILABLE` (bridge starting, unreachable or empty reply): state `recovering`, events `task.recovering` (`retry_once`) and `task.recovery.finished` (`recovered` or `failed`). Denials and other errors are never retried, and no side effect or approval is ever repeated.
 
 At startup, tasks still in a non-final state were interrupted by a crash or a forced exit. They are closed as `interrupted`, keeping their last state as outcome, and journaled as `task.recovered` in the new session. Nothing is re-run, so an action that may have happened is never repeated; a task interrupted while `dispatching` is flagged in the Activity page so the user can check its result. Within a session, the broker's idempotency reservations already prevent repeated dispatch.
 

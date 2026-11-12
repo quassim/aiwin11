@@ -424,6 +424,10 @@ const activityNames: Record<string, string> = {
   "task.failed": "Demande en échec",
   "task.partial": "Vérification incomplète",
   "task.cancelled": "Demande annulée",
+  "task.paused": "Demande en pause",
+  "task.resumed": "Demande reprise",
+  "task.recovering": "Nouvel essai après un échec passager",
+  "task.recovery.finished": "Fin du nouvel essai",
   "task.recovered": "Demande interrompue retrouvée au démarrage",
   "policy.profile": "Profil de sécurité appliqué",
   "inspection.completed": "Fenêtre inspectée",
@@ -493,6 +497,7 @@ const taskErrors: Record<string, string> = {
   FILE_AUDIT_UNAVAILABLE:
     "Le journal local est indisponible ; l’opération n’a pas été effectuée ou n’a pas pu être journalisée.",
   TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
+  PAUSE_EXPIRED: "La demande est restée en pause plus de 30 minutes : elle a été arrêtée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
   OUTCOME_UNRECORDED: "Le résultat de l’action n’a pas pu être journalisé.",
   AUDIT_UNAVAILABLE: "Le journal local est indisponible.",
@@ -538,6 +543,8 @@ function App() {
   const [draftReply, setDraftReply] = useState("");
   const [actionReports, setActionReports] = useState<ActionReport[]>([]);
   const [stopState, setStopState] = useState<"" | "idle" | "stopped" | "requested" | "confirmed" | "failed">("");
+  // "requested": pause asked, applied before the next model step; "paused": the task waits.
+  const [pauseState, setPauseState] = useState<"" | "requested" | "paused">("");
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
   const canSend =
     !running &&
@@ -678,6 +685,7 @@ function App() {
     setDraftReply("");
     setActionReports([]);
     setStopState("");
+    setPauseState("");
     setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "modelSelected") {
@@ -697,6 +705,8 @@ function App() {
         return;
       }
       if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
+      if (update.stage === "task.paused") setPauseState("paused");
+      if (update.stage === "task.resumed") setPauseState("");
       // Text streamed before a tool call is superseded by the next step.
       if (update.stage === "agent.tool.requested" || update.stage === "workflow.step.started") setDraftReply("");
       setTaskProgress(activityNames[update.stage] ?? "");
@@ -731,6 +741,7 @@ function App() {
       // The streamed draft is unvalidated: only the agent-approved reply stays on screen.
       setDraftReply("");
       setPendingApproval(undefined);
+      setPauseState("");
       setRunning(false);
       setStopState((current) => (current === "requested" ? "confirmed" : current));
       refresh();
@@ -745,6 +756,19 @@ function App() {
       setStopState("failed");
     }
     refresh();
+  }
+
+  async function togglePause() {
+    try {
+      if (pauseState === "") {
+        if (await invoke<boolean>("pause_task")) setPauseState("requested");
+      } else {
+        await invoke<boolean>("resume_task");
+        setPauseState("");
+      }
+    } catch {
+      setTaskStatus("Le cœur local n’a pas pu traiter la pause.");
+    }
   }
 
   async function cancelTask() {
@@ -986,11 +1010,23 @@ function App() {
                   {dictating ? "Écoute…" : "🎤 Dicter"}
                 </button>
                 {running && (
+                  <button type="button" aria-pressed={pauseState !== ""} onClick={() => void togglePause()}>
+                    {pauseState === "" ? "Pause" : "Reprendre"}
+                  </button>
+                )}
+                {running && (
                   <button type="button" onClick={() => void cancelTask()}>
                     Annuler
                   </button>
                 )}
               </div>
+              {running && pauseState !== "" && (
+                <p role="status">
+                  {pauseState === "requested"
+                    ? "Pause demandée : la demande s’arrêtera avant sa prochaine étape, sans interrompre une action en cours."
+                    : "Demande en pause. Reprends-la ou annule-la ; au-delà de 30 minutes, elle s’arrête."}
+                </p>
+              )}
               <p role="status">{dictationStatus}</p>
             </form>
             <Routines
