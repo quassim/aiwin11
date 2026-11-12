@@ -546,6 +546,9 @@ impl TaskSlot {
             .as_deref()
             .filter(|model| local && request.cloud_approved && !model.is_empty() && model.len() <= 256);
         let mut cloud_model: Option<&str> = (!local).then_some(request.model.as_str());
+        // Checked before each cloud call: a task never starts a call once its budget is spent.
+        let budget = lock(core)?.cloud_token_budget();
+        let mut cloud_tokens: u64 = 0;
         let mut history: Vec<StepRecord> = Vec::new();
         for step in 1..=MAX_AGENT_STEPS {
             if self.phase.load(Ordering::Acquire) == CANCELLED {
@@ -573,8 +576,20 @@ impl TaskSlot {
                             _ => "MODEL_UNAVAILABLE_OR_INVALID",
                         })
                 }
-                Some(model) => openai::propose(model, &openai_messages(prompt, &history), &mut sink),
+                Some(_) if cloud_tokens >= budget => {
+                    record_code(core, task, "model.budget.exceeded", &format!("tokens:{cloud_tokens}"))?;
+                    return Err("CLOUD_BUDGET_EXCEEDED");
+                }
+                Some(model) => {
+                    openai::propose(model, &openai_messages(prompt, &history), &mut sink).map(|(proposal, used)| {
+                        cloud_tokens += used;
+                        proposal
+                    })
+                }
             };
+            if cloud_model.is_some() && cloud_tokens > 0 {
+                record_code(core, task, "model.usage", &format!("tokens:{cloud_tokens}"))?;
+            }
             let proposal = match proposal {
                 Ok(proposal) => proposal,
                 // Only before any step: no local observation (file, screen) may reach the cloud.

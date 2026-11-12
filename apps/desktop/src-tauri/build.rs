@@ -34,6 +34,8 @@ fn main() {
         "get_privacy",
         "set_privacy",
         "get_cloud_fallback",
+        "get_cloud_budget",
+        "set_cloud_budget",
         "set_cloud_fallback",
         "get_model_resources",
     ])))

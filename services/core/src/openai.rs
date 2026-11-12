@@ -79,7 +79,14 @@ fn read_entry() -> Result<Option<Credential>, &'static str> {
 
 /// Streams the conversation (instructions, request, tool calls and results, in the Chat
 /// Completions format) with the tool catalog. Callers must hold a cloud approval.
-pub(crate) fn propose(model: &str, messages: &[Value], sink: &mut StreamSink<'_>) -> Result<Proposal, &'static str> {
+/// Sends one request and returns the proposal with the tokens it used (reported by OpenAI;
+/// when not reported, a conservative estimate: input characters / 3 + the output cap).
+pub(crate) fn propose(
+    model: &str,
+    messages: &[Value],
+    sink: &mut StreamSink<'_>,
+) -> Result<(Proposal, u64), &'static str> {
+    let estimate = serde_json::to_string(messages).map(|text| text.len() as u64 / 3).unwrap_or(0) + 1024;
     if !model.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte)) {
         return Err("MODEL_REQUIRED");
     }
@@ -103,6 +110,7 @@ pub(crate) fn propose(model: &str, messages: &[Value], sink: &mut StreamSink<'_>
         "model": model,
         "store": false,
         "stream": true,
+        "stream_options": { "include_usage": true },
         "max_completion_tokens": 1024,
         "parallel_tool_calls": false,
         "messages": messages,
@@ -111,7 +119,14 @@ pub(crate) fn propose(model: &str, messages: &[Value], sink: &mut StreamSink<'_>
     }));
     drop(credential);
     let stream = open_stream(request).map_err(|_| "CLOUD_REQUEST_FAILED")?;
-    fold_stream(stream, sink)
+    let mut usage = None;
+    let proposal = fold_with_usage(stream, sink, &mut usage)?;
+    Ok((proposal, usage.unwrap_or(estimate)))
+}
+
+#[cfg(test)]
+fn fold_stream(reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Proposal, &'static str> {
+    fold_with_usage(reader, sink, &mut None)
 }
 
 /// One streamed tool call, assembled from its fragments.
@@ -125,7 +140,11 @@ struct PartialCall {
 
 /// Folds an OpenAI Chat Completions SSE stream into one proposal. Only text deltas reach
 /// the sink; at most one tool call (index 0) is accepted, as `parallel_tool_calls` is off.
-fn fold_stream(reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Proposal, &'static str> {
+fn fold_with_usage(
+    reader: impl BufRead,
+    sink: &mut StreamSink<'_>,
+    usage: &mut Option<u64>,
+) -> Result<Proposal, &'static str> {
     let mut text = StreamedText::default();
     let mut call: Option<PartialCall> = None;
     let mut finish: Option<String> = None;
@@ -137,6 +156,9 @@ fn fold_stream(reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Propos
             return finish_proposal(finish.as_deref(), call, text.as_str());
         }
         let chunk: Value = serde_json::from_str(data).map_err(|_| INVALID)?;
+        if let Some(total) = chunk.pointer("/usage/total_tokens").and_then(Value::as_u64) {
+            *usage = Some(total);
+        }
         let mut delta_text = None;
         if let Some(choice) = chunk.pointer("/choices/0") {
             let delta = choice.get("delta");

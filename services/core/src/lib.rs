@@ -263,6 +263,39 @@ impl Core {
         write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
+    /// Most tokens one task may spend with a cloud provider (default 50 000, 1 000 to 2 000 000).
+    pub fn cloud_token_budget(&self) -> u64 {
+        self.setting("routing.cloud_token_budget")
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse().ok())
+            .filter(|budget| (1_000..=2_000_000).contains(budget))
+            .unwrap_or(50_000)
+    }
+
+    pub fn set_cloud_token_budget(&mut self, budget: u64) -> Result<(), &'static str> {
+        if !(1_000..=2_000_000).contains(&budget) {
+            return Err("SETTINGS_INVALID");
+        }
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('routing.cloud_token_budget', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [budget.to_string()],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.budget.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, format!("tokens:{budget}")],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// Retention of past sessions, in days.
     pub fn retention_days(&self) -> u32 {
         Self::retention_days_in(&self.db)
@@ -760,6 +793,15 @@ mod tests {
         assert!(core.cloud_fallback_enabled());
         core.db.execute("DROP TABLE settings", []).unwrap();
         assert!(!core.cloud_fallback_enabled(), "an unreadable setting never allows the cloud");
+    }
+
+    #[test]
+    fn cloud_token_budget_defaults_and_bounds() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert_eq!(core.cloud_token_budget(), 50_000);
+        assert_eq!(core.set_cloud_token_budget(10), Err("SETTINGS_INVALID"));
+        core.set_cloud_token_budget(20_000).unwrap();
+        assert_eq!(core.cloud_token_budget(), 20_000);
     }
 
     #[test]

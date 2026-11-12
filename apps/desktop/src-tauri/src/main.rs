@@ -313,6 +313,16 @@ async fn get_model_resources() -> Result<Vec<aiwin11_core::model_gateway::Loaded
 }
 
 #[tauri::command]
+fn get_cloud_budget(state: State<'_, Arc<AppState>>) -> Result<u64, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.cloud_token_budget())
+}
+
+#[tauri::command]
+fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_token_budget(tokens)
+}
+
+#[tauri::command]
 fn get_privacy(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
     Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.private_mode())
 }
@@ -488,6 +498,8 @@ fn main() {
             get_admin_helper,
             get_privacy,
             get_cloud_fallback,
+            get_cloud_budget,
+            set_cloud_budget,
             set_cloud_fallback,
             get_model_resources,
             set_privacy,

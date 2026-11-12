@@ -18,7 +18,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | ❌ Le cœur tourne dans le processus Tauri |
-| Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies `manual` et `local_first` avec secours cloud explicite, modèles chargés et VRAM ; voix/image/vidéo, budget, autres stratégies ❌ |
+| Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies `manual` et `local_first` avec secours cloud explicite, modèles chargés et VRAM ; budget en jetons par demande cloud ✅ ; voix/image/vidéo, coût en euros, autres stratégies ❌ |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification ✅, raccourci global Ctrl+Alt+Espace ouvrant le champ de demande (palette simple) ✅ ; overlay flottant ❌ |
 | Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | ❌ |
 | Distribution (installateur, mises à jour) | ❌ Usage développeur seulement |

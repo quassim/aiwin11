@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, R3 — modèles par tâche
+
+**Fait** : `28ee87e` vue « Modèles par tâche » (texte/actions, vision ; voix/image/vidéo signalées indisponibles), routage `manual` / `local_first` avec secours OpenAI explicite (avant toute action, accord de la demande, jamais en mode privé), modèles chargés et VRAM (`/api/ps`) ; budget en jetons par demande cloud (`CLOUD_BUDGET_EXCEEDED`, événements `model.usage`).
+
+**Vérifié** : `verify.ps1` (85 tests Rust). Non testé en réel (pas de clé OpenAI).
+
+**Reste en R3** : coût en euros (prix saisis par l’utilisateur), stratégies `quality_first`/`cost_optimized`/`adaptive`, tests de capacités par modèle dans l’interface, détection GPU (NVIDIA/AMD) hors Ollama, modèles d’embedding. Ensuite R4–R9.
+
 ## 2026-11-12, après-midi — suite
 
 **Fait** : `1273304` lancement en un double-clic (`Ollama.cmd`, `AiWin11.cmd`), testé par l’utilisateur ; `cc9251c` `click_control` (UI Automation Invoke/Toggle/Select sur un contrôle numéroté de la fenêtre lue, toujours demandé) ; `4d2b4d7` Ctrl+Alt+Espace ouvre directement le champ de demande.

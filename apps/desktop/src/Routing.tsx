@@ -18,6 +18,7 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
   const [fallback, setFallback] = useState<boolean>();
   const [loaded, setLoaded] = useState<LoadedModel[]>();
   const [status, setStatus] = useState("");
+  const [budget, setBudget] = useState<number>();
 
   async function refreshResources() {
     try {
@@ -34,6 +35,7 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
       setFallback(enabled);
       onFallbackChange(enabled);
     });
+    void invoke<number>("get_cloud_budget").then(setBudget);
     void refreshResources();
   }, [onFallbackChange]);
 
@@ -77,6 +79,24 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
           et jamais en mode privé. Sinon, le modèle choisi est utilisé tel quel.
         </span>
       </label>
+      <div className="task-form">
+        <label htmlFor="cloud-budget">Budget maximal d’une demande envoyée à OpenAI (jetons)</label>
+        <select
+          id="cloud-budget"
+          value={budget ?? ""}
+          disabled={budget === undefined}
+          onChange={(event) => {
+            const tokens = Number(event.target.value);
+            void invoke("set_cloud_budget", { tokens }).then(() => setBudget(tokens));
+          }}
+        >
+          {[10_000, 20_000, 50_000, 100_000, 200_000].map((value) => (
+            <option key={value} value={value}>
+              {value.toLocaleString("fr-FR")} jetons
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="section-header">
         <h3>Ressources des modèles locaux</h3>
         <button onClick={() => void refreshResources()}>Actualiser</button>
