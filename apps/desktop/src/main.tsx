@@ -518,6 +518,8 @@ const taskErrors: Record<string, string> = {
   FILE_COPY_FAILED: "La copie a échoué. Aucun fichier partiel n’a été conservé.",
   FILE_COPY_CLEANUP_FAILED: "La copie a échoué et un fichier temporaire n’a pas pu être supprimé.",
   FILE_OUTSIDE_SCOPE: "Le fichier se trouve hors du dossier autorisé ou n’est pas un fichier simple.",
+  FOLDER_UNKNOWN: "Ce dossier n’est pas un des dossiers de l’agent.",
+  FILE_FOLDER_MISMATCH: "Une copie ou un renommage doit rester dans le même dossier.",
   FILE_PROTECTED: "Ce fichier est protégé par une règle de la page Sécurité : l’agent n’y a pas accès.",
   WINDOW_PROTECTED: "Cette fenêtre est protégée par une règle de la page Sécurité : l’agent n’y a pas accès.",
   FILE_TOO_LARGE: "Le fichier dépasse 64 Kio.",

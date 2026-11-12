@@ -60,6 +60,8 @@ fn main() {
         "set_routine_schedule",
         "dictate",
         "set_workspace",
+        "get_extra_folders",
+        "set_extra_folders",
         "get_embedding_model",
         "set_embedding_model",
         "save_routine",

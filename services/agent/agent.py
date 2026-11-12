@@ -16,11 +16,16 @@ MAX_REPLY_CHARS = 4000
 
 MAX_FILE_NAME = 128
 _NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_")
+_ALIAS_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 _RESERVED = {"CON", "PRN", "AUX", "NUL"}
 
 
 def is_text_file_name(value: object) -> bool:
-    """Flat ASCII text file name, as accepted by the host's local file store."""
+    """Text file name as accepted by the host: `name.txt`, or `alias/name.txt` for an extra folder."""
+    if isinstance(value, str) and value.count("/") == 1:
+        alias, value = value.split("/")
+        if not (0 < len(alias) <= 24 and all(char in _ALIAS_CHARS for char in alias)):
+            return False
     if not isinstance(value, str) or len(value) > MAX_FILE_NAME or "." not in value:
         return False
     stem, extension = value.rsplit(".", 1)

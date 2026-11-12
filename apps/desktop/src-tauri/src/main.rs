@@ -8,6 +8,7 @@ use std::{
 
 use aiwin11_core::{
     backup,
+    folders::FolderSet,
     grants::Grant,
     local_files::LocalFiles,
     manifest::{ToolManifest, MANIFESTS},
@@ -79,7 +80,8 @@ fn lock_core(core: &Mutex<Core>) -> std::sync::MutexGuard<'_, Core> {
 
 struct AppState {
     core: Mutex<Core>,
-    files: Option<LocalFiles>,
+    /// The agent's folders; the desktop Files page works on the primary one.
+    files: Option<FolderSet>,
     task: TaskSlot,
     vision: Mutex<()>,
     video: Mutex<VideoJob>,
@@ -207,7 +209,7 @@ fn local_files_root(state: State<'_, Arc<AppState>>) -> Result<String, &'static 
 async fn preview_local_text(state: State<'_, Arc<AppState>>, name: String) -> Result<String, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?;
+        let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?.primary();
         let mut core = state.core.try_lock().map_err(|_| "CORE_BUSY")?;
         files.preview(&mut core, &name)
     })
@@ -223,7 +225,7 @@ async fn copy_local_text(
 ) -> Result<(), &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?;
+        let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?.primary();
         let mut core = state.core.try_lock().map_err(|_| "CORE_BUSY")?;
         files.copy(&mut core, &name, &destination)
     })
@@ -266,7 +268,7 @@ async fn with_local_files<T: Send + 'static>(
 ) -> Result<T, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?;
+        let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?.primary();
         let mut core = state.core.try_lock().map_err(|_| "CORE_BUSY")?;
         execute(files, &mut core)
     })
@@ -791,6 +793,37 @@ fn set_workspace(state: State<'_, Arc<AppState>>, path: String) -> Result<String
     Ok(stored)
 }
 
+/// Main window only: the extra folders the agent may work in (applied at the next start), and
+/// the aliases of those in use now.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderOverview {
+    saved: Vec<String>,
+    aliases: Vec<String>,
+}
+
+#[tauri::command]
+fn get_extra_folders(state: State<'_, Arc<AppState>>) -> FolderOverview {
+    let saved = lock_core(&state.core).extra_folders().iter().map(|path| path.to_string_lossy().into_owned()).collect();
+    let aliases = state.files.as_ref().map(|files| files.aliases().iter().map(|alias| (*alias).to_owned()).collect());
+    FolderOverview { saved, aliases: aliases.unwrap_or_default() }
+}
+
+#[tauri::command]
+fn set_extra_folders(state: State<'_, Arc<AppState>>, paths: Vec<String>) -> Result<Vec<String>, &'static str> {
+    let mut stored = Vec::new();
+    for path in paths.iter().map(|path| path.trim()).filter(|path| !path.is_empty()) {
+        let canonical = LocalFiles::validate_workspace(std::path::Path::new(path))?;
+        let text = canonical.to_string_lossy().into_owned();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned();
+        if !stored.contains(&text) {
+            stored.push(text);
+        }
+    }
+    lock_core(&state.core).set_extra_folders(&stored)?;
+    Ok(stored)
+}
+
 /// The user clicked the microphone: one phrase, recognized offline by Windows.
 #[tauri::command]
 async fn dictate(state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
@@ -1109,7 +1142,8 @@ fn main() {
             let files = core
                 .workspace()
                 .and_then(|workspace| LocalFiles::open_with_workspace(&data_dir, &workspace).ok())
-                .or_else(|| LocalFiles::open(&data_dir).ok());
+                .or_else(|| LocalFiles::open(&data_dir).ok())
+                .map(|primary| FolderSet::with_extra(primary, &data_dir, &core.extra_folders()));
             app.manage(Arc::new(AppState {
                 video: Mutex::new(VideoJob::Idle),
                 files,
@@ -1154,6 +1188,8 @@ fn main() {
             set_routine_schedule,
             dictate,
             set_workspace,
+            get_extra_folders,
+            set_extra_folders,
             get_embedding_model,
             set_embedding_model,
             save_routine,

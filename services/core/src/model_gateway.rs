@@ -44,7 +44,7 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
     if include_files {
         functions.push(json!({
             "name": "list_text_files",
-            "description": "Liste les fichiers .txt, .md et .csv du dossier de fichiers d’AiWin11 (lecture seule).",
+            "description": "Les fichiers des dossiers supplémentaires choisis par l’utilisateur apparaissent sous la forme dossier/nom.txt ; utilise ce nom tel quel avec les autres outils de fichiers. Liste les fichiers .txt, .md et .csv du dossier de fichiers d’AiWin11 (lecture seule).",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({

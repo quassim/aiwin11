@@ -60,6 +60,15 @@ class AgentProtocolTest(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("search_text_files", arguments)]}})
 
+    def test_file_names_may_carry_one_folder_alias(self):
+        for name in ["documents/notes.txt", "ete-2026/Budget.csv"]:
+            with self.subTest(name=name):
+                result = self.invoke({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
+                self.assertEqual(result.returncode, 0)
+        for name in ["Docs/notes.txt", "a/b/notes.txt", "/notes.txt", "docs/../notes.txt", "docs\notes.txt"]:
+            with self.subTest(name=name):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
+
     def test_find_control_takes_one_bounded_query(self):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("find_control", {"query": "Enregistrer"})]}})
         self.assertEqual(result.returncode, 0)
@@ -98,7 +107,7 @@ class AgentProtocolTest(unittest.TestCase):
             "x.txt:stream",
             "x.md:stream",
             "../x.csv",
-            "dir/x.txt",
+            "dir/sub/x.txt",
             "NUL.txt",
             "COM1.txt",
             "x.txt ",

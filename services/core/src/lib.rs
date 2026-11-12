@@ -2,6 +2,7 @@
 pub mod admin;
 pub mod backup;
 pub mod broker;
+pub mod folders;
 pub mod grants;
 pub mod images;
 #[cfg(windows)]
@@ -735,6 +736,41 @@ impl Core {
     /// The folder the user chose for the agent's file tools, if any (applied at startup).
     pub fn workspace(&self) -> Option<std::path::PathBuf> {
         self.setting("files.workspace").ok().flatten().filter(|path| !path.is_empty()).map(Into::into)
+    }
+
+    /// Extra folders the agent may work in, besides the primary one (applied at the next start).
+    pub fn extra_folders(&self) -> Vec<std::path::PathBuf> {
+        self.setting("files.extra_folders")
+            .ok()
+            .flatten()
+            .map(|value| {
+                value.lines().filter(|line| !line.is_empty()).take(folders::MAX_EXTRA_FOLDERS).map(Into::into).collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Stores the extra folders. Each path must already be validated by
+    /// `LocalFiles::validate_workspace`; only their number is journaled.
+    pub fn set_extra_folders(&mut self, paths: &[String]) -> Result<(), &'static str> {
+        if paths.len() > folders::MAX_EXTRA_FOLDERS || paths.iter().any(|path| path.is_empty() || path.contains('\n')) {
+            return Err("SETTINGS_INVALID");
+        }
+        self.db
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('files.extra_folders', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [paths.join("\n")],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.db
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.folders.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), self.session_id, format!("count:{}", paths.len())],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        Ok(())
     }
 
     /// Stores the agent's folder (an empty path restores AiWin11's dedicated folder). The path

@@ -168,6 +168,8 @@ Dis à l’agent « Souviens-toi que… » : après ton accord, l’information 
 
 Dans **Fichiers**, tu peux remplacer le dossier dédié par un dossier de ton profil Windows (par exemple dans Documents), hors AppData. Le changement s’applique au prochain démarrage. Les fichiers `.txt`, `.md` et `.csv` peuvent être mis à la corbeille et restaurés sans écrasement.
 
+**Dossiers supplémentaires de l’agent** accepte jusqu’à quatre autres dossiers de ton profil (un chemin par ligne), eux aussi appliqués au prochain démarrage. L’agent y accède avec le nom court du dossier, par exemple `documents/notes.txt` ; une copie ou un renommage reste toujours dans le même dossier.
+
 ### Pages Inspecteur et Fichiers
 
 Dans **Fichiers**, place un fichier `.txt`, `.md` ou `.csv` en UTF-8 de 64 Kio maximum dans le dossier affiché. Saisis son nom, puis clique sur **Afficher l’aperçu** pour le lire en texte brut ou sur **Copier le fichier** pour le dupliquer.

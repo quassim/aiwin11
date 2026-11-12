@@ -24,7 +24,8 @@ use uuid::Uuid;
 use crate::{
     admin,
     broker::{Capability, ExecutionError, Peer, Policy},
-    local_files::{LocalFiles, SearchHit, MAX_SEARCH_CHARS},
+    folders::FolderSet,
+    local_files::{SearchHit, MAX_SEARCH_CHARS},
     model_gateway::{tool_catalog, GatewayError, LocalStrategy, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
     openai,
     policy::{self, ActionContext, AgentAction, AgentProfile, Effect, PolicySettings},
@@ -369,7 +370,7 @@ struct Run<'a, F: Fn(TaskUpdate)> {
     /// The request being run (a delegated sub-request reuses its provider and models).
     request: &'a TaskRequest,
     core: &'a Mutex<Core>,
-    files: Option<&'a LocalFiles>,
+    files: Option<&'a FolderSet>,
     task: &'a str,
     progress: &'a F,
     started: Instant,
@@ -656,7 +657,7 @@ impl TaskSlot {
     pub fn run(
         &self,
         core: &Mutex<Core>,
-        files: Option<&LocalFiles>,
+        files: Option<&FolderSet>,
         request: &TaskRequest,
         progress: impl Fn(TaskUpdate),
     ) -> Result<TaskOutcome, &'static str> {
@@ -732,7 +733,7 @@ impl TaskSlot {
     fn run_workflow<F: Fn(TaskUpdate)>(
         &self,
         core: &Mutex<Core>,
-        files: Option<&LocalFiles>,
+        files: Option<&FolderSet>,
         task: &str,
         steps: Vec<WorkflowStep<'_>>,
         request: &TaskRequest,
@@ -796,7 +797,7 @@ impl TaskSlot {
     fn plan_and_execute<F: Fn(TaskUpdate)>(
         &self,
         core: &Mutex<Core>,
-        files: Option<&LocalFiles>,
+        files: Option<&FolderSet>,
         task: &str,
         prompt: &str,
         request: &TaskRequest,
@@ -2932,10 +2933,17 @@ struct AgentReply {
 
 /// A non-empty file name argument of at most 128 bytes. The file store checks it fully.
 fn file_argument(arguments: &Map<String, Value>, key: &str) -> Option<String> {
-    arguments.get(key).and_then(Value::as_str).filter(|name| !name.is_empty() && name.len() <= 128).map(str::to_owned)
+    arguments
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty() && name.len() <= MAX_AGENT_FILE_NAME)
+        .map(str::to_owned)
 }
 
 /// Validates the agent decision again on the trusted side.
+/// A file name the agent may pass: `name.txt` or `alias/name.txt` (alias of an extra folder).
+const MAX_AGENT_FILE_NAME: usize = 128 + 25;
+
 fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
     let reply: AgentReply = serde_json::from_slice(bytes).map_err(|_| "AGENT_REJECTED")?;
     if reply.version != AGENT_PROTOCOL {
@@ -2966,7 +2974,9 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         }
         ("tool", Some("read_text_file"), Some(arguments), None) if arguments.len() == 1 => {
             match arguments.get("name").and_then(Value::as_str) {
-                Some(name) if !name.is_empty() && name.len() <= 128 => Ok(PlannedAction::ReadFile(name.to_owned())),
+                Some(name) if !name.is_empty() && name.len() <= MAX_AGENT_FILE_NAME => {
+                    Ok(PlannedAction::ReadFile(name.to_owned()))
+                }
                 _ => Err("AGENT_REJECTED"),
             }
         }
@@ -3831,7 +3841,7 @@ mod tests {
 
     fn run_with_files(
         core: &Mutex<Core>,
-        files: Option<&LocalFiles>,
+        files: Option<&FolderSet>,
         task: &TaskSlot,
         prompt: &str,
         approve: bool,
@@ -3994,10 +4004,10 @@ mod tests {
             .any(|event| event.kind.starts_with("policy.evaluated") || event.kind.starts_with("tool.")));
     }
 
-    fn temp_files(contents: &[(&str, &str)]) -> (std::path::PathBuf, LocalFiles) {
+    fn temp_files(contents: &[(&str, &str)]) -> (std::path::PathBuf, FolderSet) {
         let directory = std::env::temp_dir().join(format!("aiwin11-agent-test-{}", Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
-        let files = LocalFiles::open(&directory).unwrap();
+        let files = FolderSet::single(crate::local_files::LocalFiles::open(&directory).unwrap());
         for (name, text) in contents {
             std::fs::write(files.root().join(name), text).unwrap();
         }

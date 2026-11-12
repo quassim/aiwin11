@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { ExtraFolders } from "./ExtraFolders";
 
 const errors: Record<string, string> = {
   INVALID_FILE_NAME:
@@ -164,6 +165,7 @@ export function LocalFiles({ onFinished }: { onFinished: () => void }) {
         </div>
         <p role="status">{workspaceStatus}</p>
       </form>
+      <ExtraFolders />
       <form
         className="task-form"
         onSubmit={(event) => {
