@@ -418,6 +418,7 @@ fn run_scheduler(state: Arc<AppState>) {
                 vision_model: None,
                 cloud_fallback_model: None,
                 scheduled: true,
+                agent: aiwin11_core::policy::AgentProfile::General,
             };
             let outcome = state.task.run(&state.core, state.files.as_ref(), &request, |_| {});
             let report = match outcome {

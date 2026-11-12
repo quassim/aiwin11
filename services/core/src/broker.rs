@@ -346,7 +346,7 @@ mod tests {
     #[test]
     #[ignore = "measurement on the reference machine"]
     fn measure_permission_decision_latency() {
-        use crate::policy::{self, ActionContext, AgentAction, PolicySettings};
+        use crate::policy::{self, ActionContext, AgentAction, AgentProfile, PolicySettings};
         use std::time::Instant;
         let path = std::env::temp_dir().join(format!("aiwin11-measure-{}.sqlite3", Uuid::new_v4()));
         let mut core = Core::open(&path).unwrap();
@@ -357,7 +357,7 @@ mod tests {
             let decision = policy::evaluate(
                 PolicySettings::default(),
                 AgentAction::LaunchApplication,
-                ActionContext { local_model: true, temporary_grant: false },
+                ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General },
             );
             assert!(!decision.rule.is_empty());
             core.authorize_dispatch(Policy::granting(&[Capability::LaunchNotepad]), Peer::Agent, &command).unwrap();

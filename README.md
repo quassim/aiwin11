@@ -61,6 +61,10 @@ Ce que l’agent peut faire :
 
 Quand une action demande ton accord, un encadré la décrit exactement (fichiers, nombre de caractères, texte complet à écrire, titre de la fenêtre…). Choisis **Autoriser** ou **Refuser** ; le focus clavier commence sur **Refuser**. Sans réponse sous 60 secondes, la proposition expire. **Annuler** arrête la génération en cours ou une demande en attente d’accord ; une action déjà en cours d’exécution n’est plus annulable.
 
+### Agents spécialisés
+
+Au-dessus du champ de demande, choisis l’**Agent** : Général (tous les outils), Fichiers et bureautique, Administration Windows, ou Lecture seule (aucune modification). Un agent ne voit et ne peut utiliser que les outils de son domaine.
+
 ### Profils de sécurité
 
 | Action | Observation | Assisté | Autonome limité | Avancé |

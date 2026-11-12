@@ -27,7 +27,7 @@ use crate::{
     local_files::LocalFiles,
     model_gateway::{tool_catalog, GatewayError, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
     openai,
-    policy::{self, ActionContext, AgentAction, Effect, PolicySettings},
+    policy::{self, ActionContext, AgentAction, AgentProfile, Effect, PolicySettings},
     windows_bridge::{ListedWindow, NamedNode, ProcessSnapshot, SystemSnapshot, WindowTarget, MAX_LISTED_WINDOWS},
     Core,
 };
@@ -57,6 +57,9 @@ pub struct TaskRequest {
     /// Run by the scheduler, nobody watching: local model only, Observation profile forced.
     #[serde(default)]
     pub scheduled: bool,
+    /// Specialized agent chosen by the user (default: general).
+    #[serde(default)]
+    pub agent: AgentProfile,
 }
 
 /// What actually happened to one action the agent asked for.
@@ -572,6 +575,7 @@ impl TaskSlot {
             record_code(core, task, "task.scheduled", "observation")?;
         }
         record_code(core, task, "policy.profile", &profile_code(settings))?;
+        record_code(core, task, "agent.profile", request.agent.code())?;
         // File contents and screen data never leave the machine: local-only tools are offered,
         // and allowed by the policy engine, only for local models.
         let local = matches!(request.provider, Provider::Ollama);
@@ -581,7 +585,7 @@ impl TaskSlot {
             task,
             progress,
             settings,
-            context: ActionContext { local_model: local, temporary_grant: false },
+            context: ActionContext { local_model: local, temporary_grant: false, profile: request.agent },
             actions: Vec::new(),
             launched_notepad: None,
             windows: Vec::new(),
@@ -623,7 +627,10 @@ impl TaskSlot {
             };
             let proposal = match cloud_model {
                 None => {
-                    let tools = tool_catalog(false, local && files.is_some(), local, run.vision_model.is_some());
+                    let tools = for_agent(
+                        tool_catalog(false, local && files.is_some(), local, run.vision_model.is_some()),
+                        request.agent,
+                    );
                     Ollama::connect()
                         .and_then(|provider| {
                             provider.propose(&request.model, &ollama_messages(prompt, &history), tools, &mut sink)
@@ -1931,6 +1938,20 @@ fn control_type_name(id: u32) -> &'static str {
 }
 
 /// Model-facing window tree, indented by depth and framed as untrusted data.
+/// Keeps only the tools the chosen agent may use: the model never sees the others.
+fn for_agent(catalog: Value, agent: AgentProfile) -> Value {
+    let Value::Array(tools) = catalog else { return catalog };
+    Value::Array(
+        tools
+            .into_iter()
+            .filter(|tool| {
+                let name = tool.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+                crate::manifest::MANIFESTS.iter().any(|manifest| manifest.tool == name && agent.allows(manifest.action))
+            })
+            .collect(),
+    )
+}
+
 fn diagnostic_code(diagnostic: Diagnostic) -> &'static str {
     match diagnostic {
         Diagnostic::Network => "network",
@@ -2794,6 +2815,7 @@ mod tests {
             vision_model: std::env::var("AIWIN11_TEST_VISION_MODEL").ok(),
             cloud_fallback_model: None,
             scheduled: false,
+            agent: AgentProfile::General,
         }
     }
 

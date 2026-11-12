@@ -198,6 +198,73 @@ pub struct ActionContext {
     pub local_model: bool,
     /// The user gave a temporary grant for this action that is still in force.
     pub temporary_grant: bool,
+    /// The specialized agent running the task: it may only use its own tools.
+    pub profile: AgentProfile,
+}
+
+/// Specialized agents (ROADMAP R8, "permissions par agent"): each one only sees and may only
+/// use the tools of its domain. Chosen by the user for each request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentProfile {
+    /// Every tool.
+    #[default]
+    General,
+    /// Files, Notepad, clipboard, memory.
+    Office,
+    /// Diagnostics, processes, services, windows, administrator operations.
+    WindowsAdmin,
+    /// Tools without side effects only.
+    ReadOnly,
+}
+
+impl AgentProfile {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Office => "office",
+            Self::WindowsAdmin => "windows_admin",
+            Self::ReadOnly => "read_only",
+        }
+    }
+
+    pub fn allows(self, action: AgentAction) -> bool {
+        use AgentAction as A;
+        match self {
+            Self::General => true,
+            Self::ReadOnly => !action.has_side_effect(),
+            Self::Office => matches!(
+                action,
+                A::LaunchApplication
+                    | A::ListFiles
+                    | A::ReadFile
+                    | A::CopyFile
+                    | A::MoveFile
+                    | A::TrashFile
+                    | A::OrganizeFiles
+                    | A::TypeText
+                    | A::ReadClipboard
+                    | A::WriteClipboard
+                    | A::Remember
+                    | A::Recall
+                    | A::SearchMemory
+            ),
+            Self::WindowsAdmin => matches!(
+                action,
+                A::SystemStatus
+                    | A::ListProcesses
+                    | A::ListServices
+                    | A::RunDiagnostic
+                    | A::AdminService
+                    | A::AdminCleanTemp
+                    | A::ListWindows
+                    | A::ArrangeWindow
+                    | A::InspectWindow
+                    | A::Recall
+                    | A::SearchMemory
+            ),
+        }
+    }
 }
 
 /// A temporary grant can only relax an `Ask` for a side effect that is neither critical nor
@@ -267,6 +334,9 @@ pub fn base_effect(action: AgentAction, autonomy: Autonomy) -> Effect {
 /// only make the outcome more restrictive than the matrix, except simulation, which replaces
 /// any non-denied side effect with a dry run.
 pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionContext) -> Decision {
+    if !context.profile.allows(action) {
+        return Decision { effect: E::Deny, rule: "agent_scope" };
+    }
     if action.local_only() && !context.local_model {
         return Decision { effect: E::Deny, rule: "local_only" };
     }
@@ -294,7 +364,7 @@ pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionCo
 
 /// The full table for the UI: effect of every action in every profile, for a local model.
 pub fn table(simulate: bool) -> Vec<(AgentAction, [Effect; 4])> {
-    let context = ActionContext { local_model: true, temporary_grant: false };
+    let context = ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General };
     AgentAction::ALL
         .into_iter()
         .map(|action| {
@@ -309,9 +379,30 @@ pub fn table(simulate: bool) -> Vec<(AgentAction, [Effect; 4])> {
 mod tests {
     use super::*;
 
-    const LOCAL: ActionContext = ActionContext { local_model: true, temporary_grant: false };
-    const CLOUD: ActionContext = ActionContext { local_model: false, temporary_grant: false };
-    const GRANTED: ActionContext = ActionContext { local_model: true, temporary_grant: true };
+    const LOCAL: ActionContext =
+        ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General };
+    const CLOUD: ActionContext =
+        ActionContext { local_model: false, temporary_grant: false, profile: AgentProfile::General };
+    const GRANTED: ActionContext =
+        ActionContext { local_model: true, temporary_grant: true, profile: AgentProfile::General };
+
+    #[test]
+    fn specialized_agents_only_use_their_own_tools() {
+        let with = |profile| ActionContext { profile, ..LOCAL };
+        let decide = |profile, action| evaluate(PolicySettings::default(), action, with(profile));
+        assert_eq!(decide(AgentProfile::Office, A::AdminService).rule, "agent_scope");
+        assert_eq!(decide(AgentProfile::WindowsAdmin, A::TrashFile).rule, "agent_scope");
+        assert_ne!(decide(AgentProfile::WindowsAdmin, A::ListServices).effect, E::Deny);
+        for action in AgentAction::ALL {
+            let read_only = decide(AgentProfile::ReadOnly, action);
+            assert_eq!(
+                read_only.effect == E::Deny && read_only.rule == "agent_scope",
+                action.has_side_effect(),
+                "{action:?}"
+            );
+            assert_eq!(decide(AgentProfile::General, action), evaluate(PolicySettings::default(), action, LOCAL));
+        }
+    }
 
     #[test]
     fn a_temporary_grant_only_turns_an_ask_into_allow() {
@@ -330,7 +421,7 @@ mod tests {
             assert_eq!(effect(autonomy, false, A::InspectWindow, GRANTED), E::Ask);
             assert_ne!(effect(autonomy, true, A::CopyFile, GRANTED), E::Allow);
         }
-        let cloud_granted = ActionContext { local_model: false, temporary_grant: true };
+        let cloud_granted = ActionContext { local_model: false, temporary_grant: true, profile: AgentProfile::General };
         assert_eq!(effect(P::Assisted, false, A::CopyFile, cloud_granted), E::Deny);
         assert_eq!(effect(P::Observation, false, A::CopyFile, GRANTED), E::Deny, "a denial stays a denial");
     }

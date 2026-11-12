@@ -285,6 +285,7 @@ const activityNames: Record<string, string> = {
   "model.provider.unavailable": "Fournisseur de modèles indisponible",
   "settings.models.changed": "Choix des modèles modifié",
   "settings.privacy.changed": "Mode privé modifié",
+  "agent.profile": "Agent choisi",
   "settings.routing.changed": "Routage des modèles modifié",
   "model.usage": "Jetons cloud utilisés",
   "model.budget.exceeded": "Budget cloud de la demande atteint",
@@ -432,6 +433,7 @@ function App() {
   const [cloudFallback, setCloudFallback] = useState(false);
   const [dictating, setDictating] = useState(false);
   const [floating, setFloating] = useState(false);
+  const [agent, setAgent] = useState<"general" | "office" | "windowsAdmin" | "readOnly">("general");
   const [dictationStatus, setDictationStatus] = useState("");
   const [vendor, setVendor] = useState<"openai" | "deepseek">("openai");
   const vendorName = vendor === "deepseek" ? "DeepSeek" : "OpenAI";
@@ -614,6 +616,7 @@ function App() {
           cloudApproved,
           // Vision stays local: only sent for Ollama tasks.
           visionModel: provider === "ollama" && visionModel ? visionModel : null,
+          agent,
           // local_first: OpenAI only if Ollama is unreachable, with this request's approval.
           cloudFallbackModel:
             provider === "ollama" && cloudFallback && cloudApproved && cloudModel.trim() ? cloudModel.trim() : null,
@@ -798,6 +801,18 @@ function App() {
               }}
             >
               <label htmlFor="prompt">Ta demande</label>
+              <label htmlFor="agent">Agent</label>
+              <select
+                id="agent"
+                value={agent}
+                disabled={running}
+                onChange={(event) => setAgent(event.target.value as typeof agent)}
+              >
+                <option value="general">Général : tous les outils</option>
+                <option value="office">Fichiers et bureautique</option>
+                <option value="windowsAdmin">Administration Windows</option>
+                <option value="readOnly">Lecture seule : aucune modification</option>
+              </select>
               <textarea
                 id="prompt"
                 rows={3}
