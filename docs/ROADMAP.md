@@ -46,7 +46,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Contrôle des fichiers | 🟡 Dossier dédié ou dossier choisi dans le profil (`.txt` seulement) ; plusieurs dossiers et autres formats ❌ | R2 |
 | Contrôle des logiciels (lancer, gérer) | 🟡 Bloc-notes seulement | R2 |
 | Contrôle des fenêtres | ✅ Lister, premier plan, réduire, restaurer, agrandir (jamais fermer) ; lecture de la fenêtre précédente | — |
-| Paramètres système | ❌ | R2 (lecture) / R9 (modification, composant privilégié) |
+| Paramètres système | 🟡 Lecture ✅ dans `get_system_status` : thème clair/sombre, transparence, langue d’affichage, fuseau horaire, alimentation et batterie (testé en réel sur la machine de référence) ; modification ❌ | R2 (lecture) / R9 (modification, composant privilégié) |
 | Terminal / PowerShell | ❌ | R2 |
 | Navigateur | ❌ | R6 (via MCP) ou R2 |
 | Périphériques | ❌ | R7+ |

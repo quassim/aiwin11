@@ -30,6 +30,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Temps jusqu’à l’interface prête (T-001) : premier rendu horodaté (`ui.ready`, ms depuis le lancement), affiché dans le Centre de contrôle. Vérifié par `verify.ps1` ; valeur réelle en release à relever avec l’application lancée.
 
+- Paramètres Windows en lecture dans `get_system_status` (thème, transparence, langue, fuseau horaire, alimentation, batterie, économiseur), validés par le cœur. Vérifié par `verify.ps1` et le test réel du pont sur la machine de référence.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

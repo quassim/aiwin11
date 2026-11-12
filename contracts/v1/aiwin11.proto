@@ -227,6 +227,29 @@ message SystemStatus {
   repeated DriveStatus drives = 6;
   // Display adapters, at most 4 (WMI Win32_VideoController).
   repeated GpuInfo gpus = 7;
+  // Read-only Windows settings of the current user; absent if they could not be read.
+  SystemSettings settings = 8;
+}
+
+// Windows settings read for the agent (ROADMAP "Paramètres système", reading only).
+message SystemSettings {
+  // Personalization (HKCU): absent when the value is not set.
+  optional bool apps_light_theme = 1;
+  optional bool system_light_theme = 2;
+  optional bool transparency = 3;
+  // Display language, BCP 47 tag such as "fr-BE", at most 16 characters.
+  string ui_language = 4;
+  // Windows time zone identifier such as "Romance Standard Time", at most 64 characters.
+  string time_zone = 5;
+  enum PowerSource {
+    POWER_SOURCE_UNKNOWN = 0;
+    POWER_SOURCE_AC = 1;
+    POWER_SOURCE_BATTERY = 2;
+  }
+  PowerSource power_source = 6;
+  // 0 to 100; absent without a battery or when unknown.
+  optional uint32 battery_percent = 7;
+  bool battery_saver = 8;
 }
 
 message GpuInfo {

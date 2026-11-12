@@ -919,6 +919,47 @@ pub(crate) struct SystemSnapshot {
     pub drives: Vec<DriveSpace>,
     /// Adapter name, driver version, memory (WMI).
     pub gpus: Vec<(String, String, u64)>,
+    /// Read-only Windows settings; `None` when absent or malformed.
+    pub settings: Option<WindowsSettings>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WindowsSettings {
+    pub apps_light_theme: Option<bool>,
+    pub system_light_theme: Option<bool>,
+    pub transparency: Option<bool>,
+    pub ui_language: String,
+    pub time_zone: String,
+    /// `Some(true)` on mains power, `Some(false)` on battery.
+    pub on_ac_power: Option<bool>,
+    pub battery_percent: Option<u32>,
+    pub battery_saver: bool,
+}
+
+/// Keeps the settings only if every text is short and made of expected characters.
+fn accept_settings(settings: aiwin11_contracts::v1::SystemSettings) -> Option<WindowsSettings> {
+    use aiwin11_contracts::v1::system_settings::PowerSource;
+    let language_ok = settings.ui_language.len() <= 16
+        && settings.ui_language.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+    let zone_ok = settings.time_zone.chars().count() <= 64
+        && settings.time_zone.chars().all(|c| c.is_alphanumeric() || " ()+-._/".contains(c));
+    let battery_ok = settings.battery_percent.is_none_or(|percent| percent <= 100);
+    let on_ac_power = match PowerSource::try_from(settings.power_source) {
+        Ok(PowerSource::Ac) => Some(true),
+        Ok(PowerSource::Battery) => Some(false),
+        Ok(PowerSource::Unknown) => None,
+        Err(_) => return None,
+    };
+    (language_ok && zone_ok && battery_ok).then_some(WindowsSettings {
+        apps_light_theme: settings.apps_light_theme,
+        system_light_theme: settings.system_light_theme,
+        transparency: settings.transparency,
+        ui_language: settings.ui_language,
+        time_zone: settings.time_zone,
+        on_ac_power,
+        battery_percent: settings.battery_percent,
+        battery_saver: settings.battery_saver,
+    })
 }
 
 /// Validates the bridge's metrics: coherent memory and drive figures, bounded lists.
@@ -953,6 +994,8 @@ fn accept_system_status(status: aiwin11_contracts::v1::SystemStatus) -> Option<S
             .map(|drive| DriveSpace { name: drive.name, total_bytes: drive.total_bytes, free_bytes: drive.free_bytes })
             .collect(),
         gpus: status.gpus.into_iter().map(|gpu| (gpu.name, gpu.driver_version, gpu.memory_bytes)).collect(),
+        // Malformed settings are dropped; the metrics stay usable.
+        settings: status.settings.and_then(accept_settings),
     })
 }
 
@@ -1227,8 +1270,27 @@ mod tests {
                 driver_version: "32.0".into(),
                 memory_bytes: 4 << 30,
             }],
+            settings: Some(aiwin11_contracts::v1::SystemSettings {
+                apps_light_theme: Some(false),
+                ui_language: "fr-BE".into(),
+                time_zone: "Romance Standard Time".into(),
+                power_source: 1,
+                ..Default::default()
+            }),
         };
         assert_eq!(accept_system_status(good.clone()).unwrap().drives[0].name, "C:\\");
+        let settings = accept_system_status(good.clone()).unwrap().settings.unwrap();
+        assert_eq!((settings.apps_light_theme, settings.on_ac_power), (Some(false), Some(true)));
+        for bad in [
+            aiwin11_contracts::v1::SystemSettings { ui_language: "fr BE".into(), ..Default::default() },
+            aiwin11_contracts::v1::SystemSettings { time_zone: "x\n".into(), ..Default::default() },
+            aiwin11_contracts::v1::SystemSettings { battery_percent: Some(101), ..Default::default() },
+            aiwin11_contracts::v1::SystemSettings { power_source: 7, ..Default::default() },
+        ] {
+            let status = SystemStatus { settings: Some(bad), ..good.clone() };
+            let snapshot = accept_system_status(status).expect("metrics still accepted");
+            assert_eq!(snapshot.settings, None, "malformed settings dropped");
+        }
         for bad in [
             SystemStatus { memory_available_bytes: 64 << 30, ..good.clone() },
             SystemStatus { cpu_load_percent: 101, ..good.clone() },
@@ -1256,6 +1318,8 @@ mod tests {
         let status =
             core.agent_system_status(&task, Policy::granting(&[crate::broker::Capability::SystemStatus])).unwrap();
         assert!(status.memory_available_bytes > 0 && !status.drives.is_empty(), "{status:?}");
+        let settings = status.settings.expect("Windows settings read");
+        assert!(!settings.ui_language.is_empty() && !settings.time_zone.is_empty(), "{settings:?}");
     }
 
     #[test]

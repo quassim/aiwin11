@@ -301,7 +301,7 @@ Diffusion sur ce PC) à partir d’une description, et l’enregistre dans le do
         functions.push(json!({
             "name": "get_system_status",
             "description": "Lit, en lecture seule, l’état du PC : mémoire totale et disponible, charge du processeur, \
-        nombre de processeurs logiques, durée depuis le démarrage, espace libre des disques internes. Ne modifie rien.",
+        nombre de processeurs logiques, durée depuis le démarrage, espace libre des disques internes, cartes graphiques, \n        et les paramètres Windows de l’utilisateur (thème clair ou sombre, langue d’affichage, fuseau horaire, \n        alimentation et batterie). Ne modifie rien.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({

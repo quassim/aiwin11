@@ -28,7 +28,9 @@ use crate::{
     model_gateway::{tool_catalog, GatewayError, LocalStrategy, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
     openai,
     policy::{self, ActionContext, AgentAction, AgentProfile, Effect, PolicySettings},
-    windows_bridge::{ListedWindow, NamedNode, ProcessSnapshot, SystemSnapshot, WindowTarget, MAX_LISTED_WINDOWS},
+    windows_bridge::{
+        ListedWindow, NamedNode, ProcessSnapshot, SystemSnapshot, WindowTarget, WindowsSettings, MAX_LISTED_WINDOWS,
+    },
     Core, ToolCalling,
 };
 
@@ -2383,6 +2385,38 @@ fn arrangement_label(arrangement: Arrangement) -> &'static str {
 }
 
 /// Model-facing system metrics (numbers and drive roots only).
+/// Windows settings, read only; unknown values are said to be unknown.
+fn describe_settings(settings: Option<&WindowsSettings>) -> String {
+    let Some(settings) = settings else { return "\nParamètres Windows : indisponibles".to_owned() };
+    let theme = |light: Option<bool>| match light {
+        Some(true) => "clair",
+        Some(false) => "sombre",
+        None => "inconnu",
+    };
+    let power = match (settings.on_ac_power, settings.battery_percent) {
+        (Some(true), Some(percent)) => format!("secteur, batterie à {percent} %"),
+        (Some(true), None) => "secteur".to_owned(),
+        (Some(false), Some(percent)) => format!("batterie à {percent} %"),
+        (Some(false), None) => "batterie".to_owned(),
+        (None, _) => "inconnue".to_owned(),
+    };
+    format!(
+        "\nParamètres Windows (lecture seule) :\n- Thème des applications : {}, thème de Windows : {}, transparence : {}\n\
+         - Langue d’affichage : {}\n- Fuseau horaire : {}\n- Alimentation : {}{}",
+        theme(settings.apps_light_theme),
+        theme(settings.system_light_theme),
+        match settings.transparency {
+            Some(true) => "activée",
+            Some(false) => "désactivée",
+            None => "inconnue",
+        },
+        if settings.ui_language.is_empty() { "inconnue" } else { &settings.ui_language },
+        if settings.time_zone.is_empty() { "inconnu" } else { &settings.time_zone },
+        power,
+        if settings.battery_saver { ", économiseur de batterie actif" } else { "" }
+    )
+}
+
 fn describe_system(result: Result<SystemSnapshot, &'static str>) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     let gb = |bytes: u64| format!("{:.1}", bytes as f64 / GB as f64);
@@ -2418,7 +2452,7 @@ fn describe_system(result: Result<SystemSnapshot, &'static str>) -> String {
                         .collect::<Vec<_>>()
                         .join("\n")
                 }
-            )
+            ) + &describe_settings(status.settings.as_ref())
         }
         Err(code) => format!("État du PC indisponible : {code}. Rien n’a été modifié."),
     }
@@ -2988,6 +3022,32 @@ fn invoke_agent(
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn windows_settings_are_described_with_unknowns_said_plainly() {
+        assert!(describe_settings(None).contains("indisponibles"));
+        let settings = WindowsSettings {
+            apps_light_theme: Some(false),
+            system_light_theme: None,
+            transparency: Some(true),
+            ui_language: "fr-BE".into(),
+            time_zone: String::new(),
+            on_ac_power: Some(false),
+            battery_percent: Some(42),
+            battery_saver: true,
+        };
+        let text = describe_settings(Some(&settings));
+        for expected in [
+            "applications : sombre",
+            "Windows : inconnu",
+            "transparence : activée",
+            "fr-BE",
+            "Fuseau horaire : inconnu",
+            "batterie à 42 %, économiseur",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+    }
 
     #[test]
     fn prompts_are_trimmed_and_bounded() {

@@ -79,6 +79,7 @@ Ce que l’agent peut faire :
 | « Copie notes.txt vers sauvegarde.txt », « Renomme brouillon.txt en idees.txt » | Copie ou renomme dans ce dossier, sans jamais remplacer un fichier existant |
 | « Mets ancien.txt à la corbeille » | Déplace le fichier dans la corbeille d’AiWin11 (`%LOCALAPPDATA%\app.aiwin11.desktop\trash`) : rien n’est supprimé, il reste récupérable |
 | « Mon PC est lent, regarde ce qui se passe » | Lit en lecture seule la mémoire, la charge du processeur, l’espace des disques et, si besoin, les processus ; ne modifie rien |
+| « Mon PC est en thème sombre ? Il est sur batterie ? » | Lit en lecture seule les paramètres Windows : thème, transparence, langue d’affichage, fuseau horaire, alimentation et batterie ; ne modifie rien |
 | « Quelles fenêtres sont ouvertes ? », « Réduis la fenêtre du navigateur » | Liste les fenêtres (après ton accord) puis met au premier plan, réduit, restaure ou agrandit l’une d’elles ; ne ferme jamais de fenêtre |
 | « Qu’est-ce que j’ai copié ? », « Copie cette adresse dans le presse-papiers » | Lit ou remplace le texte du presse-papiers, toujours après ton accord (l’ancien contenu est perdu en cas d’écriture) |
 | « Y a-t-il des services Windows arrêtés ? » | Liste en lecture seule les services automatiques arrêtés puis des services en cours ; ne démarre ni n’arrête rien |

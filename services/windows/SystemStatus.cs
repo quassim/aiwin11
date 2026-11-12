@@ -3,7 +3,8 @@ using System.Runtime.InteropServices;
 using Protocol = Aiwin11.V1;
 
 /// Read-only system metrics for the agent's `get_system_status` tool: physical memory,
-/// processor load sampled over 250 ms, uptime and fixed drives' space. Standard-user APIs only.
+/// processor load sampled over 250 ms, uptime, fixed drives' space, display adapters and the
+/// current user's Windows settings (theme, language, time zone, power). Standard-user APIs only.
 static class SystemStatusReader
 {
     const int MaxDrives = 8;
@@ -54,6 +55,7 @@ static class SystemStatusReader
         {
             // GPU details unavailable: the rest of the status is still reported.
         }
+        status.Settings = ReadSettings();
         foreach (var drive in DriveInfo.GetDrives())
         {
             if (status.Drives.Count >= MaxDrives) break;
@@ -74,6 +76,57 @@ static class SystemStatusReader
         }
         return status;
     }
+
+    /// Current user's theme, display language, time zone and power state. Reads only.
+    static Protocol.SystemSettings ReadSettings()
+    {
+        var settings = new Protocol.SystemSettings();
+        try
+        {
+            using var personalize = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (personalize?.GetValue("AppsUseLightTheme") is int apps) settings.AppsLightTheme = apps != 0;
+            if (personalize?.GetValue("SystemUsesLightTheme") is int system) settings.SystemLightTheme = system != 0;
+            if (personalize?.GetValue("EnableTransparency") is int transparency) settings.Transparency = transparency != 0;
+        }
+        catch (Exception error) when (error is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            // Theme unknown: left out.
+        }
+        var language = System.Globalization.CultureInfo.CurrentUICulture.Name;
+        if (language.Length <= 16) settings.UiLanguage = language;
+        var zone = TimeZoneInfo.Local.Id;
+        if (zone.Length <= 64) settings.TimeZone = zone;
+        if (GetSystemPowerStatus(out var power))
+        {
+            settings.PowerSource = power.ACLineStatus switch
+            {
+                1 => Protocol.SystemSettings.Types.PowerSource.Ac,
+                0 => Protocol.SystemSettings.Types.PowerSource.Battery,
+                _ => Protocol.SystemSettings.Types.PowerSource.Unknown,
+            };
+            // 128: no system battery; 255: unknown.
+            if ((power.BatteryFlag & 128) == 0 && power.BatteryLifePercent <= 100)
+                settings.BatteryPercent = power.BatteryLifePercent;
+            settings.BatterySaver = power.SystemStatusFlag == 1;
+        }
+        return settings;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct SystemPowerStatus
+    {
+        public byte ACLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte SystemStatusFlag;
+        public uint BatteryLifeTime;
+        public uint BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
 
     [StructLayout(LayoutKind.Sequential)]
     struct MemoryStatusEx
