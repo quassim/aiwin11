@@ -116,7 +116,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
 | Licence : open source, privée ou hybride | ✅ Sans objet (usage personnel) | — |
-| Service privilégié facultatif | ✅ Assistant élevé à la demande (option B) : `AiWin11.Admin.exe`, liste fermée (services, fichiers temporaires), désactivé par défaut, accord + UAC, empreinte SHA-256 vérifiée et fichier verrouillé pendant l’opération (build release) ; 🟡 UAC réel non testé, signature de code ❌ | — |
+| Service privilégié facultatif | ✅ Assistant élevé à la demande (option B) : `AiWin11.Admin.exe`, liste fermée (services, fichiers temporaires), désactivé par défaut, accord + UAC, empreinte SHA-256 vérifiée et fichier verrouillé pendant l’opération (build release) ; 🟡 UAC réel non testé, signature de code optionnelle (`AIWIN11_SIGN_THUMBPRINT`, certificat à fournir) 🟡 | — |
 
 ### 2.3 Spécification v1.0 [S1]
 
