@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, midi — suite (développement seul)
+
+**Fait** : `9a8d068` relecture complète de la conversation de conception, ROADMAP §2.5 ; `7bfad73` mode privé (T-011), icône de zone de notification (ouvrir, tout arrêter, quitter), raccourci global Ctrl+Alt+Espace, et **correction** : toutes les commandes Tauri ajoutées depuis R1 sont maintenant déclarées (`build.rs`, `capabilities/`) — avant, l’interface les aurait vues refusées.
+
+**Vérifié** : `verify.ps1` (83 tests Rust, linters, builds). Non testé à la main.
+
+**Prochaine étape** (ordre conseillé) : R2 UIA Invoke/SetValue sur la fenêtre inspectée (nœuds numérotés), PowerShell approuvé (liste fermée), dossiers autorisés ; R3 modèle par type de tâche + routage `local_first`/`manual` + budget ; R5 palette de commandes ; R6 mémoire/MCP ; R7 voix (STT/TTS locaux) ; R8 workflows ; R9 installateur.
+
 ## 2026-11-12, fin de matinée — avec l’utilisateur (développement seul, tests E2E par l’utilisateur)
 
 **Fait**
