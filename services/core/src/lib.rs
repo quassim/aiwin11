@@ -156,6 +156,9 @@ pub struct ModelFacts {
     pub vram_bytes: Option<u64>,
 }
 
+/// Codes of the closed list of applications the agent can open.
+pub const APPLICATION_CODES: [&str; 3] = ["notepad", "charmap", "paint"];
+
 /// At most this many protected file patterns, each 1 to 64 characters.
 pub const MAX_PROTECTED_PATTERNS: usize = 20;
 
@@ -558,6 +561,42 @@ impl Core {
                 "INSERT INTO events (id, session_id, kind, source, code)
                  VALUES (?1, ?2, 'settings.routing.changed', 'core', ?3)",
                 params![Uuid::new_v4().to_string(), session, if enabled { "local_first" } else { "manual" }],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
+    /// Applications of the closed list the user forbade the agent to open (per-resource rule).
+    /// Codes `notepad`, `charmap`, `paint`; unknown codes are ignored.
+    pub fn blocked_applications(&self) -> Vec<&'static str> {
+        let stored = self.setting("policy.blocked_applications").ok().flatten().unwrap_or_default();
+        APPLICATION_CODES.into_iter().filter(|code| stored.split(',').any(|item| item == *code)).collect()
+    }
+
+    pub fn set_blocked_applications(&mut self, codes: &[String]) -> Result<(), &'static str> {
+        if codes.iter().any(|code| !APPLICATION_CODES.contains(&code.as_str())) {
+            return Err("SETTINGS_INVALID");
+        }
+        let kept: Vec<&str> =
+            APPLICATION_CODES.into_iter().filter(|code| codes.iter().any(|item| item == code)).collect();
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('policy.blocked_applications', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [kept.join(",")],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.policy.applications.changed', 'core', ?3)",
+                params![
+                    Uuid::new_v4().to_string(),
+                    session,
+                    if kept.is_empty() { "none".to_owned() } else { kept.join("+") }
+                ],
             )?;
             transaction.commit()
         };
@@ -1385,6 +1424,18 @@ mod tests {
         assert!(!matches_pattern("*.md", "notes.txt"));
         assert!(matches_pattern("a*b*c", "aXXbYYc"));
         assert!(!matches_pattern("a*b*c", "aXXbYY"));
+    }
+
+    #[test]
+    fn blocked_applications_are_codes_of_the_closed_list() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert!(core.blocked_applications().is_empty());
+        core.set_blocked_applications(&["paint".to_owned(), "notepad".to_owned()]).unwrap();
+        assert_eq!(core.blocked_applications(), ["notepad", "paint"]);
+        assert_eq!(core.activity().unwrap()[0].code.as_deref(), Some("notepad+paint"));
+        assert_eq!(core.set_blocked_applications(&["cmd".to_owned()]), Err("SETTINGS_INVALID"));
+        core.set_blocked_applications(&[]).unwrap();
+        assert!(core.blocked_applications().is_empty());
     }
 
     #[test]

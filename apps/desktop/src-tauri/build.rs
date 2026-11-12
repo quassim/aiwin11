@@ -72,6 +72,8 @@ fn main() {
         "ui_ready",
         "get_local_fallback_model",
         "get_protected_files",
+        "get_blocked_applications",
+        "set_blocked_applications",
         "list_backups",
         "backup_data",
         "schedule_restore",

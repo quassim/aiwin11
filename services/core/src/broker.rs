@@ -9,6 +9,16 @@ use uuid::Uuid;
 
 use crate::Core;
 
+/// Code of an application of the closed list, as used by the per-application rules.
+pub(crate) fn application_code(application: i32) -> Option<&'static str> {
+    match Application::try_from(application).ok()? {
+        Application::Notepad => Some("notepad"),
+        Application::CharacterMap => Some("charmap"),
+        Application::Paint => Some("paint"),
+        _ => None,
+    }
+}
+
 /// Constructed by the trusted host after authenticating the transport peer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Peer {
@@ -261,6 +271,21 @@ impl Core {
         result
     }
 
+    /// Per-resource rules the user set, checked at execution time for the agent only: an
+    /// application of the closed list the user blocked is refused with `resource_blocked`.
+    fn check_resource_rules(&self, peer: Peer, command: &Command) -> Result<(), &'static str> {
+        if peer != Peer::Agent {
+            return Ok(());
+        }
+        if let Some(Operation::LaunchApplication(launch)) = &command.operation {
+            let code = application_code(launch.application);
+            if code.is_some_and(|code| self.blocked_applications().contains(&code)) {
+                return Err("resource_blocked");
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn authorize_dispatch(
         &mut self,
         policy: Policy,
@@ -268,7 +293,10 @@ impl Core {
         command: &Command,
     ) -> Result<Option<String>, ExecutionError> {
         let task_id = Uuid::parse_str(&command.task_id).ok().map(|id| id.to_string());
-        let operation = match policy.authorize(peer, command, self.session_id()) {
+        let operation = match policy
+            .authorize(peer, command, self.session_id())
+            .and_then(|operation| self.check_resource_rules(peer, command).map(|()| operation))
+        {
             Ok(operation) => operation,
             Err(code) => {
                 self.audit(task_id.as_deref(), "policy.denied", code).map_err(|_| ExecutionError::AuditUnavailable)?;
@@ -347,6 +375,25 @@ mod tests {
                 application: Application::Notepad as i32,
             })),
         }
+    }
+
+    #[test]
+    fn a_blocked_application_is_refused_to_the_agent_at_dispatch_and_audited() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let grant = Policy::granting(&[Capability::LaunchNotepad]);
+        core.set_blocked_applications(&["notepad".to_owned()]).unwrap();
+        let command = request(&core);
+        assert_eq!(
+            core.authorize_dispatch(grant, Peer::Agent, &command).map(|_| ()),
+            Err(ExecutionError::Denied("resource_blocked"))
+        );
+        let event = &core.activity().unwrap()[0];
+        assert_eq!((event.kind.as_str(), event.code.as_deref()), ("policy.denied", Some("resource_blocked")));
+        // The rule targets the agent only, and lifting it allows the launch again.
+        core.set_blocked_applications(&[]).unwrap();
+        assert!(core.authorize_dispatch(grant, Peer::Agent, &request(&core)).is_ok());
+        assert_eq!(application_code(Application::Paint as i32), Some("paint"));
+        assert_eq!(application_code(999), None);
     }
 
     /// Measurement for the NFR "permission evaluation p95 < 50 ms" (ROADMAP §4): the policy

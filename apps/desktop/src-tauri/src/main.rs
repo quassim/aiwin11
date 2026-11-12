@@ -691,6 +691,16 @@ fn cancel_restore(state: State<'_, Arc<AppState>>) {
 }
 
 #[tauri::command]
+fn get_blocked_applications(state: State<'_, Arc<AppState>>) -> Vec<&'static str> {
+    lock_core(&state.core).blocked_applications()
+}
+
+#[tauri::command]
+fn set_blocked_applications(state: State<'_, Arc<AppState>>, applications: Vec<String>) -> Result<(), &'static str> {
+    lock_core(&state.core).set_blocked_applications(&applications)
+}
+
+#[tauri::command]
 fn get_protected_files(state: State<'_, Arc<AppState>>) -> Vec<String> {
     lock_core(&state.core).protected_files()
 }
@@ -1145,6 +1155,8 @@ fn main() {
             get_cloud_cost,
             get_local_fallback_model,
             get_protected_files,
+            get_blocked_applications,
+            set_blocked_applications,
             list_backups,
             backup_data,
             schedule_restore,

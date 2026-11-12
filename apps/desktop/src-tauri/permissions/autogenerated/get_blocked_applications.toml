@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-blocked-applications"
+description = "Enables the get_blocked_applications command without any pre-configured scope."
+commands.allow = ["get_blocked_applications"]
+
+[[permission]]
+identifier = "deny-get-blocked-applications"
+description = "Denies the get_blocked_applications command without any pre-configured scope."
+commands.deny = ["get_blocked_applications"]

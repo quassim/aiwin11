@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { agentState, agentStateLabels, transferLabel } from "./agentState";
+import { BlockedApps } from "./BlockedApps";
 import { ProtectedFiles } from "./ProtectedFiles";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
@@ -1274,6 +1275,7 @@ function App() {
         {page === "Sécurité" && (
           <>
             <Security onFinished={refresh} />
+            <BlockedApps />
             <ProtectedFiles />
           </>
         )}

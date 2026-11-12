@@ -2178,6 +2178,16 @@ impl TaskSlot {
             _ => ("notepad", "le Bloc-notes", Capability::LaunchNotepad),
         };
         let summary = &format!("Ouvrir {name}");
+        // A blocked application is refused before any approval is asked; the broker checks the
+        // same rule again at execution time.
+        if lock(run.core)?.blocked_applications().contains(&code) {
+            record_code(run.core, run.task, "policy.resource.denied", code)?;
+            run.report(action, summary, ActionStatus::Denied, Some("resource_blocked"));
+            return Ok(format!(
+                "Ouverture refusée : l’utilisateur a interdit à l’agent d’ouvrir {name} (règle resource_blocked). \
+                 Rien n’a été exécuté."
+            ));
+        }
         let approval = ApprovalAction::Launch { application: code };
         let grant = match self.gate(run, action, summary, capability, approval)? {
             Gate::Stop(observation) => return Ok(observation),
