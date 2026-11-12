@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-mcp-servers"
+description = "Enables the set_mcp_servers command without any pre-configured scope."
+commands.allow = ["set_mcp_servers"]
+
+[[permission]]
+identifier = "deny-set-mcp-servers"
+description = "Denies the set_mcp_servers command without any pre-configured scope."
+commands.deny = ["set_mcp_servers"]

@@ -95,10 +95,12 @@ pub enum AgentAction {
     SearchMemory,
     RunDiagnostic,
     OrganizeFiles,
+    McpListTools,
+    McpCall,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 27] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -124,6 +126,8 @@ impl AgentAction {
         Self::SearchMemory,
         Self::RunDiagnostic,
         Self::OrganizeFiles,
+        Self::McpListTools,
+        Self::McpCall,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -157,6 +161,8 @@ impl AgentAction {
             Self::SearchMemory => "search_memory",
             Self::RunDiagnostic => "run_diagnostic",
             Self::OrganizeFiles => "organize_files",
+            Self::McpListTools => "mcp_list_tools",
+            Self::McpCall => "mcp_call",
         }
     }
 
@@ -213,7 +219,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 25] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 27] = [
+    (A::McpListTools, [E::Ask, E::Ask, E::Allow, E::Allow]),
+    (A::McpCall, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::OrganizeFiles, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::RunDiagnostic, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::SearchMemory, [E::Allow, E::Allow, E::Allow, E::Allow]),
@@ -342,7 +350,9 @@ mod tests {
     fn assisted_is_the_default_and_asks_for_every_side_effect() {
         assert_eq!(PolicySettings::default(), PolicySettings { autonomy: P::Assisted, simulate: false });
         for action in AgentAction::ALL {
-            let asks = action.has_side_effect() || action.reads_screen() || action.private_data();
+            // Listing MCP tools starts a program the user declared: it asks too.
+            let asks =
+                action.has_side_effect() || action.reads_screen() || action.private_data() || action == A::McpListTools;
             let expected = if asks { E::Ask } else { E::Allow };
             assert_eq!(effect(P::Assisted, false, action, LOCAL), expected, "{action:?}");
         }

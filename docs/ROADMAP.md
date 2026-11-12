@@ -20,7 +20,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Architecture multi-processus gRPC [S1 §2–3] | ❌ Le cœur tourne dans le processus Tauri |
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies `manual` et `local_first` avec secours cloud explicite, modèles chargés et VRAM ; budget en jetons par demande cloud ✅ ; voix/image/vidéo, coût en euros, autres stratégies ❌ |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification ✅, raccourci global Ctrl+Alt+Espace ouvrant le champ de demande (palette simple) ✅ ; overlay flottant ❌ |
-| Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 Mémoire durable chiffrée (DPAPI) ✅, recherche sémantique locale dans la mémoire ✅, synthèse vocale locale ✅, dictée locale (SAPI) ✅, demandes enregistrées et planifiées (quotidien, lecture seule) ✅ ; indexation de fichiers, MCP, voix, image, vidéo, workflows, multi-agents ❌ |
+| Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 Mémoire durable chiffrée (DPAPI) ✅, client MCP stdio (extensions déclarées, appel approuvé) ✅, recherche sémantique locale dans la mémoire ✅, synthèse vocale locale ✅, dictée locale (SAPI) ✅, demandes enregistrées et planifiées (quotidien, lecture seule) ✅ ; indexation de fichiers, MCP, voix, image, vidéo, workflows, multi-agents ❌ |
 | Distribution (installateur, mises à jour) | 🟡 Installateur NSIS par utilisateur (`scripts/package.ps1`) avec pont, assistant et agent embarqués, Python détecté automatiquement ; signature, mises à jour, Python/.NET embarqués ❌ |
 
 ---

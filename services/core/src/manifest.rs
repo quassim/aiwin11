@@ -63,6 +63,7 @@ pub enum CapabilityName {
     MemoryWrite,
     MemoryRead,
     Diagnostic,
+    McpServer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -93,7 +94,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 25] = [
+pub const MANIFESTS: [ToolManifest; 27] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -450,6 +451,36 @@ pub const MANIFESTS: [ToolManifest; 25] = [
         reversibility: R::Reversible,
         timeout_ms: 60_000,
         capabilities: &[C::FileMove],
+    },
+    ToolManifest {
+        action: AgentAction::McpListTools,
+        tool: "mcp_list_tools",
+        version: 1,
+        // Starts the user's declared server to read its tool list.
+        risk: Risk::Medium,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 60_000,
+        capabilities: &[C::McpServer],
+    },
+    ToolManifest {
+        action: AgentAction::McpCall,
+        tool: "mcp_call",
+        version: 1,
+        // An external tool can do anything: always asks, never grantable.
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Irreversible,
+        timeout_ms: 60_000,
+        capabilities: &[C::McpServer],
     },
 ];
 

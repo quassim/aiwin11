@@ -6,6 +6,8 @@ pub mod grants;
 pub mod local_files;
 pub mod manifest;
 #[cfg(windows)]
+pub mod mcp;
+#[cfg(windows)]
 pub mod memory;
 pub mod model_gateway;
 #[cfg(windows)]

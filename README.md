@@ -116,6 +116,12 @@ Sous chaque réponse, **Lire à voix haute** utilise une voix Windows installée
 
 Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ; un clic sur une demande enregistrée la remet dans le champ, tu n’as plus qu’à l’envoyer. Avec une heure et **Planifier**, AiWin11 l’exécute seul chaque jour (s’il est ouvert), avec le modèle local et en lecture seule : aucune action modifiante, aucun envoi au cloud. Les résultats s’affichent dans **Résultats des demandes planifiées**.
 
+### Extensions MCP
+
+La page **Extensions** déclare jusqu’à 5 serveurs MCP locaux : un nom, le chemin complet de l’exécutable et ses arguments (par exemple `C:\Program Files
+odejs
+ode.exe` et le chemin du script du serveur). L’agent peut lister leurs outils puis, avec ton accord à chaque appel (arguments affichés), en utiliser un. N’ajoute que des extensions de confiance.
+
 ### Mémoire
 
 Dis à l’agent « Souviens-toi que… » : après ton accord, l’information est enregistrée, chiffrée pour ton compte Windows. Il peut la relire dans les demandes suivantes (modèles locaux seulement). La page **Mémoire** liste et efface ces informations.

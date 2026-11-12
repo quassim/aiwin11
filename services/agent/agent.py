@@ -93,6 +93,29 @@ def is_move_plan(value: object) -> bool:
     return len(sources) == len(value) and len(destinations) == len(value) and not sources & destinations
 
 
+def is_mcp_server(value: object) -> bool:
+    """Declared MCP server name: 1 to 32 ASCII letters, digits, '_' or '-'."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 32
+        and all(char.isascii() and (char.isalnum() or char in "_-") for char in value)
+    )
+
+
+def is_mcp_tool(value: object) -> bool:
+    """MCP tool name: 1 to 64 ASCII letters, digits, '_', '-', '.' or '/'."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 64
+        and all(char.isascii() and (char.isalnum() or char in "_-./") for char in value)
+    )
+
+
+def is_mcp_arguments(value: object) -> bool:
+    """MCP tool arguments: a JSON object of at most 4000 characters once serialized."""
+    return isinstance(value, dict) and len(json.dumps(value)) <= 4000
+
+
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
 Rule = tuple[str, ...] | Callable[[object], bool]
@@ -113,6 +136,8 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "list_windows": {},
     "list_services": {},
     "organize_files": {"moves": is_move_plan},
+    "mcp_list_tools": {"server": is_mcp_server},
+    "mcp_call": {"server": is_mcp_server, "tool": is_mcp_tool, "arguments": is_mcp_arguments},
     "run_diagnostic": {"diagnostic": ("network", "wifi", "time")},
     "admin_service": {
         "service": is_service_name,

@@ -40,6 +40,7 @@ message Command {
     RecallNotes recall_notes = 35;
     RunDiagnostic run_diagnostic = 36;
     Dictate dictate = 37;
+    McpRequest mcp_request = 38;
   }
 }
 
@@ -186,6 +187,10 @@ message CommandOutput {
   string text = 1;
   bool truncated = 2;
 }
+
+// One request to a user-declared MCP server, run by the core after authorization. The tool
+// name and arguments never travel in the command (they are shown in the approval).
+message McpRequest {}
 
 // Memory operations, run by the core itself after broker authorization. The note never
 // travels in the command; it is encrypted by the core before storage.

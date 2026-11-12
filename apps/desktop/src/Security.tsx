@@ -73,6 +73,8 @@ const actionNames: Record<string, string> = {
   writeClipboard: "Copier un texte dans le presse-papiers",
   listWindows: "Lister les fenêtres ouvertes",
   listServices: "Lister les services Windows (lecture seule)",
+  mcpListTools: "Lister les outils d’une extension MCP",
+  mcpCall: "Appeler un outil d’une extension MCP",
   runDiagnostic: "Diagnostic Windows de la liste fermée (réseau, Wi-Fi, heure)",
   remember: "Retenir une information (mémoire chiffrée)",
   recall: "Relire la mémoire",

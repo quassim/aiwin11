@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
+import { Extensions } from "./Extensions";
 import { History } from "./History";
 import { Memory } from "./Memory";
 import { Routines } from "./Routines";
@@ -11,7 +12,7 @@ import { Routing } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
 
-type Page = "Accueil" | "Modèles" | "Sécurité" | "Mémoire" | "Inspecteur" | "Fichiers" | "Activité";
+type Page = "Accueil" | "Modèles" | "Sécurité" | "Mémoire" | "Extensions" | "Inspecteur" | "Fichiers" | "Activité";
 type Provider = "ollama" | "openai";
 type ModelPreferences = { provider: Provider; localModel: string; cloudModel: string; visionModel: string };
 type Activity = { sequence: number; kind: string; timestamp: string; taskId: string | null; code: string | null };
@@ -55,6 +56,8 @@ type ApprovalAction =
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
   | { kind: "listServices" }
+  | { kind: "mcpListTools"; server: string }
+  | { kind: "mcpCall"; server: string; tool: string; arguments: string }
   | { kind: "organizeFiles"; moves: [string, string][] }
   | { kind: "runDiagnostic"; diagnostic: string }
   | { kind: "remember"; text: string }
@@ -148,6 +151,19 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       title: `L’agent propose de ranger ${action.moves.length} fichier(s)`,
       detail: "Plan complet, approuvé en une fois. Aucun fichier existant ne sera remplacé :",
       quote: action.moves.map(([source, destination]) => `${source} → ${destination}`).join("\n"),
+    };
+  }
+  if (action.kind === "mcpListTools") {
+    return {
+      title: "L’agent demande à lister les outils d’une extension",
+      detail: `Action : démarrer le serveur MCP « ${action.server} » pour lire la liste de ses outils.`,
+    };
+  }
+  if (action.kind === "mcpCall") {
+    return {
+      title: "L’agent propose d’utiliser une extension",
+      detail: `Action : appeler l’outil « ${action.tool} » du serveur MCP « ${action.server} » avec ces arguments. L’effet dépend entièrement de l’extension.`,
+      quote: action.arguments,
     };
   }
   if (action.kind === "listServices") {
@@ -258,7 +274,7 @@ const dictationErrors: Record<string, string> = {
   CORE_BUSY: "AiWin11 est occupé : réessaie dans un instant.",
 };
 
-const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Mémoire", "Inspecteur", "Fichiers", "Activité"];
+const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Mémoire", "Extensions", "Inspecteur", "Fichiers", "Activité"];
 const activityNames: Record<string, string> = {
   "session.started": "Session ouverte",
   "task.created": "Demande reçue",
@@ -285,6 +301,9 @@ const activityNames: Record<string, string> = {
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
   "window.list.completed": "Fenêtres listées par l’agent",
   "service.list.completed": "Services listés par l’agent",
+  "mcp.request.completed": "Extension MCP utilisée",
+  "mcp.request.failed": "Échec d’une extension MCP",
+  "settings.mcp.changed": "Extensions MCP modifiées",
   "diagnostic.run.completed": "Diagnostic Windows effectué",
   "diagnostic.run.failed": "Diagnostic Windows impossible",
   "memory.saved": "Information retenue (chiffrée)",
@@ -986,6 +1005,7 @@ function App() {
         )}
         {page === "Sécurité" && <Security onFinished={refresh} />}
         {page === "Mémoire" && <Memory />}
+        {page === "Extensions" && <Extensions />}
         {page === "Inspecteur" && <Inspector onFinished={refresh} />}
         {page === "Fichiers" && <LocalFiles onFinished={refresh} />}
         {page === "Activité" && (

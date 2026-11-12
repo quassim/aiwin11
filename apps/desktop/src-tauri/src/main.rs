@@ -432,6 +432,20 @@ fn run_scheduler(state: Arc<AppState>) {
 }
 
 #[tauri::command]
+fn get_mcp_servers(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::mcp::McpServer>, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.mcp_servers())
+}
+
+/// Main window only: declares the MCP servers the agent may use (each call still asks).
+#[tauri::command]
+fn set_mcp_servers(
+    state: State<'_, Arc<AppState>>,
+    servers: Vec<aiwin11_core::mcp::McpServer>,
+) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_mcp_servers(servers)
+}
+
+#[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
 }
@@ -628,6 +642,8 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            get_mcp_servers,
+            set_mcp_servers,
             get_reports,
             set_routine_schedule,
             dictate,
