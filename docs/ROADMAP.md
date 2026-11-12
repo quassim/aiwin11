@@ -79,8 +79,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Core : Sessions ✅, Events ✅, Tasks ✅, State 🟡, Configuration 🟡, IPC 🟡 (Tauri seulement) | 🟡 | R4 |
 | Context & Memory (RAG, index), Workflow Engine (triggers, jobs, scheduler) | ❌ | R6, R8 |
 | Broker : Policy Engine ✅, Approvals ✅, Sandboxing 🟡, Audit ✅, Secrets ✅ | 🟡 | R4 |
-| Stack : Tailwind CSS + composants accessibles | 🔷 CSS sans framework aujourd’hui ; décider du design system | R5 |
-| Installateur signé, MSIX selon besoins (à valider par prototype) | ❌ | R9 |
+| Stack : Tailwind CSS + composants accessibles | 🔷 CSS sans framework aujourd’hui ; décider du design system en R5 | R5 |
+| Installateur signé, MSIX selon besoins | ✅ Décidé : installateur **classique** ; réalisation ❌ | R9 |
 | M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto ❌ | 🟡 | R3 |
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
 | M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ❌, vérification 🟡, interruption ✅, **reprise** ❌ | 🟡 | R2, R8 |
@@ -113,8 +113,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Base MCP spec 2026-07-28 | ❌ | R6 |
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
-| Licence : open source, privée ou hybride | 🔷 | — |
-| Service privilégié facultatif | 🔷 | R9 |
+| Licence : open source, privée ou hybride | ✅ Sans objet (usage personnel) | — |
+| Service privilégié facultatif | 🔷 Voir « Composant administrateur » §6 | R9 |
 
 ### 2.3 Spécification v1.0 [S1]
 
@@ -156,7 +156,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Services : Memory, Workflow, Speech, Image, Video, Plugin, Telemetry (local) | ❌ | R6–R9 |
 | MCP avec passerelle de sécurité ; autorisation MCP ≠ permission AiWin11 | ❌ | R6 |
 | Tables : sessions ✅, tasks ✅, tool_executions ✅, events ✅, settings ✅ ; providers, models, model_profiles, agents, policies, approvals, memory_entries, workflows, artifacts ❌ | 🟡 | R2, R3, R6, R8 |
-| Dates UTC ✅, migrations versionnées ✅, clés hors SQLite ✅, chiffrement des données sensibles 🔷, **durée de conservation et effacement** ❌ | 🟡 | R1 |
+| Dates UTC ✅, migrations versionnées ✅, clés hors SQLite ✅, chiffrement : pas de chiffrement de la base, rien de sensible stocké (✅ décidé, §6), **durée de conservation et effacement** ❌ | 🟡 | R1 |
 | Profil IA : stratégie, capacités requises, `allow_cloud_fallback`, `allow_screen_upload`, `allow_document_upload`, **budget par tâche** | ❌ | R3 |
 | Lots A ✅, B ✅, C 🟡, D ❌, E ❌ | — | — |
 | Matrice de tests T-001 à T-014 | Voir §3 | — |
@@ -170,8 +170,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 
 | Point | État | Phase |
 |---|---|---|
-| Dépôt privé pour versionner le travail de Codex | 🔷 Dépôt git **local** (choix actuel) | R1 |
-| CI sur un vrai runner Windows 11 | ❌ Workflow présent mais jamais exécuté | R1 |
+| Dépôt privé pour versionner le travail de Codex | ✅ Décidé : dépôt git **local** uniquement | — |
+| CI sur un vrai runner Windows 11 | 🟡 Workflow présent mais pas exécuté (dépôt local) ; remplacé par `scripts/verify.ps1` sur la machine de référence | R1 |
 | Code linté et typé | 🟡 clippy ✅, TypeScript strict ✅ ; ESLint, ruff/mypy, `cargo fmt --check` ❌ | R1 |
 | Tests unitaires, intégration, sécurité | ✅ 59 tests Rust, 10 Python, 11 tests réels | — |
 | Aucune opération hors broker | ✅ | — |
@@ -222,7 +222,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | 100 % des appels d’outils par le broker, 100 % des actions tracées | ✅ |
 | Aucune requête cloud en mode local strict | ✅ Par conception — test réseau R3 |
 | Changement de provider sans redémarrage global | ✅ |
-| Machine de référence définie | 🟡 RTX 3090 / 32 Go utilisée ; à documenter formellement — R1 |
+| Machine de référence définie | ✅ PC de l’utilisateur (i9-12900K, 32 Go, RTX 3090, Windows 11 Pro) — §6 |
 
 ---
 
@@ -241,7 +241,8 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Mesures : démarrage, RAM au repos, navigation, évaluation de politique ; machine de référence documentée.
 - Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).
 - Audit d’accessibilité au lecteur d’écran (Narrateur, NVDA).
-- 🔷 Décider : dépôt privé GitHub et CI ; licence.
+- Script local `scripts/verify.ps1` qui remplace la CI (dépôt local) : builds, analyse statique, tests unitaires et, en option, tests réels.
+- Test qui garantit l’invariant « rien de sensible dans SQLite » (voir §6).
 
 ### R2 — Politiques par ressource et contrôle Windows étendu (fin du lot C, début de M02/M04)
 
@@ -315,19 +316,43 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Journaux techniques, traces d’agents, statistiques des modèles, ressources, diagnostics ; suivi des coûts avancé.
 - Suite complète de tests de sécurité et de robustesse (AW-024).
 - Catalogue local de plugins (AW-031).
-- Installateur signé, MSIX à évaluer, mises à jour, diagnostics (AW-032).
-- 🔷 Composant privilégié facultatif, limité en durée et en périmètre, pour les actions administrateur.
+- **Installateur classique** (NSIS ou MSI via Tauri) embarquant le pont .NET, l’agent Python et leurs runtimes ; mises à jour ; diagnostics (AW-032). Signature de code facultative pour un usage personnel.
+- Composant administrateur : option B (assistant élevé à la demande, invite UAC à chaque action) si la décision §6 la retient.
 
 ---
 
-## 6. Décisions ouvertes 🔷
+## 6. Décisions
+
+### Prises (12 novembre 2026)
+
+| Décision | Choix | Conséquence |
+|---|---|---|
+| Dépôt | **Local uniquement** pour le moment | La CI GitHub n’est pas exécutée : R1 ajoute un script local qui lance toutes les vérifications (`scripts/verify.ps1`) |
+| Licence | **Sans objet** : usage personnel, un seul utilisateur | Aucune action |
+| Installateur | **Classique** (pas de MSIX) | R9 : installateur Tauri NSIS ou MSI, avec le pont .NET, l’agent Python et leur runtime |
+| Chiffrement SQLite | **Pas de chiffrement de la base entière pour l’instant** | Voir ci-dessous |
+| Machine de référence | **Le PC de l’utilisateur** : Intel Core i9-12900K (16 cœurs / 24 threads), 32 Go de RAM, NVIDIA RTX 3090 24 Go (pilote 621.14), SSD Samsung 980 PRO 1 To, Windows 11 Professionnel build 26300 | Toutes les mesures de performance (R1) sont faites et comparées sur cette machine |
+
+**Chiffrement SQLite — justification.** Aujourd’hui la base ne contient aucune donnée sensible : seulement des types d’événements, des codes de décision, des états de tâche et le profil de sécurité. Les demandes, les réponses, les noms et contenus de fichiers, les titres de fenêtres et le texte saisi n’y sont jamais écrits ; la clé API est dans le Gestionnaire d’identifiants Windows. Chiffrer la base entière (SQLCipher) ajouterait une dépendance native et une gestion de clé sans rien protéger de plus. Deux règles à la place :
+
+1. **Invariant** : rien de sensible dans SQLite tant qu’il n’existe pas de chiffrement de contenu. Tout ajout de données utilisateur à la base doit passer par la règle 2. Un test le vérifie (R1).
+2. **Quand la mémoire arrivera (R6)** : les contenus mémorisés (textes, extraits, embeddings) seront chiffrés champ par champ avec une clé protégée par DPAPI pour l’utilisateur Windows courant ; les métadonnées non sensibles restent en clair pour les requêtes.
+
+Recommandation hors application : activer BitLocker sur le disque système protège la base, les fichiers et la corbeille d’AiWin11 en cas de vol du PC.
+
+### Encore ouvertes 🔷
 
 | Décision | Contexte |
 |---|---|
-| Dépôt privé GitHub et CI | Proposé dans [H] ; dépôt local pour l’instant |
-| Licence | Ouverte dans [S0 §10] |
-| Design system (Tailwind ou autre) | [S0 §3] ; CSS simple aujourd’hui |
-| MSIX ou installateur classique | [S0 §3], à valider par prototype |
-| Chiffrement des données sensibles dans SQLite | [S1 §9] |
-| Composant privilégié pour l’administration | [S0 §10], [S1 §2.1] |
-| Machine de référence pour les cibles de performance | [S0 §8], [S1 §11] |
+| Composant administrateur | Voir l’explication ci-dessous ; à décider avant R2 (actions système) |
+| Design system (Tailwind ou autre) | [S0 §3] ; CSS simple aujourd’hui ; à décider en R5 |
+
+**Composant administrateur — de quoi il s’agit.** AiWin11 tourne avec les droits d’un utilisateur normal, comme exigé par la spécification. Certaines actions Windows exigent les droits administrateur : installer ou désinstaller un logiciel, arrêter ou configurer un service, modifier des réglages système protégés (pare-feu, Defender, registre machine), nettoyer des fichiers système. Pour le scénario « PC lent », par exemple, une partie des optimisations en dépend. Trois options :
+
+| Option | Fonctionnement | Avantages | Inconvénients |
+|---|---|---|---|
+| A. Jamais d’administration | L’agent prépare l’action et te l’explique ; tu la fais toi-même | Aucun risque d’élévation | L’agent ne peut pas finir certaines tâches seul |
+| B. Assistant élevé à la demande | Un petit programme séparé, lancé seulement pour une action précise, avec l’invite UAC de Windows à chaque fois, puis il s’arrête | Tu valides deux fois (AiWin11 puis Windows) ; rien d’élevé ne reste actif | Développement supplémentaire ; une invite UAC à chaque action |
+| C. Service Windows permanent | Un service installé tourne en permanence avec des droits élevés | Pas d’invite UAC | Surface d’attaque permanente ; contraire à l’esprit de la spécification |
+
+Recommandation : **A maintenant, B plus tard** (R9) si le besoin se confirme. C est déconseillée.
