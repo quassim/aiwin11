@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package aiwin11.v1;
+option csharp_namespace = "Aiwin11.V1.Ipc";
+
+// Read-only contract for validating the local transport before migrating services.
+service IpcProbe {
+  rpc Check (ProbeRequest) returns (ProbeReply);
+}
+
+message ProbeRequest {
+  uint32 schema_version = 1;
+}
+
+message ProbeReply {
+  uint32 schema_version = 1;
+  uint32 worker_process_id = 2;
+}

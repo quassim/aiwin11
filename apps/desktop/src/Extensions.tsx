@@ -1,10 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
-type McpServer = { name: string; command: string; args: string[] };
-type Draft = { name: string; command: string; args: string };
+type McpServer = { name: string; command: string; args: string[]; enabled: boolean; allowedTools: string[] | null };
+type Draft = Omit<McpServer, "args" | "allowedTools"> & { args: string; tools: string; restrict: boolean };
 
-const toDraft = (server: McpServer): Draft => ({ ...server, args: server.args.join("\n") });
+const toDraft = (server: McpServer): Draft => ({
+  ...server,
+  args: server.args.join("\n"),
+  tools: server.allowedTools?.join("\n") ?? "",
+  restrict: server.allowedTools != null,
+});
+const lines = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 
 /** MCP servers the user declares (stdio, fixed executable and arguments, no shell). */
 export function Extensions() {
@@ -25,10 +35,9 @@ export function Extensions() {
     const servers: McpServer[] = drafts.map((draft) => ({
       name: draft.name.trim(),
       command: draft.command.trim(),
-      args: draft.args
-        .split("\n")
-        .map((arg) => arg.trim())
-        .filter(Boolean),
+      args: lines(draft.args),
+      enabled: draft.enabled,
+      allowedTools: draft.restrict ? lines(draft.tools) : null,
     }));
     try {
       await invoke("set_mcp_servers", { servers });
@@ -51,6 +60,14 @@ export function Extensions() {
       {drafts.map((draft, index) => (
         <fieldset key={index} className="task-form">
           <legend>Extension {index + 1}</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={draft.enabled}
+              onChange={(event) => update(index, { enabled: event.target.checked })}
+            />{" "}
+            Activer ce serveur
+          </label>
           <label htmlFor={`mcp-name-${index}`}>Nom</label>
           <input
             id={`mcp-name-${index}`}
@@ -71,6 +88,25 @@ export function Extensions() {
             value={draft.args}
             onChange={(event) => update(index, { args: event.target.value })}
           />
+          <label>
+            <input
+              type="checkbox"
+              checked={draft.restrict}
+              onChange={(event) => update(index, { restrict: event.target.checked })}
+            />{" "}
+            Limiter les outils autorisés
+          </label>
+          {draft.restrict && (
+            <>
+              <label htmlFor={`mcp-tools-${index}`}>Outils autorisés (un identifiant par ligne)</label>
+              <textarea
+                id={`mcp-tools-${index}`}
+                rows={3}
+                value={draft.tools}
+                onChange={(event) => update(index, { tools: event.target.value })}
+              />
+            </>
+          )}
           <button type="button" onClick={() => setDrafts(drafts.filter((_, i) => i !== index))}>
             Retirer
           </button>
@@ -80,7 +116,9 @@ export function Extensions() {
         <button
           type="button"
           disabled={drafts.length >= 5}
-          onClick={() => setDrafts([...drafts, { name: "", command: "", args: "" }])}
+          onClick={() =>
+            setDrafts([...drafts, { name: "", command: "", args: "", enabled: false, restrict: true, tools: "" }])
+          }
         >
           Ajouter une extension
         </button>

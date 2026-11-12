@@ -51,6 +51,7 @@ message Command {
     InspectProcess inspect_process = 46;
     ListApplications list_applications = 47;
     StopProcess stop_process = 48;
+    ListSpeechRecognizers list_speech_recognizers = 49;
   }
 }
 
@@ -219,7 +220,17 @@ message InvokeControl {
 }
 
 // Desktop only (user's click): listens to the default microphone for one phrase, offline.
-message Dictate { uint32 max_seconds = 1; }
+message Dictate {
+  uint32 max_seconds = 1;
+  string recognizer_id = 2;
+}
+message ListSpeechRecognizers {}
+message SpeechRecognizer {
+  string id = 1;
+  string label = 2;
+  string language = 3;
+}
+message SpeechRecognizerList { repeated SpeechRecognizer recognizers = 1; }
 
 message DictationResult {
   enum Status {
@@ -243,6 +254,7 @@ message RunDiagnostic {
     DIAGNOSTIC_NETWORK = 1;  // ipconfig /all
     DIAGNOSTIC_WIFI = 2;     // netsh wlan show interfaces
     DIAGNOSTIC_TIME = 3;     // w32tm /query /status
+    DIAGNOSTIC_POWER_SHELL_OS = 4; // Fixed local OS inventory.
   }
   Diagnostic diagnostic = 1;
 }
@@ -431,6 +443,8 @@ message Result {
   DisplayList display_list = 17;
   ProcessDetails process_details = 18;
   ApplicationList application_list = 19;
+  bool control_keyboard_verified = 20;
+  SpeechRecognizerList speech_recognizers = 21;
 }
 
 message Error {

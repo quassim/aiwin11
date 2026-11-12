@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod desktop;
+
 use std::{
     fs,
     sync::{Arc, Mutex, OnceLock},
@@ -15,7 +17,7 @@ use aiwin11_core::{
     model_gateway::{LocalModelProvider, LocalStrategy, ModelResource, Ollama},
     openai,
     policy::{self, AgentAction, Effect, PolicySettings},
-    task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
+    task::{StopStatus, TaskRequest, TaskSlot},
     windows_bridge::{Capture, Inspection},
     CloudCost, Core, ModelFacts, ModelManifest, ModelPreferences, ToolCalling,
 };
@@ -28,6 +30,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 struct Snapshot {
     session_id: String,
     events: Vec<Activity>,
+    replay: bool,
 }
 
 #[derive(Serialize)]
@@ -83,6 +86,8 @@ struct AppState {
     /// The agent's folders; the desktop Files page works on the primary one.
     files: Option<FolderSet>,
     task: TaskSlot,
+    task_worker: aiwin11_model_ipc::TaskSupervisor,
+    desktop: desktop::DesktopState,
     vision: Mutex<()>,
     video: Mutex<VideoJob>,
     /// Process start, and the time the interface first reported itself rendered (T-001).
@@ -104,6 +109,8 @@ enum VideoJob {
     },
     Failed {
         code: &'static str,
+        #[serde(rename = "canResume")]
+        can_resume: bool,
     },
 }
 
@@ -125,24 +132,80 @@ fn start_video(
     if matches!(*job, VideoJob::Submitting | VideoJob::Queued) {
         return Err("VIDEO_BUSY");
     }
-    let task = lock_core(&state.core).authorize_video()?;
+    let task = {
+        let mut core = lock_core(&state.core);
+        if core.video_ticket()?.is_some() {
+            return Err("VIDEO_TRACKING_PENDING");
+        }
+        let task = core.authorize_video()?;
+        core.reserve_video_submission()?;
+        task
+    };
     *job = VideoJob::Submitting;
     drop(job);
-    tauri::async_runtime::spawn_blocking(move || {
-        let outcome = request.run(|| {
-            if let Ok(mut job) = state.video.lock() {
-                *job = VideoJob::Queued;
-            }
-        });
-        let audited = lock_core(&state.core).finish_video(task.as_deref(), &outcome);
-        if let Ok(mut job) = state.video.lock() {
-            *job = match audited.and(outcome) {
-                Ok(filename) => VideoJob::Completed { filename },
-                Err(code) => VideoJob::Failed { code },
-            };
+    tauri::async_runtime::spawn_blocking(move || match request.submit() {
+        Ok(ticket) => {
+            let saved = lock_core(&state.core).set_video_ticket(Some(&ticket)).is_ok();
+            follow_video(&state, task.as_deref(), ticket, saved);
         }
+        Err(code) => finish_video(&state, task.as_deref(), Err(code), false),
     });
     Ok(())
+}
+
+#[tauri::command]
+fn resume_video(state: State<'_, Arc<AppState>>) -> Result<(), &'static str> {
+    let state = Arc::clone(state.inner());
+    let mut job = state.video.lock().map_err(|_| "VIDEO_UNAVAILABLE")?;
+    if matches!(*job, VideoJob::Submitting | VideoJob::Queued) {
+        return Err("VIDEO_BUSY");
+    }
+    let (ticket, task) = {
+        let mut core = lock_core(&state.core);
+        let ticket = core.video_ticket()?.ok_or("VIDEO_UNAVAILABLE")?;
+        (ticket, core.authorize_video()?)
+    };
+    *job = VideoJob::Queued;
+    drop(job);
+    tauri::async_runtime::spawn_blocking(move || follow_video(&state, task.as_deref(), ticket, true));
+    Ok(())
+}
+
+#[tauri::command]
+fn forget_video_tracking(state: State<'_, Arc<AppState>>) -> Result<(), &'static str> {
+    let mut job = state.video.lock().map_err(|_| "VIDEO_UNAVAILABLE")?;
+    if matches!(*job, VideoJob::Submitting | VideoJob::Queued) {
+        return Err("VIDEO_BUSY");
+    }
+    let mut core = lock_core(&state.core);
+    core.set_video_ticket(None)?;
+    core.journal("video.tracking.forgotten", None).map_err(|_| "VIDEO_AUDIT_UNAVAILABLE")?;
+    *job = VideoJob::Idle;
+    Ok(())
+}
+
+fn follow_video(state: &AppState, task: Option<&str>, ticket: aiwin11_core::video::VideoTicket, saved: bool) {
+    if let Ok(mut job) = state.video.lock() {
+        *job = VideoJob::Queued;
+    }
+    let outcome = ticket.follow();
+    let terminal = matches!(&outcome, Ok(_) | Err("VIDEO_GENERATION_FAILED" | "VIDEO_OUTPUT_MISSING"));
+    let mut can_resume = saved;
+    if terminal && saved {
+        can_resume = lock_core(&state.core).set_video_ticket(None).is_err();
+    }
+    finish_video(state, task, outcome, can_resume);
+}
+
+fn finish_video(state: &AppState, task: Option<&str>, outcome: Result<String, &'static str>, can_resume: bool) {
+    let audited = lock_core(&state.core).finish_video(task, &outcome);
+    if let Ok(mut job) = state.video.lock() {
+        *job = match audited.and(outcome) {
+            Ok(filename) if !can_resume => VideoJob::Completed { filename },
+            Ok(_) => VideoJob::Failed { code: "VIDEO_UNAVAILABLE", can_resume },
+            Err(code) => VideoJob::Failed { code, can_resume },
+        };
+    }
 }
 
 const UPDATE_KEY: Option<&str> = option_env!("AIWIN11_UPDATE_PUBLIC_KEY");
@@ -258,6 +321,38 @@ async fn list_trash(state: State<'_, Arc<AppState>>) -> Result<Vec<(String, Stri
 }
 
 #[tauri::command]
+async fn index_local_text(state: State<'_, Arc<AppState>>, name: String) -> Result<(), &'static str> {
+    with_local_files(state, move |files, core| core.index_file(files, &name)).await
+}
+
+#[tauri::command]
+fn indexed_file_names(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, &'static str> {
+    lock_core(&state.core).indexed_file_names()
+}
+
+#[tauri::command]
+fn remove_indexed_file(state: State<'_, Arc<AppState>>, name: String) -> Result<(), &'static str> {
+    lock_core(&state.core).remove_indexed_file(&name)
+}
+
+#[tauri::command]
+async fn search_indexed_files(
+    state: State<'_, Arc<AppState>>,
+    query: String,
+) -> Result<Vec<aiwin11_core::memory::IndexedFile>, &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let (files, model) = {
+            let core = lock_core(&state.core);
+            (core.indexed_files()?, core.embedding_model())
+        };
+        Ok(aiwin11_core::memory::search_indexed_files(&query, files, model.as_deref()))
+    })
+    .await
+    .map_err(|_| "MEMORY_UNAVAILABLE")?
+}
+
+#[tauri::command]
 async fn restore_local_text(state: State<'_, Arc<AppState>>, id: String, name: String) -> Result<(), &'static str> {
     with_local_files(state, move |files, core| files.restore(core, &id, &name)).await
 }
@@ -277,16 +372,22 @@ async fn with_local_files<T: Send + 'static>(
 }
 
 #[tauri::command]
-async fn get_snapshot(state: State<'_, Arc<AppState>>) -> Result<Snapshot, &'static str> {
+async fn get_snapshot(
+    state: State<'_, Arc<AppState>>,
+    session_id: Option<String>,
+    after_sequence: Option<u64>,
+) -> Result<Snapshot, &'static str> {
     let state = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || snapshot(&state)).await.map_err(|_| "CORE_UNAVAILABLE")?
-}
-
-fn snapshot(state: &AppState) -> Result<Snapshot, &'static str> {
-    let core = lock_core(&state.core);
-    let events = core.activity().map_err(|_| "ACTIVITY_UNAVAILABLE")?;
+    let current_session = lock_core(&state.core).session_id().to_owned();
+    let after = after_sequence.filter(|_| session_id.as_deref() == Some(current_session.as_str()));
+    #[cfg(windows)]
+    let events = aiwin11_model_ipc::journal_page(&state.store, current_session.clone(), after).await?;
+    #[cfg(not(windows))]
+    let events = aiwin11_core::read_committed_activity(&state.store, &current_session, after)
+        .map_err(|_| "ACTIVITY_UNAVAILABLE")?;
     Ok(Snapshot {
-        session_id: core.session_id().into(),
+        session_id: current_session,
+        replay: after.is_some(),
         events: events
             .into_iter()
             .map(|event| Activity {
@@ -302,6 +403,10 @@ fn snapshot(state: &AppState) -> Result<Snapshot, &'static str> {
 
 #[tauri::command]
 async fn discover_models() -> Result<Vec<String>, &'static str> {
+    #[cfg(windows)]
+    return aiwin11_model_ipc::list_local_models().await;
+
+    #[cfg(not(windows))]
     tauri::async_runtime::spawn_blocking(|| {
         Ollama::connect().and_then(|provider| provider.discover()).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")
     })
@@ -408,18 +513,59 @@ async fn read_capture(
 
 #[tauri::command]
 async fn run_task(
+    app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     request: TaskRequest,
-    progress: Channel<TaskUpdate>,
-) -> Result<TaskOutcome, &'static str> {
+    progress: Channel<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        state.task.run(&state.core, state.files.as_ref(), &request, |update| {
+        let result = run_task_worker(&state, &request, |update| {
+            if update.pointer("/update/type").and_then(serde_json::Value::as_str) == Some("approvalRequired") {
+                desktop::notify(&app, "Un accord est demandé");
+            }
             let _ = progress.send(update);
-        })
+        });
+        match &result {
+            Ok(_) => desktop::notify(&app, "Tâche terminée"),
+            Err(code) if code == "TASK_CANCELLED" => desktop::notify(&app, "Tâche annulée"),
+            Err(code) if code == "TASK_BUSY" => {}
+            Err(_) => desktop::notify(&app, "Tâche en échec"),
+        }
+        result
     })
     .await
     .map_err(|_| "CORE_UNAVAILABLE")?
+}
+
+fn run_task_worker(
+    state: &AppState,
+    request: &TaskRequest,
+    progress: impl Fn(serde_json::Value),
+) -> Result<serde_json::Value, String> {
+    state.task.while_idle(|| run_reserved_task(state, request, progress)).ok_or("TASK_BUSY")?
+}
+
+fn run_reserved_task(
+    state: &AppState,
+    request: &TaskRequest,
+    progress: impl Fn(serde_json::Value),
+) -> Result<serde_json::Value, String> {
+    let session = lock_core(&state.core).session_id().to_owned();
+    let result = tauri::async_runtime::block_on(state.task_worker.run(&state.store, &session, request, progress));
+    if matches!(result.as_ref().err().map(String::as_str), Some("TASK_WORKER_UNAVAILABLE" | "CORE_UNAVAILABLE")) {
+        let _ = lock_core(&state.core).recover_task_worker();
+    }
+    result
+}
+
+#[tauri::command]
+fn get_task_replay(
+    state: State<'_, Arc<AppState>>,
+    run_id: Option<String>,
+    after_sequence: Option<usize>,
+) -> aiwin11_model_ipc::TaskReplay {
+    state.task_worker.replay(run_id.as_deref(), after_sequence.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -438,20 +584,20 @@ fn delete_openai_key(state: State<'_, Arc<AppState>>) -> Result<(), &'static str
 }
 
 #[tauri::command]
-fn cancel_task(state: State<'_, Arc<AppState>>) -> bool {
-    state.task.cancel()
+async fn cancel_task(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    state.task_worker.control(aiwin11_model_ipc::TaskCommand::Cancel, String::new()).await.map(|result| result.0)
 }
 
 /// Pauses the running task at its next safe point (before the next model step).
 #[tauri::command]
-fn pause_task(state: State<'_, Arc<AppState>>) -> bool {
-    state.task.pause()
+async fn pause_task(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    state.task_worker.control(aiwin11_model_ipc::TaskCommand::Pause, String::new()).await.map(|result| result.0)
 }
 
 /// Resumes a paused task, or withdraws a pause not reached yet.
 #[tauri::command]
-fn resume_task(state: State<'_, Arc<AppState>>) -> bool {
-    state.task.resume()
+async fn resume_task(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    state.task_worker.control(aiwin11_model_ipc::TaskCommand::Resume, String::new()).await.map(|result| result.0)
 }
 
 #[derive(Serialize)]
@@ -527,7 +673,35 @@ fn set_local_strategy(state: State<'_, Arc<AppState>>, strategy: LocalStrategy) 
 
 #[tauri::command]
 fn get_cloud_fallback(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
-    Ok(lock_core(&state.core).cloud_fallback_enabled())
+    Ok(lock_core(&state.core).legacy_cloud_fallback())
+}
+
+#[tauri::command]
+fn get_agent_models(state: State<'_, Arc<AppState>>) -> aiwin11_core::AgentModels {
+    lock_core(&state.core).agent_models()
+}
+
+#[tauri::command]
+fn get_local_runtime_preferences(state: State<'_, Arc<AppState>>) -> aiwin11_core::LocalRuntimePreferences {
+    lock_core(&state.core).local_runtime_preferences()
+}
+
+#[tauri::command]
+fn set_local_runtime_preferences(
+    state: State<'_, Arc<AppState>>,
+    preferences: aiwin11_core::LocalRuntimePreferences,
+) -> Result<(), &'static str> {
+    lock_core(&state.core).set_local_runtime_preferences(preferences)
+}
+
+#[tauri::command]
+async fn discover_lm_studio_models() -> Result<Vec<String>, &'static str> {
+    aiwin11_model_ipc::list_lm_studio_models().await
+}
+
+#[tauri::command]
+fn set_agent_models(state: State<'_, Arc<AppState>>, models: aiwin11_core::AgentModels) -> Result<(), &'static str> {
+    lock_core(&state.core).set_agent_models(models)
 }
 
 #[tauri::command]
@@ -594,6 +768,12 @@ fn get_model_manifests(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelManif
 /// Models loaded by Ollama and their RAM/VRAM use.
 #[tauri::command]
 async fn get_model_resources() -> Result<Vec<ModelResource>, &'static str> {
+    #[cfg(windows)]
+    return aiwin11_model_ipc::list_loaded_models()
+        .await
+        .map(|models| models.into_iter().map(ModelResource::from).collect());
+
+    #[cfg(not(windows))]
     tauri::async_runtime::spawn_blocking(|| {
         Ollama::connect()
             .and_then(|provider| provider.loaded_models())
@@ -616,6 +796,19 @@ fn ui_ready(state: State<'_, Arc<AppState>>) -> u64 {
         let _ = lock_core(&state.core).record_ui_ready(elapsed);
     }
     elapsed
+}
+
+#[tauri::command]
+async fn ui_navigation(state: State<'_, Arc<AppState>>, elapsed_ms: u32) -> Result<(), &'static str> {
+    if elapsed_ms > 30_000 {
+        return Err("INVALID_UI_DURATION");
+    }
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        lock_core(&state.core).record_ui_navigation(elapsed_ms).map_err(|_| "ACTIVITY_UNAVAILABLE")
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 #[tauri::command]
@@ -751,6 +944,68 @@ fn get_cloud_vendor(state: State<'_, Arc<AppState>>) -> Result<openai::Vendor, &
     cloud_vendor(&state)
 }
 
+#[tauri::command]
+fn get_cloud_providers(state: State<'_, Arc<AppState>>) -> Vec<serde_json::Value> {
+    let core = lock_core(&state.core);
+    openai::CLOUD_PROVIDERS
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id, "label": entry.label, "enabled": core.cloud_vendor_enabled(entry.id)
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn set_cloud_provider_enabled(
+    state: State<'_, Arc<AppState>>,
+    vendor: openai::Vendor,
+    enabled: bool,
+) -> Result<(), &'static str> {
+    lock_core(&state.core).set_cloud_vendor_enabled(vendor, enabled)
+}
+
+#[tauri::command]
+async fn probe_cloud_model(
+    state: State<'_, Arc<AppState>>,
+    vendor: openai::Vendor,
+    model: String,
+) -> Result<bool, &'static str> {
+    if !aiwin11_core::valid_model_name(&model) {
+        return Err("MODEL_REQUIRED");
+    }
+    let state = Arc::clone(state.inner());
+    {
+        let core = lock_core(&state.core);
+        if core.private_mode() {
+            return Err("PRIVATE_MODE");
+        }
+        if !core.cloud_vendor_enabled(vendor) {
+            return Err("CLOUD_PROVIDER_DISABLED");
+        }
+        core.journal("model.cloud.probe", Some(vendor.code())).map_err(|_| "AUDIT_UNAVAILABLE")?;
+    }
+    let messages = [serde_json::json!({
+        "role": "user",
+        "content": "Synthetic tool capability test. Call launch_application exactly once with application notepad. No action will be executed."
+    })];
+    let name = model.clone();
+    let (proposal, used) = tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::block_on(aiwin11_model_ipc::propose_cloud(vendor, &name, &messages, &mut |_| true))
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")??;
+    let verified = matches!(proposal, aiwin11_core::model_gateway::Proposal::Calls(calls) if
+        calls.as_array().is_some_and(|calls| calls.len() == 1
+            && calls[0].pointer("/function/name").and_then(serde_json::Value::as_str) == Some("launch_application")
+            && calls[0].pointer("/function/arguments") == Some(&serde_json::json!({"application":"notepad"}))));
+    let core = lock_core(&state.core);
+    core.record_cloud_probe_usage(used).map_err(|_| "AUDIT_UNAVAILABLE")?;
+    core.record_cloud_tool_capability(vendor, &model, verified).map_err(|_| "SETTINGS_UNAVAILABLE")?;
+    Ok(verified)
+}
+
 /// Main window only: chooses the cloud provider (each keeps its own key).
 #[tauri::command]
 fn set_cloud_vendor(state: State<'_, Arc<AppState>>, vendor: openai::Vendor) -> Result<(), &'static str> {
@@ -834,6 +1089,29 @@ async fn dictate(state: State<'_, Arc<AppState>>) -> Result<String, &'static str
 }
 
 #[tauri::command]
+async fn get_speech_recognizers(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut core = lock_core(&state.core);
+        let selected = core.speech_recognizer();
+        let list = core.speech_recognizers()?;
+        Ok(serde_json::json!({ "selected": selected, "recognizers": list.into_iter().map(|entry| {
+            serde_json::json!({"id": entry.id, "label": entry.label, "language": entry.language})
+        }).collect::<Vec<_>>() }))
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
+}
+
+#[tauri::command]
+async fn set_speech_recognizer(state: State<'_, Arc<AppState>>, id: String) -> Result<(), &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || lock_core(&state.core).set_speech_recognizer(&id))
+        .await
+        .map_err(|_| "CORE_UNAVAILABLE")?
+}
+
+#[tauri::command]
 fn get_reports(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     lock_core(&state.core).reports()
 }
@@ -854,37 +1132,41 @@ fn run_scheduler(state: Arc<AppState>) {
     let mut startup = true;
     loop {
         std::thread::sleep(std::time::Duration::from_secs(30));
-        if state.task.is_running() {
-            continue;
-        }
-        let (due, model) = {
-            let mut core = lock_core(&state.core);
-            let model = core.model_preferences().local_model;
-            if model.is_empty() {
-                continue;
-            }
-            let Ok(due) = core.take_due_routines(startup) else { continue };
-            startup = false;
-            (due, model)
-        };
-        for routine in due {
+        while state.task.while_idle(|| {
+            let (routine, model) = {
+                let mut core = lock_core(&state.core);
+                let model = core.model_preferences().local_model;
+                if model.is_empty() {
+                    return false;
+                }
+                let Ok(due) = core.take_due_routine(startup) else { return false };
+                let Some(routine) = due else {
+                    startup = false;
+                    return false;
+                };
+                (routine, model)
+            };
             let request = TaskRequest {
                 provider: aiwin11_core::task::Provider::Ollama,
                 prompt: routine.text.clone(),
                 model: model.clone(),
                 cloud_approved: false,
+                cloud_vendor: None,
+                local_runtime: aiwin11_core::model_gateway::LocalRuntime::Ollama,
                 vision_model: None,
                 cloud_fallback_model: None,
                 scheduled: true,
                 agent: aiwin11_core::policy::AgentProfile::General,
             };
-            let outcome = state.task.run(&state.core, state.files.as_ref(), &request, |_| {});
+            let outcome = run_reserved_task(&state, &request, |_| {});
             let report = match outcome {
-                Ok(outcome) => format!("« {} » : {}", routine.text, outcome.reply),
+                Ok(outcome) => format!("« {} » : {}", routine.text, outcome["reply"].as_str().unwrap_or_default()),
                 Err(code) => format!("« {} » : échec ({code}).", routine.text),
             };
             let _ = lock_core(&state.core).save_report(&report);
-        }
+            true
+        }) == Some(true)
+        {}
     }
 }
 
@@ -928,23 +1210,48 @@ fn set_floating(app: tauri::AppHandle, enabled: bool) -> Result<(), &'static str
 #[serde(rename_all = "camelCase")]
 struct ImageEngine {
     endpoint: String,
+    backend: aiwin11_core::images::ImageBackend,
     available: bool,
+    checkpoint: Option<String>,
+    checkpoints: Vec<aiwin11_core::images::ImageCheckpoint>,
 }
 
 #[tauri::command]
 async fn get_image_engine(state: State<'_, Arc<AppState>>) -> Result<ImageEngine, &'static str> {
-    let endpoint = lock_core(&state.core).image_endpoint().unwrap_or_default();
+    let (endpoint, checkpoint, backend) = {
+        let core = lock_core(&state.core);
+        (core.image_endpoint().unwrap_or_default(), core.image_checkpoint(), core.image_backend())
+    };
     let probe = endpoint.clone();
-    let available = tauri::async_runtime::spawn_blocking(move || aiwin11_core::images::engine_available(&probe))
-        .await
-        .unwrap_or(false);
-    Ok(ImageEngine { endpoint, available })
+    let checkpoints =
+        tauri::async_runtime::spawn_blocking(move || aiwin11_core::images::list_checkpoints(&probe, backend))
+            .await
+            .ok()
+            .and_then(Result::ok);
+    Ok(ImageEngine {
+        endpoint,
+        backend,
+        available: checkpoints.is_some(),
+        checkpoint,
+        checkpoints: checkpoints.unwrap_or_default(),
+    })
 }
 
 /// Main window only: the local image engine (loopback HTTP only), or none.
 #[tauri::command]
-fn set_image_engine(state: State<'_, Arc<AppState>>, endpoint: String) -> Result<(), &'static str> {
-    lock_core(&state.core).set_image_endpoint(&endpoint)
+fn set_image_engine(
+    state: State<'_, Arc<AppState>>,
+    endpoint: String,
+    backend: Option<aiwin11_core::images::ImageBackend>,
+) -> Result<(), &'static str> {
+    let mut core = lock_core(&state.core);
+    let backend = backend.unwrap_or_else(|| core.image_backend());
+    core.set_image_endpoint(&endpoint, backend)
+}
+
+#[tauri::command]
+fn set_image_checkpoint(state: State<'_, Arc<AppState>>, checkpoint: String) -> Result<(), &'static str> {
+    lock_core(&state.core).set_image_checkpoint(&checkpoint)
 }
 
 /// Opens AiWin11's images folder in Explorer (fixed executable, fixed folder).
@@ -1006,8 +1313,17 @@ fn revoke_grant(state: State<'_, Arc<AppState>>, id: String) -> Result<(), &'sta
 /// "Stoppe toutes les tâches": always available, journaled with its immediate result. The stop
 /// is confirmed when the running task ends as cancelled (`task.cancelled`).
 #[tauri::command]
-fn stop_all_tasks(state: State<'_, Arc<AppState>>) -> Result<StopStatus, &'static str> {
-    let status = state.task.stop_all();
+async fn stop_all_tasks(state: State<'_, Arc<AppState>>) -> Result<StopStatus, &'static str> {
+    stop_task_worker(&state).await
+}
+
+async fn stop_task_worker(state: &AppState) -> Result<StopStatus, &'static str> {
+    let (_, code) = state.task_worker.control(aiwin11_model_ipc::TaskCommand::Stop, String::new()).await?;
+    let status = match code.as_str() {
+        "stopped" => StopStatus::Stopped,
+        "requested" => StopStatus::Requested,
+        _ => StopStatus::Idle,
+    };
     let _ = lock_core(&state.core).journal("tasks.stop.requested", Some(status.code()));
     Ok(status)
 }
@@ -1055,8 +1371,17 @@ fn set_model_preferences(state: State<'_, Arc<AppState>>, preferences: ModelPref
 
 /// The user's answer to the action the agent proposed for the running task.
 #[tauri::command]
-fn resolve_approval(state: State<'_, Arc<AppState>>, approval_id: String, approved: bool) -> Result<(), &'static str> {
-    state.task.resolve_approval(&approval_id, approved)
+async fn resolve_approval(state: State<'_, Arc<AppState>>, approval_id: String, approved: bool) -> Result<(), String> {
+    use aiwin11_model_ipc::TaskCommand;
+    let (accepted, code) = state
+        .task_worker
+        .control(if approved { TaskCommand::Approve } else { TaskCommand::Decline }, approval_id)
+        .await?;
+    if accepted {
+        Ok(())
+    } else {
+        Err(code)
+    }
 }
 
 /// Brings the main window to the front (tray, global shortcut).
@@ -1068,104 +1393,68 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
-/// Tray icon (open, stop all tasks, quit) and the global shortcut Ctrl+Alt+Espace that brings
-/// AiWin11 to the front from any application. Nothing here can start an action.
-fn desktop_surfaces(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::{
-        menu::{Menu, MenuItem},
-        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    };
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-
-    let open = MenuItem::with_id(app, "open", "Ouvrir AiWin11", true, None::<&str>)?;
-    let stop = MenuItem::with_id(app, "stop", "Stoppe toutes les tâches", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
-    let mut tray = TrayIconBuilder::with_id("main").tooltip("AiWin11").menu(&menu).show_menu_on_left_click(false);
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
-    }
-    tray.on_menu_event(|app, event| match event.id.as_ref() {
-        "open" => show_main(app),
-        "stop" => {
-            let state = Arc::clone(app.state::<Arc<AppState>>().inner());
-            let status = state.task.stop_all();
-            let _ = lock_core(&state.core).journal("tasks.stop.requested", Some(status.code()));
-        }
-        "quit" => app.exit(0),
-        _ => {}
-    })
-    .on_tray_icon_event(|tray, event| {
-        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-            show_main(tray.app_handle());
-        }
-    })
-    .build(app)?;
-
-    let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
-    app.handle().plugin(
-        tauri_plugin_global_shortcut::Builder::new()
-            .with_handler(move |app, pressed, event| {
-                if *pressed == shortcut && event.state() == ShortcutState::Pressed {
-                    show_main(app);
-                    // Command palette: the window opens on the request field, ready to type.
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.eval("window.dispatchEvent(new Event('aiwin11-palette'))");
-                    }
-                }
-            })
-            .build(),
-    )?;
-    // Another application may already own the shortcut: the tray still works.
-    let _ = app.global_shortcut().register(shortcut);
-    Ok(())
-}
-
 fn main() {
+    #[cfg(windows)]
+    if let Some(code) = aiwin11_model_ipc::run_worker() {
+        std::process::exit(code);
+    }
     let launched = Instant::now();
-    tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    if updates_configured() {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    builder
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
         .setup(move |app| {
             let data_dir = app.path().app_local_data_dir()?;
             fs::create_dir_all(&data_dir)?;
             let store = data_dir.join("aiwin11.sqlite3");
-            // A restore asked for during the previous run is applied before the store opens.
-            let restored = backup::apply_pending_restore(&store);
-            let core = Core::open(&store)?;
-            if let Some(outcome) = restored {
-                let _ = core.journal(
-                    if outcome.is_ok() { "data.restore.applied" } else { "data.restore.failed" },
-                    Some(outcome.err().unwrap_or("success")),
-                );
-            }
+            let session = aiwin11_model_ipc::initialize_core(&store)?;
+            let mut core = Core::attach_task_worker(&store, &session, std::process::id())?;
+            core.set_broker_transport(aiwin11_model_ipc::broker_dispatch);
             // The user's folder if one was chosen and is still allowed; otherwise the dedicated one.
             let files = core
                 .workspace()
                 .and_then(|workspace| LocalFiles::open_with_workspace(&data_dir, &workspace).ok())
                 .or_else(|| LocalFiles::open(&data_dir).ok())
                 .map(|primary| FolderSet::with_extra(primary, &data_dir, &core.extra_folders()));
+            let video = match core.video_ticket() {
+                Ok(Some(_)) => VideoJob::Failed { code: "VIDEO_TRACKING_PENDING", can_resume: true },
+                Ok(None) => VideoJob::Idle,
+                Err(code) => VideoJob::Failed { code, can_resume: true },
+            };
             app.manage(Arc::new(AppState {
-                video: Mutex::new(VideoJob::Idle),
+                video: Mutex::new(video),
                 files,
                 core: Mutex::new(core),
                 task: TaskSlot::default(),
+                task_worker: aiwin11_model_ipc::TaskSupervisor::default(),
+                desktop: desktop::DesktopState::default(),
                 vision: Mutex::new(()),
                 launched,
                 ui_ready_ms: OnceLock::new(),
                 store,
             }));
-            // Pay the bridge's first start (runtime load, antivirus scan) now, not within a
-            // command's deadline. The spare process waits idle for an authorized command.
-            std::thread::spawn(aiwin11_core::windows_bridge::prewarm_bridge);
             let scheduler = Arc::clone(app.state::<Arc<AppState>>().inner());
             std::thread::spawn(move || run_scheduler(scheduler));
-            desktop_surfaces(app)?;
+            desktop::install(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            desktop::show_palette,
+            desktop::overlay_status,
+            desktop::overlay_dismiss,
+            desktop::overlay_open_workspace,
+            desktop::take_workspace_request,
+            desktop::overlay_rendered,
             get_snapshot,
             discover_models,
             run_task,
+            get_task_replay,
             cancel_task,
             pause_task,
             resume_task,
@@ -1175,11 +1464,21 @@ fn main() {
             get_privacy,
             get_cloud_fallback,
             get_local_strategy,
+            get_agent_models,
+            get_local_runtime_preferences,
+            set_local_runtime_preferences,
+            discover_lm_studio_models,
+            set_agent_models,
             set_local_strategy,
             get_memories,
+            index_local_text,
+            indexed_file_names,
+            remove_indexed_file,
+            search_indexed_files,
             get_routines,
             get_image_engine,
             set_image_engine,
+            set_image_checkpoint,
             open_images_folder,
             set_floating,
             get_mcp_servers,
@@ -1187,6 +1486,8 @@ fn main() {
             get_reports,
             set_routine_schedule,
             dictate,
+            get_speech_recognizers,
+            set_speech_recognizer,
             set_workspace,
             get_extra_folders,
             set_extra_folders,
@@ -1196,6 +1497,9 @@ fn main() {
             update_routine,
             delete_memory,
             get_cloud_vendor,
+            get_cloud_providers,
+            set_cloud_provider_enabled,
+            probe_cloud_model,
             set_cloud_vendor,
             get_cloud_budget,
             get_cloud_cost,
@@ -1212,8 +1516,11 @@ fn main() {
             get_cloud_usage,
             get_runtime_status,
             ui_ready,
+            ui_navigation,
             video_status,
             start_video,
+            resume_video,
+            forget_video_tracking,
             updates_configured,
             check_update,
             install_update,

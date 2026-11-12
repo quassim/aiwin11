@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-probe-cloud-model"
+description = "Enables the probe_cloud_model command without any pre-configured scope."
+commands.allow = ["probe_cloud_model"]
+
+[[permission]]
+identifier = "deny-probe-cloud-model"
+description = "Denies the probe_cloud_model command without any pre-configured scope."
+commands.deny = ["probe_cloud_model"]

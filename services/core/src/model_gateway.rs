@@ -243,6 +243,11 @@ sécurité, de mise à jour et les services vitaux de Windows sont toujours refu
             }
         }));
         functions.push(json!({
+            "name": "run_powershell_diagnostic",
+            "description": "Demande l’accord pour lire avec PowerShell l’édition, la version et le numéro de build de Windows. Commande fixe, sans argument.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
             "name": "delegate",
             "description": "Confie une sous-demande à un agent spécialisé : office (fichiers, Bloc-notes, \
 presse-papiers, mémoire), windows_admin (diagnostic, processus, services, fenêtres) ou read_only (lecture seule). \
@@ -250,7 +255,7 @@ Il agit avec ses seuls outils et te rend sa réponse.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent": { "type": "string", "enum": ["office", "windows_admin", "read_only"] },
+                    "agent": { "type": "string", "enum": ["office", "windows_admin", "development", "research", "multimedia", "read_only"] },
                     "request": { "type": "string" }
                 },
                 "required": ["agent", "request"],
@@ -431,13 +436,13 @@ L’utilisateur doit l’approuver.",
 
 /// A provider-neutral proposal: one or more tool calls, or a text answer.
 #[derive(Debug, PartialEq)]
-pub(crate) enum Proposal {
+pub enum Proposal {
     Calls(Value),
     Text(String),
 }
 
 impl Proposal {
-    pub(crate) fn from_parts(calls: Option<&Value>, text: Option<&str>) -> Option<Self> {
+    pub fn from_parts(calls: Option<&Value>, text: Option<&str>) -> Option<Self> {
         if let Some(calls) = calls.filter(|calls| calls.as_array().is_some_and(|list| !list.is_empty())) {
             return Some(Self::Calls(calls.clone()));
         }
@@ -446,7 +451,7 @@ impl Proposal {
             .map(|text| Self::Text(text.to_owned()))
     }
 
-    pub(crate) fn to_agent_message(&self) -> Value {
+    pub fn to_agent_message(&self) -> Value {
         match self {
             Self::Calls(calls) => json!({ "calls": calls }),
             Self::Text(text) => json!({ "text": text }),
@@ -480,7 +485,7 @@ pub enum GatewayError {
 
 /// Receives each streamed chunk's text delta, if any, as it arrives.
 /// Returning `false` stops reading, which closes the provider connection.
-pub(crate) type StreamSink<'a> = dyn FnMut(Option<&str>) -> bool + 'a;
+pub type StreamSink<'a> = dyn FnMut(Option<&str>) -> bool + 'a;
 
 /// Accumulates streamed text within the reply bound.
 #[derive(Default)]
@@ -557,6 +562,10 @@ pub enum LocalStrategy {
     /// Always the configured model.
     #[default]
     Manual,
+    LocalOnly,
+    CloudOnly,
+    LocalFirst,
+    Balanced,
     /// The loaded model with the largest share in VRAM.
     Adaptive,
     /// The largest installed model that advertises tool calling.
@@ -565,10 +574,39 @@ pub enum LocalStrategy {
     CostOptimized,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LocalRuntime {
+    #[default]
+    Ollama,
+    LmStudio,
+}
+
+impl LocalRuntime {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Ollama => "ollama",
+            Self::LmStudio => "lm_studio",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "" | "ollama" => Some(Self::Ollama),
+            "lm_studio" => Some(Self::LmStudio),
+            _ => None,
+        }
+    }
+}
+
 impl LocalStrategy {
     pub fn code(self) -> &'static str {
         match self {
             Self::Manual => "manual",
+            Self::LocalOnly => "local_only",
+            Self::CloudOnly => "cloud_only",
+            Self::LocalFirst => "local_first",
+            Self::Balanced => "balanced",
             Self::Adaptive => "adaptive",
             Self::QualityFirst => "quality_first",
             Self::CostOptimized => "cost_optimized",
@@ -576,9 +614,22 @@ impl LocalStrategy {
     }
 
     pub fn from_code(code: &str) -> Option<Self> {
-        [Self::Manual, Self::Adaptive, Self::QualityFirst, Self::CostOptimized]
-            .into_iter()
-            .find(|strategy| strategy.code() == code)
+        [
+            Self::Manual,
+            Self::LocalOnly,
+            Self::CloudOnly,
+            Self::LocalFirst,
+            Self::Balanced,
+            Self::Adaptive,
+            Self::QualityFirst,
+            Self::CostOptimized,
+        ]
+        .into_iter()
+        .find(|strategy| strategy.code() == code)
+    }
+
+    pub fn ranks_local(self) -> bool {
+        matches!(self, Self::Balanced | Self::Adaptive | Self::QualityFirst | Self::CostOptimized)
     }
 }
 
@@ -765,7 +816,7 @@ impl Ollama {
 
     /// Streams the conversation so far (instructions, request, tool calls and observations)
     /// with the tool catalog to a local model.
-    pub(crate) fn propose(
+    pub fn propose(
         &self,
         model: &str,
         messages: &[Value],
@@ -815,6 +866,8 @@ struct Embeddings {
 impl Ollama {
     /// Local embeddings (`/api/embed`), in batches of 32 texts. Vectors stay in memory only.
     pub(crate) fn embed(&self, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, GatewayError> {
+        self.describe(model)?;
+        self.ensure_cloud_disabled()?;
         let mut vectors = Vec::with_capacity(texts.len());
         for batch in texts.chunks(32) {
             let reply: Embeddings = Self::receive(
@@ -927,7 +980,7 @@ impl Ollama {
     /// `preferred`, with the reason journaled, or `None` to keep the configured model. A
     /// different model is returned only after it advertises tool calling and passes the probe.
     /// `excluded`: models whose manifest says they failed the probe or lack tool calling.
-    pub(crate) fn route_local(
+    pub fn route_local(
         &self,
         strategy: LocalStrategy,
         preferred: &str,
@@ -935,12 +988,21 @@ impl Ollama {
     ) -> Result<Option<(String, &'static str)>, GatewayError> {
         let usable = |name: &str| !excluded.iter().any(|model| model == name);
         let candidate = match strategy {
-            LocalStrategy::Manual => return Ok(None),
+            LocalStrategy::Manual | LocalStrategy::LocalOnly | LocalStrategy::CloudOnly | LocalStrategy::LocalFirst => {
+                return Ok(None)
+            }
             // Probes at most one candidate.
-            LocalStrategy::Adaptive => {
-                let loaded: Vec<_> = self.loaded_models()?.into_iter().filter(|model| usable(&model.name)).collect();
+            LocalStrategy::Adaptive | LocalStrategy::Balanced => {
+                let loaded: Vec<_> = self
+                    .loaded_models()?
+                    .into_iter()
+                    .filter(|model| usable(&model.name))
+                    .filter(|model| strategy != LocalStrategy::Balanced || model.placement() == Placement::Gpu)
+                    .collect();
                 let Some(candidate) = gpu_candidate(&loaded, preferred) else { return Ok(None) };
-                if candidate == preferred || !self.probe_tool_calling(candidate)? {
+                if (strategy == LocalStrategy::Adaptive && candidate == preferred)
+                    || !self.probe_tool_calling(candidate)?
+                {
                     return Ok(None);
                 }
                 return Ok(Some((candidate.to_owned(), "gpu_verified")));
@@ -1347,6 +1409,7 @@ mod tests {
                 "admin_service",
                 "admin_clean_temp",
                 "run_diagnostic",
+                "run_powershell_diagnostic",
                 "delegate",
                 "generate_image",
                 "mcp_list_tools",
@@ -1380,6 +1443,7 @@ mod tests {
                 "admin_service",
                 "admin_clean_temp",
                 "run_diagnostic",
+                "run_powershell_diagnostic",
                 "delegate",
                 "generate_image",
                 "mcp_list_tools",
@@ -1436,12 +1500,19 @@ mod tests {
 
     #[test]
     fn local_strategy_codes_round_trip() {
-        for strategy in
-            [LocalStrategy::Manual, LocalStrategy::Adaptive, LocalStrategy::QualityFirst, LocalStrategy::CostOptimized]
-        {
+        for strategy in [
+            LocalStrategy::Manual,
+            LocalStrategy::LocalOnly,
+            LocalStrategy::CloudOnly,
+            LocalStrategy::LocalFirst,
+            LocalStrategy::Balanced,
+            LocalStrategy::Adaptive,
+            LocalStrategy::QualityFirst,
+            LocalStrategy::CostOptimized,
+        ] {
             assert_eq!(LocalStrategy::from_code(strategy.code()), Some(strategy));
         }
-        assert_eq!(LocalStrategy::from_code("cloud_only"), None);
+        assert_eq!(LocalStrategy::from_code("unknown"), None);
         assert_eq!(LocalStrategy::default(), LocalStrategy::Manual);
     }
 

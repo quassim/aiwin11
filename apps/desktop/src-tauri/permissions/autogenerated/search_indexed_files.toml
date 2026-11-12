@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-search-indexed-files"
+description = "Enables the search_indexed_files command without any pre-configured scope."
+commands.allow = ["search_indexed_files"]
+
+[[permission]]
+identifier = "deny-search-indexed-files"
+description = "Denies the search_indexed_files command without any pre-configured scope."
+commands.deny = ["search_indexed_files"]

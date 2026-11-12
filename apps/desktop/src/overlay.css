@@ -1,0 +1,130 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Segoe UI", sans-serif;
+  color: #f1f5fb;
+  background: #131c2a;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input {
+  font: inherit;
+}
+.palette {
+  min-height: 100vh;
+  padding: 17px 20px 14px;
+  border: 1px solid #364a64;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+h1 {
+  font-size: 19px;
+  margin: 0 auto 0 0;
+}
+.task-state {
+  color: #b5c9e5;
+  font-size: 12px;
+}
+.task-state[data-task="approval"] {
+  color: #ffd690;
+}
+.task-state[data-task="running"] {
+  color: #9ed9ff;
+}
+button {
+  cursor: pointer;
+  color: inherit;
+}
+.close {
+  background: transparent;
+  border: 1px solid #516481;
+  border-radius: 6px;
+  font-size: 20px;
+  width: 30px;
+}
+label {
+  display: block;
+  color: #c2d2e9;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+input {
+  width: 100%;
+  border: 1px solid #516481;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #0c1421;
+  color: inherit;
+}
+input::placeholder {
+  color: #a9bbd3;
+}
+:focus-visible {
+  outline: 2px solid #94d6ff;
+  outline-offset: 2px;
+}
+ul {
+  list-style: none;
+  padding: 2px;
+  margin: 12px -2px;
+  max-height: 215px;
+  overflow: auto;
+}
+li + li {
+  margin-top: 3px;
+}
+li button {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+  font-size: 14px;
+}
+li button:hover,
+li button[data-selected="true"] {
+  background: #243750;
+  border-color: #47678e;
+}
+li button span {
+  color: #9ec4ed;
+  visibility: hidden;
+}
+li button[data-selected="true"] span {
+  visibility: visible;
+}
+.empty {
+  color: #b5c9e5;
+  padding: 8px;
+}
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #b5c9e5;
+  font-size: 12px;
+}
+kbd {
+  border: 1px solid #516481;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font: inherit;
+  color: #ecf5ff;
+}
+.error,
+.warning {
+  color: #ffd690;
+  margin: 7px 0;
+  font-size: 12px;
+}

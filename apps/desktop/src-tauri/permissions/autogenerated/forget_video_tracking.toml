@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-video-tracking"
+description = "Enables the forget_video_tracking command without any pre-configured scope."
+commands.allow = ["forget_video_tracking"]
+
+[[permission]]
+identifier = "deny-forget-video-tracking"
+description = "Denies the forget_video_tracking command without any pre-configured scope."
+commands.deny = ["forget_video_tracking"]

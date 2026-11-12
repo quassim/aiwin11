@@ -79,6 +79,7 @@ Ce que l’agent peut faire :
 | « Copie notes.txt vers sauvegarde.txt », « Renomme brouillon.txt en idees.txt » | Copie ou renomme dans ce dossier, sans jamais remplacer un fichier existant |
 | « Mets ancien.txt à la corbeille » | Déplace le fichier dans la corbeille d’AiWin11 (`%LOCALAPPDATA%\app.aiwin11.desktop\trash`) : rien n’est supprimé, il reste récupérable |
 | « Mon PC est lent, regarde ce qui se passe » | Lit en lecture seule la mémoire, la charge du processeur, l’espace des disques et, si besoin, les processus ; ne modifie rien |
+| « Donne-moi l’édition et le numéro de build de Windows via PowerShell » | Demande ton accord, puis exécute le diagnostic local en lecture seule |
 | « Mon PC est en thème sombre ? Il est sur batterie ? » | Lit en lecture seule les paramètres Windows : thème, transparence, langue d’affichage, fuseau horaire, alimentation et batterie ; ne modifie rien |
 | « Quelles fenêtres sont ouvertes ? », « Réduis la fenêtre du navigateur » | Liste les fenêtres (après ton accord) puis met au premier plan, réduit, restaure ou agrandit l’une d’elles ; ne ferme jamais de fenêtre |
 | « Qu’est-ce que j’ai copié ? », « Copie cette adresse dans le presse-papiers » | Lit ou remplace le texte du presse-papiers, toujours après ton accord (l’ancien contenu est perdu en cas d’écriture) |
@@ -121,7 +122,12 @@ La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque,
 
 ### Mode privé, zone de notification et raccourci
 
-**Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord. AiWin11 a une icône dans la zone de notification (Ouvrir, Stoppe toutes les tâches, Quitter) et **Ctrl+Alt+Espace** le ramène au premier plan depuis n’importe quelle application, directement sur le champ de demande (palette de commandes).
+**Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord.
+
+- **Ctrl+Alt+Espace** affiche ou masque la palette sur l’écran du pointeur. Elle indique l’état de la tâche et permet de rejoindre une approbation en attente. Tape `>` pour filtrer les commandes, utilise les flèches et Entrée pour choisir, ou Échap pour fermer.
+- Écris une demande dans la palette pour la préparer dans l’Accueil. Le bouton **Envoyer** de l’Accueil lance la demande après relecture.
+- **Ctrl+Alt+Retour arrière** demande l’arrêt des tâches. Le menu de la zone de notification permet aussi d’ouvrir ou masquer AiWin11, d’ouvrir la palette, d’arrêter les tâches et de quitter. Si Windows réserve un raccourci à une autre application, utilise le menu ou le bouton **Palette de commandes** dans AiWin11.
+- Quand AiWin11 est en arrière-plan, une notification Windows signale l’accord demandé ou la fin d’une tâche. Vérifie que les notifications sont autorisées dans Windows si elles ne s’affichent pas.
 
 ### Opérations administrateur (désactivées par défaut)
 
@@ -178,7 +184,15 @@ Dans **Inspecteur**, **Inspecter une fenêtre** et **Capturer la fenêtre** lise
 
 ## Vérifier le projet
 
-Le plus simple : `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1` lance tout (tests de l’agent, ruff et mypy, ESLint et Prettier, build de l’interface, `cargo fmt --check`, pont .NET, tests Rust, clippy) et affiche un résumé ; `-Live` ajoute les tests réels, `-Tauri` le build release.
+Le script `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1` lance les vérifications Python, React, Rust et .NET. Ajoute `-Ipc` pour les tests gRPC, dont l’annulation pendant une approbation. `-Live` ajoute les tests des compagnons sur un bureau Windows et `-Tauri` compile la version release.
+
+Pour T-003, passe `-CloudVendor openai -CloudModel <modèle>` avec une clé déjà enregistrée dans AiWin11. Le test envoie une seule consigne synthétique au fournisseur choisi et vérifie la réponse et le décompte de jetons. `deepseek` est également accepté.
+
+Avec la release compilée et AiWin11 fermé, `powershell -ExecutionPolicy Bypass -File scripts/smoke-desktop.ps1` teste le parcours de refus avec le modèle configuré. Ajoute `-AllowCloud` si le fournisseur sélectionné est cloud. La demande synthétique et la réponse au refus peuvent consommer des jetons. Le script vérifie le focus et le journal et ferme l’instance qu’il a lancée.
+
+L’option `-InspectOnly` vérifie en lecture seule que l’Inspecteur reçoit la liste des écrans du pont Windows et que le broker a enregistré l’exécution.
+
+L’option `-ModelsOnly` ouvre **Modèles** et vérifie la lecture du catalogue SAPI sans capturer d’audio. Pour essayer LM Studio, démarre son serveur sur `127.0.0.1:1234`, choisis **LM Studio** comme moteur local et liste les modèles. Gemini et Claude utilisent leurs API compatibles Chat Completions avec une clé propre au fournisseur. [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) · [Gemini](https://aistudio.google.com/docs/openai) · [Claude](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)
 
 Outils d’analyse de l’agent Python (une fois) :
 
@@ -209,6 +223,7 @@ npm --prefix apps/desktop run tauri -- build --no-bundle
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/measure.ps1 -Runs 3
+powershell -ExecutionPolicy Bypass -File scripts/measure.ps1 -Runs 3 -NavigationSamples 20
 cargo test --locked -p aiwin11-core --release measure_ -- --ignored --nocapture
 ```
 

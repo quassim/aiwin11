@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { agentState, agentStateLabels, transferLabel } from "./agentState";
 import { BlockedApps } from "./BlockedApps";
 import { ProtectedFiles, ProtectedWindows } from "./ProtectedFiles";
@@ -15,7 +16,13 @@ import { Video } from "./Video";
 import { ModelProbe } from "./ModelProbe";
 import { ModelConfig, type ModelPreferences } from "./ModelConfig";
 import { autoSpeak, speak, SpeechControls } from "./Speech";
-import { Routing, type LocalStrategy } from "./Routing";
+import {
+  Routing,
+  type AgentModels,
+  type CloudProvider,
+  type LocalRuntimePreferences,
+  type LocalStrategy,
+} from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
 
@@ -31,6 +38,14 @@ type Page =
   | "Fichiers"
   | "Activité";
 type Provider = "ollama" | "openai";
+const workspacePages = {
+  home: "Accueil",
+  dashboard: "Centre de contrôle",
+  models: "Modèles",
+  security: "Sécurité",
+  activity: "Activité",
+} satisfies Record<string, Page>;
+type WorkspaceRequest = { target: keyof typeof workspacePages; draft: string | null };
 type Activity = { sequence: number; kind: string; timestamp: string; taskId: string | null; code: string | null };
 type TaskEntry = { id: string; state: string; outcome: string | null; createdAt: string; updatedAt: string };
 const taskStateNames: Record<string, string> = {
@@ -43,12 +58,19 @@ const taskStateNames: Record<string, string> = {
   cancelled: "Annulée",
   interrupted: "Interrompue (arrêt d’AiWin11)",
 };
-type Snapshot = { sessionId: string; events: Activity[] };
+type Snapshot = { sessionId: string; events: Activity[]; replay: boolean };
 type ActionStatus = "done" | "partial" | "simulated" | "declined" | "expired" | "denied" | "failed";
 type ActionReport = { action: string; summary: string; status: ActionStatus; code: string | null };
 type TaskOutcome = { reply: string; actions: ActionReport[] };
 /** Why the local model was chosen for a request (journaled as model.selected). */
 const routingReasons: Record<string, string> = {
+  agent_profile: "Modèle configuré pour cet agent.",
+  delegated_profile: "Modèle configuré pour l’agent délégué.",
+  local_only: "Routage local uniquement.",
+  cloud_only: "Routage cloud uniquement.",
+  local_first: "Routage local d’abord.",
+  balanced_cloud: "Modèle cloud vérifié sélectionné avec ton accord.",
+  lm_studio_configured: "Modèle local configuré dans LM Studio.",
   gpu_verified: "Déjà chargé sur le GPU, appel d’outil vérifié.",
   quality_first: "Plus gros modèle local capable d’appeler des outils, appel d’outil vérifié.",
   cost_optimized: "Modèle déjà chargé en mémoire, le plus léger, appel d’outil vérifié.",
@@ -116,9 +138,17 @@ type TaskUpdate =
   | {
       type: "modelSelected";
       model: string;
-      reason: "gpu_verified" | "quality_first" | "cost_optimized" | "configured_local" | "local_fallback";
+      reason: string;
     }
-  | ({ type: "approvalRequired" } & PendingApproval);
+  | ({ type: "approvalRequired"; issuedAtMs?: number } & PendingApproval);
+type TaskProgress = { runId: string; sequence: number; update: TaskUpdate };
+type TaskReplay = {
+  runId: string;
+  afterSequence: number;
+  updates: TaskUpdate[];
+  outcome: TaskOutcome | null;
+  error: string | null;
+};
 const applicationNames: Record<"notepad" | "charmap" | "paint", string> = {
   notepad: "le Bloc-notes",
   charmap: "la Table des caractères",
@@ -155,14 +185,14 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
   if (action.kind === "setControlValue") {
     return {
       title: "L’agent propose de remplir un champ",
-      detail: `Action : remplacer le contenu de ${action.control} dans « ${action.title} » (application ${action.application}) par ce texte.`,
+      detail: `Remplacer le contenu de ${action.control} dans « ${action.title} » (${action.application}) par ce texte. Si UI Automation ne peut pas le faire, un champ Win32 vide peut recevoir une saisie ciblée.`,
       quote: action.text,
     };
   }
   if (action.kind === "clickControl") {
     return {
       title: "L’agent propose de cliquer dans une fenêtre",
-      detail: `Action : cliquer sur ${action.control} dans « ${action.title} » (application ${action.application}). Le clic est fait par UI Automation, sans souris.`,
+      detail: `Cliquer sur ${action.control} dans « ${action.title} » (${action.application}). Si UI Automation ne peut pas le faire, un bouton Win32 peut recevoir un clic simulé ciblé.`,
     };
   }
   if (action.kind === "remember") {
@@ -182,6 +212,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return { title: "L’agent demande à relire sa mémoire", detail: "Action : lire les informations retenues." };
   }
   if (action.kind === "runDiagnostic") {
+    if (action.diagnostic === "powershell_os") {
+      return {
+        title: "Autoriser le diagnostic PowerShell",
+        detail: "Lire l’édition, la version et le numéro de build de Windows.",
+      };
+    }
     return {
       title: "L’agent demande un diagnostic Windows",
       detail: `Action : lancer le diagnostic en lecture seule « ${action.diagnostic} ». Rien n’est modifié.`,
@@ -421,8 +457,9 @@ const activityNames: Record<string, string> = {
   "memory.deleted": "Mémoire effacée",
   "settings.embedding.changed": "Recherche dans la mémoire modifiée",
   "control.find.completed": "Contrôles trouvés dans la fenêtre lue",
-  "control.invoke.completed": "Contrôle cliqué par l’agent",
-  "control.invoke.failed": "Clic sur un contrôle impossible",
+  "control.invoke.completed": "Action sur le contrôle effectuée",
+  "control.invoke.partial": "Résultat de l’action sur le contrôle non vérifié",
+  "control.invoke.failed": "Action sur le contrôle impossible",
   "admin.operation.completed": "Opération administrateur effectuée",
   "admin.operation.failed": "Opération administrateur échouée ou refusée",
   "settings.admin.changed": "Opérations administrateur activées ou désactivées",
@@ -517,6 +554,9 @@ const taskErrors: Record<string, string> = {
   MODEL_REQUIRED: "Choisis un identifiant de modèle valide dans Modèles.",
   CLOUD_APPROVAL_REQUIRED: "Autorise la requête cloud pour cette demande.",
   CLOUD_KEY_REQUIRED: "Enregistre une clé API cloud dans Modèles.",
+  CLOUD_PROVIDER_DISABLED: "Ce fournisseur cloud est désactivé dans Modèles.",
+  ROUTING_LOCAL_REQUIRED: "La stratégie active exige un modèle Ollama.",
+  ROUTING_CLOUD_REQUIRED: "La stratégie active exige un modèle cloud et ton accord.",
   CLOUD_BUDGET_EXCEEDED: "Le budget de jetons cloud de cette demande est atteint (page Modèles).",
   CLOUD_COST_EXCEEDED: "Le coût maximal fixé pour cette demande cloud est atteint (page Modèles).",
   AGENT_TIME_LIMIT: "La demande a dépassé 15 minutes : elle a été arrêtée.",
@@ -547,7 +587,9 @@ const taskErrors: Record<string, string> = {
   INVALID_FILE_NAME: "Le nom de fichier n’est pas valide.",
   FILE_AUDIT_UNAVAILABLE:
     "Le journal local est indisponible ; l’opération n’a pas été effectuée ou n’a pas pu être journalisée.",
-  TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
+  TASK_CANCELLED: "Demande annulée.",
+  TASK_WORKER_UNAVAILABLE:
+    "Le processus de tâche s’est arrêté. Consulte le journal pour vérifier les dernières actions.",
   PAUSE_EXPIRED: "La demande est restée en pause plus de 30 minutes : elle a été arrêtée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
   OUTCOME_UNRECORDED: "Le résultat de l’action n’a pas pu être journalisé.",
@@ -556,8 +598,21 @@ const taskErrors: Record<string, string> = {
 
 function App() {
   const [page, setPage] = useState<Page>("Accueil");
+  const pageHeading = useRef<HTMLHeadingElement>(null);
+  const navigationStarted = useRef<number | undefined>(undefined);
+  const navigate = (next: Page) => {
+    if (next === page) return;
+    navigationStarted.current = performance.now();
+    setPage(next);
+  };
   const [expert, setExpert] = useState(() => localStorage.getItem("aiwin11-expert") !== "false");
   const [snapshot, setSnapshot] = useState<Snapshot>();
+  const auditSnapshot = useRef<Snapshot | undefined>(undefined);
+  const auditRefresh = useRef(false);
+  const auditRefreshQueued = useRef(false);
+  const taskCursor = useRef({ runId: "", sequence: 0 });
+  const localTaskInvocation = useRef(false);
+  const taskReplayPending = useRef(false);
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
   const [error, setError] = useState(false);
   const [models, setModels] = useState<string[]>([]);
@@ -570,13 +625,29 @@ function App() {
   const [cloudApproved, setCloudApproved] = useState(false);
   const [cloudFallback, setCloudFallback] = useState(false);
   const [localStrategy, setLocalStrategy] = useState<LocalStrategy>();
-  const adaptiveRouting = localStrategy !== undefined && localStrategy !== "manual";
+  const [agentModels, setAgentModels] = useState<AgentModels>();
+  const [localRuntime, setLocalRuntime] = useState<LocalRuntimePreferences>({ runtime: "ollama", lmStudioModel: "" });
+  const localRuntimeName = localRuntime.runtime === "lmStudio" ? "LM Studio" : "Ollama";
+  const taskProvider =
+    localStrategy === "cloudOnly"
+      ? "openai"
+      : localStrategy === "localOnly" || localStrategy === "localFirst" || localStrategy === "balanced"
+        ? "ollama"
+        : provider;
   const [dictating, setDictating] = useState(false);
   const [floating, setFloating] = useState(false);
-  const [agent, setAgent] = useState<"general" | "office" | "windowsAdmin" | "readOnly">("general");
+  const [agent, setAgent] = useState<"general" | keyof AgentModels>("general");
+  const taskCloudFallback =
+    localStrategy === "localFirst" ||
+    (localStrategy === "manual" && cloudFallback) ||
+    (localStrategy === "balanced" && agent === "general" && localRuntime.runtime === "ollama");
   const [dictationStatus, setDictationStatus] = useState("");
-  const [vendor, setVendor] = useState<"openai" | "deepseek">("openai");
-  const vendorName = vendor === "deepseek" ? "DeepSeek" : "OpenAI";
+  const [vendor, setVendor] = useState("openai");
+  const [cloudProviders, setCloudProviders] = useState<CloudProvider[]>([]);
+  const vendorName = cloudProviders.find((entry) => entry.id === vendor)?.label ?? vendor;
+  const vendorEnabled = cloudProviders.some((entry) => entry.id === vendor && entry.enabled);
+  const [cloudProbeBusy, setCloudProbeBusy] = useState(false);
+  const [cloudProbeStatus, setCloudProbeStatus] = useState("");
   const [keyConfigured, setKeyConfigured] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyStatus, setKeyStatus] = useState("");
@@ -600,12 +671,18 @@ function App() {
   const [lastFailed, setLastFailed] = useState(false);
   const [sentToCloud, setSentToCloud] = useState(false);
   const [ranOnce, setRanOnce] = useState(false);
-  const selectedModel = provider === "ollama" ? model : cloudModel.trim();
+  const profileModel = agent === "general" ? "" : agentModels?.[agent];
+  const selectedModel =
+    taskProvider === "ollama"
+      ? localRuntime.runtime === "lmStudio"
+        ? localRuntime.lmStudioModel
+        : profileModel || model
+      : cloudModel.trim();
   const canSend =
     !running &&
     !!selectedModel &&
     !!prompt.trim() &&
-    (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
+    (taskProvider === "ollama" || (cloudApproved && keyConfigured && !keyBusy && vendorEnabled));
 
   function resetApproval() {
     setCloudApproved(false);
@@ -650,33 +727,109 @@ function App() {
   }
 
   const refresh = useCallback(() => {
-    setError(false);
-    void invoke<Snapshot>("get_snapshot").then(setSnapshot, () => setError(true));
+    if (auditRefresh.current) {
+      auditRefreshQueued.current = true;
+    } else {
+      setError(false);
+      auditRefresh.current = true;
+      void (async () => {
+        let page: Snapshot;
+        do {
+          auditRefreshQueued.current = false;
+          const previous = auditSnapshot.current;
+          page = await invoke<Snapshot>("get_snapshot", {
+            sessionId: previous?.sessionId,
+            afterSequence: previous?.events[0]?.sequence,
+          });
+          const combined =
+            page.replay && previous?.sessionId === page.sessionId ? [...previous.events, ...page.events] : page.events;
+          const unique = new Map(combined.map((event) => [event.sequence, event]));
+          const latest = [...unique.values()].sort((left, right) => right.sequence - left.sequence).slice(0, 100);
+          auditSnapshot.current = { ...page, events: latest };
+          setSnapshot(auditSnapshot.current);
+        } while (auditRefreshQueued.current || (page.replay && page.events.length === 100));
+      })()
+        .catch(() => setError(true))
+        .finally(() => {
+          auditRefresh.current = false;
+        });
+    }
     void invoke<TaskEntry[]>("get_tasks").then(setTasks, () => setTasks([]));
   }, []);
 
   useEffect(refresh, [refresh]);
   useEffect(() => {
-    // After the first paint: the core measures the time since the process started (T-001).
+    if (!error || page !== "Activité") return;
+    const retry = window.setTimeout(refresh, 2000);
+    return () => window.clearTimeout(retry);
+  }, [error, page, refresh]);
+  useEffect(() => {
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+    };
+  }, [refresh]);
+  useEffect(() => {
+    let painted = 0;
     const frame = requestAnimationFrame(() => {
-      setTimeout(() => void invoke("ui_ready").catch(() => undefined), 0);
+      painted = requestAnimationFrame(() => void invoke("ui_ready").catch(() => undefined));
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(painted);
+    };
   }, []);
+  useEffect(() => {
+    const start = navigationStarted.current;
+    navigationStarted.current = undefined;
+    if (start === undefined) return;
+    pageHeading.current?.focus();
+    let painted = 0;
+    const frame = requestAnimationFrame(() => {
+      painted = requestAnimationFrame(() => {
+        void invoke("ui_navigation", { elapsedMs: Math.round(performance.now() - start) }).catch(() => undefined);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(painted);
+    };
+  }, [page]);
   useEffect(() => {
     void invoke<LocalStrategy>("get_local_strategy").then(setLocalStrategy, () => undefined);
+    void invoke<AgentModels>("get_agent_models").then(setAgentModels, () => undefined);
+    void invoke<LocalRuntimePreferences>("get_local_runtime_preferences").then(setLocalRuntime, () => undefined);
   }, []);
   useEffect(() => {
-    void invoke<"openai" | "deepseek">("get_cloud_vendor").then(setVendor, () => undefined);
+    void invoke<string>("get_cloud_vendor").then(setVendor, () => undefined);
+    void invoke<CloudProvider[]>("get_cloud_providers").then(setCloudProviders, () => undefined);
   }, []);
   useEffect(() => {
     // Ctrl+Alt+Espace from any application: open the request field, ready to type.
-    const palette = () => {
-      setPage("Accueil");
-      setTimeout(() => document.getElementById("prompt")?.focus(), 0);
+    let disposed = false;
+    const acceptRequest = async () => {
+      const request = await invoke<WorkspaceRequest | null>("take_workspace_request");
+      if (disposed || !request) return;
+      setPage(workspacePages[request.target]);
+      if (request.draft !== null) {
+        setPrompt(request.draft);
+        setCloudApproved(false);
+        requestAnimationFrame(() => document.getElementById("prompt")?.focus());
+      }
     };
-    window.addEventListener("aiwin11-palette", palette);
-    return () => window.removeEventListener("aiwin11-palette", palette);
+    const receive = () => void acceptRequest().catch(() => undefined);
+    const subscription = listen("desktop-workspace-request", receive);
+    void subscription
+      .then(() => {
+        if (!disposed) receive();
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      void subscription.then((unlisten) => unlisten()).catch(() => undefined);
+    };
   }, []);
   useEffect(() => {
     void refreshKey();
@@ -736,7 +889,105 @@ function App() {
     }
   }
 
+  const applyTaskUpdate = useCallback(
+    ({ runId, sequence, update }: TaskProgress) => {
+      const cursor = taskCursor.current;
+      if (runId === cursor.runId && sequence <= cursor.sequence) return;
+      // A later live fragment must not skip a missing one. Replay fetches the gap.
+      if (sequence !== (runId === cursor.runId ? cursor.sequence + 1 : 1)) return;
+      taskCursor.current = { runId, sequence };
+      if (update.type === "modelSelected") {
+        setRoutingExplanation(
+          `Modèle utilisé : ${update.model}. ${routingReasons[update.reason] ?? "Choix local configuré."}`,
+        );
+        return;
+      }
+      if (update.type === "delta") {
+        setDraftReply((current) => current + update.text);
+        return;
+      }
+      if (update.type === "approvalRequired") {
+        const { type: _type, issuedAtMs, ...approval } = update;
+        const expiresInMs =
+          issuedAtMs === undefined
+            ? approval.expiresInMs
+            : Math.max(0, approval.expiresInMs - (Date.now() - issuedAtMs));
+        setDraftReply("");
+        setPendingApproval(expiresInMs > 0 ? { ...approval, expiresInMs } : undefined);
+        return;
+      }
+      setLastStage(update.stage);
+      if (update.stage === "model.cloud.request") setSentToCloud(true);
+      if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
+      if (update.stage === "task.paused") setPauseState("paused");
+      if (update.stage === "task.resumed") setPauseState("");
+      // Text streamed before a tool call is superseded by the next step.
+      if (update.stage === "agent.tool.requested" || update.stage === "workflow.step.started") setDraftReply("");
+      setTaskProgress(activityNames[update.stage] ?? "");
+      refresh();
+    },
+    [refresh],
+  );
+
+  const replayTask = useCallback(async () => {
+    if (taskReplayPending.current) return;
+    taskReplayPending.current = true;
+    try {
+      const cursor = taskCursor.current;
+      const page = await invoke<TaskReplay>("get_task_replay", {
+        runId: cursor.runId,
+        afterSequence: cursor.sequence,
+      });
+      if (!page?.runId || (localTaskInvocation.current && page.runId !== taskCursor.current.runId)) return;
+      for (const [index, update] of page.updates.entries()) {
+        applyTaskUpdate({ runId: page.runId, sequence: page.afterSequence + index + 1, update });
+      }
+      if (localTaskInvocation.current) return;
+      setRanOnce(true);
+      const active = !page.outcome && !page.error;
+      setRunning(active);
+      if (active) {
+        setTaskStatus("Demande en cours…");
+      } else {
+        setDraftReply("");
+        setPendingApproval(undefined);
+        setPauseState("");
+        if (page.outcome) {
+          setAgentReply(page.outcome.reply);
+          setActionReports(page.outcome.actions);
+          setTaskStatus("");
+        } else if (page.error) {
+          setTaskStatus(taskErrors[page.error] ?? "Le cœur local n’a pas pu terminer la demande.");
+          setLastFailed(page.error !== "TASK_CANCELLED");
+        }
+      }
+    } catch {
+      // Keep the cursor. The next successful read resumes from the same sequence.
+    } finally {
+      taskReplayPending.current = false;
+    }
+  }, [applyTaskUpdate]);
+
+  useEffect(() => {
+    const reconnect = () => void replayTask();
+    reconnect();
+    window.addEventListener("focus", reconnect);
+    window.addEventListener("online", reconnect);
+    return () => {
+      window.removeEventListener("focus", reconnect);
+      window.removeEventListener("online", reconnect);
+    };
+  }, [replayTask]);
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => void replayTask(), 600);
+    return () => window.clearInterval(timer);
+  }, [replayTask, running]);
+
   async function runTask() {
+    localTaskInvocation.current = true;
+    taskCursor.current = { runId: "", sequence: 0 };
     setRunning(true);
     resetApproval();
     setLastPrompt(prompt);
@@ -753,46 +1004,22 @@ function App() {
     setSentToCloud(false);
     setRanOnce(true);
     setPendingApproval(undefined);
-    const progress = new Channel<TaskUpdate>((update) => {
-      if (update.type === "modelSelected") {
-        setRoutingExplanation(
-          `Modèle utilisé : ${update.model}. ${routingReasons[update.reason] ?? "Choix local configuré."}`,
-        );
-        return;
-      }
-      if (update.type === "delta") {
-        setDraftReply((current) => current + update.text);
-        return;
-      }
-      if (update.type === "approvalRequired") {
-        const { type: _type, ...approval } = update;
-        setDraftReply("");
-        setPendingApproval(approval);
-        return;
-      }
-      setLastStage(update.stage);
-      if (update.stage === "model.cloud.request") setSentToCloud(true);
-      if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
-      if (update.stage === "task.paused") setPauseState("paused");
-      if (update.stage === "task.resumed") setPauseState("");
-      // Text streamed before a tool call is superseded by the next step.
-      if (update.stage === "agent.tool.requested" || update.stage === "workflow.step.started") setDraftReply("");
-      setTaskProgress(activityNames[update.stage] ?? "");
-      refresh();
-    });
+    const progress = new Channel<TaskProgress>(applyTaskUpdate);
     try {
       const outcome = await invoke<TaskOutcome>("run_task", {
         request: {
           prompt,
           model: selectedModel,
-          provider,
+          provider: taskProvider,
           cloudApproved,
+          cloudVendor: cloudApproved ? vendor : null,
+          localRuntime: localRuntime.runtime,
           // Vision stays local: only sent for Ollama tasks.
-          visionModel: provider === "ollama" && visionModel ? visionModel : null,
+          visionModel: taskProvider === "ollama" && visionModel ? visionModel : null,
           agent,
           // local_first: OpenAI only if Ollama is unreachable, with this request's approval.
           cloudFallbackModel:
-            provider === "ollama" && !adaptiveRouting && cloudFallback && cloudApproved && cloudModel.trim()
+            taskProvider === "ollama" && taskCloudFallback && cloudApproved && cloudModel.trim()
               ? cloudModel.trim()
               : null,
         },
@@ -807,6 +1034,7 @@ function App() {
       setTaskStatus(taskErrors[String(failure)] ?? "Le cœur local n’a pas pu terminer la demande.");
       setLastFailed(String(failure) !== "TASK_CANCELLED");
     } finally {
+      localTaskInvocation.current = false;
       // The streamed draft is unvalidated: only the agent-approved reply stays on screen.
       setDraftReply("");
       setPendingApproval(undefined);
@@ -859,6 +1087,9 @@ function App() {
 
   return (
     <div className="workspace">
+      <button className="skip-link" type="button" onClick={() => pageHeading.current?.focus()}>
+        Aller au contenu principal
+      </button>
       <aside>
         <div className="brand">
           <span aria-hidden="true">✦</span> AiWin11
@@ -885,7 +1116,7 @@ function App() {
           {pages
             .filter((item) => expert || !expertPages.has(item))
             .map((item) => (
-              <button key={item} aria-current={item === page ? "page" : undefined} onClick={() => setPage(item)}>
+              <button key={item} aria-current={item === page ? "page" : undefined} onClick={() => navigate(item)}>
                 {item}
               </button>
             ))}
@@ -898,16 +1129,19 @@ function App() {
             const next = !expert;
             setExpert(next);
             localStorage.setItem("aiwin11-expert", String(next));
-            if (!next && expertPages.has(page)) setPage("Accueil");
+            if (!next && expertPages.has(page)) navigate("Accueil");
           }}
         >
           Mode expert
         </button>
         <div className="connection">
           <span aria-hidden="true" />
-          {provider === "ollama" ? "Ollama · Local" : `${vendorName} · Cloud`}
+          {taskProvider === "ollama" ? `${localRuntimeName} · Local` : `${vendorName} · Cloud`}
         </div>
         {running && <p role="status">{pendingApproval ? "En attente de ton accord" : "Assistant en cours"}</p>}
+        <button className="link-button" onClick={() => void invoke("show_palette").catch(() => undefined)}>
+          Palette de commandes
+        </button>
         <button
           className="link-button"
           aria-pressed={floating}
@@ -915,7 +1149,7 @@ function App() {
             const next = !floating;
             void invoke("set_floating", { enabled: next }).then(() => {
               setFloating(next);
-              if (next) setPage("Accueil");
+              if (next) navigate("Accueil");
             });
           }}
         >
@@ -937,8 +1171,10 @@ function App() {
           }
         </p>
       </aside>
-      <main>
-        <h1>{page === "Accueil" ? "Espace de travail" : page}</h1>
+      <main aria-labelledby="page-heading">
+        <h1 id="page-heading" tabIndex={-1} ref={pageHeading}>
+          {page === "Accueil" ? "Espace de travail" : page}
+        </h1>
         {error && (
           <p role="alert">
             Le cœur local est indisponible. <button onClick={refresh}>Réessayer</button>
@@ -948,7 +1184,7 @@ function App() {
           <section className="card" aria-labelledby="session-heading">
             <div className="section-header">
               <h2 id="session-heading">Assistant</h2>
-              <button className="link-button" onClick={() => setPage("Modèles")}>
+              <button className="link-button" onClick={() => navigate("Modèles")}>
                 {selectedModel || "Choisir un modèle"}
               </button>
             </div>
@@ -1031,11 +1267,17 @@ function App() {
                 id="agent"
                 value={agent}
                 disabled={running}
-                onChange={(event) => setAgent(event.target.value as typeof agent)}
+                onChange={(event) => {
+                  setAgent(event.target.value as typeof agent);
+                  resetApproval();
+                }}
               >
                 <option value="general">Général : tous les outils</option>
                 <option value="office">Fichiers et bureautique</option>
                 <option value="windowsAdmin">Administration Windows</option>
+                <option value="development">Développement : lecture des fichiers autorisés</option>
+                <option value="research">Recherche : fichiers, mémoire et MCP</option>
+                <option value="multimedia">Multimédia : images et inspection de fenêtres</option>
                 <option value="readOnly">Lecture seule : aucune modification</option>
               </select>
               <textarea
@@ -1050,7 +1292,7 @@ function App() {
                   resetApproval();
                 }}
               />
-              {provider === "ollama" && !adaptiveRouting && cloudFallback && cloudModel.trim() && keyConfigured && (
+              {taskProvider === "ollama" && taskCloudFallback && cloudModel.trim() && keyConfigured && (
                 <label className="approval">
                   <input
                     type="checkbox"
@@ -1058,10 +1300,13 @@ function App() {
                     disabled={running}
                     onChange={(event) => setCloudApproved(event.target.checked)}
                   />
-                  Si Ollama est indisponible, envoyer cette demande à {vendorName} ({cloudModel.trim()})
+                  {localStrategy === "balanced"
+                    ? "Autoriser le routage de cette demande vers"
+                    : "Si le moteur local est indisponible, envoyer cette demande à"}{" "}
+                  {vendorName} ({cloudModel.trim()})
                 </label>
               )}
-              {provider === "openai" && (
+              {taskProvider === "openai" && (
                 <label className="approval">
                   <input
                     type="checkbox"
@@ -1130,20 +1375,23 @@ function App() {
           <ControlCenter
             running={running}
             model={selectedModel}
-            provider={provider === "ollama" ? "Ollama · Local" : `${vendorName} · Cloud`}
+            provider={taskProvider === "ollama" ? `${localRuntimeName} · Local` : `${vendorName} · Cloud`}
             agent={
               {
                 general: "Général",
                 office: "Fichiers et bureautique",
                 windowsAdmin: "Administration Windows",
+                development: "Développement",
+                research: "Recherche",
+                multimedia: "Multimédia",
                 readOnly: "Lecture seule",
               }[agent]
             }
             status={pendingApproval ? "En attente de ton accord" : running ? "En cours" : "Disponible"}
             latestTask={tasks[0] ? (taskStateNames[tasks[0].state] ?? tasks[0].state) : undefined}
-            onModels={() => setPage("Modèles")}
-            onSecurity={() => setPage("Sécurité")}
-            onActivity={() => setPage("Activité")}
+            onModels={() => navigate("Modèles")}
+            onSecurity={() => navigate("Sécurité")}
+            onActivity={() => navigate("Activité")}
           />
         )}
         {page === "Modèles" && (
@@ -1152,7 +1400,22 @@ function App() {
             currentModel={model}
             onFallbackChange={setCloudFallback}
             strategy={localStrategy}
-            onStrategyChange={setLocalStrategy}
+            agentModels={agentModels}
+            onAgentModelsChange={setAgentModels}
+            cloudProviders={cloudProviders}
+            localRuntime={localRuntime}
+            onLocalRuntimeChange={(preferences) => {
+              setLocalRuntime(preferences);
+              resetApproval();
+            }}
+            onCloudProviderChange={(id, enabled) => {
+              setCloudProviders((entries) => entries.map((entry) => (entry.id === id ? { ...entry, enabled } : entry)));
+              if (id === vendor) resetApproval();
+            }}
+            onStrategyChange={(strategy) => {
+              setLocalStrategy(strategy);
+              resetApproval();
+            }}
           />
         )}
         {page === "Modèles" && (
@@ -1251,7 +1514,7 @@ function App() {
                     value={vendor}
                     disabled={running || keyBusy}
                     onChange={(event) => {
-                      const next = event.target.value === "deepseek" ? "deepseek" : "openai";
+                      const next = event.target.value;
                       void invoke("set_cloud_vendor", { vendor: next }).then(() => {
                         setVendor(next);
                         resetApproval();
@@ -1259,8 +1522,11 @@ function App() {
                       });
                     }}
                   >
-                    <option value="openai">OpenAI</option>
-                    <option value="deepseek">DeepSeek</option>
+                    {cloudProviders.map((entry) => (
+                      <option key={entry.id} value={entry.id} disabled={!entry.enabled}>
+                        {entry.label}
+                      </option>
+                    ))}
                   </select>
                   <label htmlFor="cloud-model">Identifiant du modèle {vendorName}</label>
                   <input
@@ -1274,6 +1540,28 @@ function App() {
                     }}
                     onBlur={() => rememberModels({ cloudModel: cloudModel.trim() })}
                   />
+                  <button
+                    type="button"
+                    disabled={running || cloudProbeBusy || !keyConfigured || !vendorEnabled || !cloudModel.trim()}
+                    onClick={() => {
+                      setCloudProbeBusy(true);
+                      setCloudProbeStatus("");
+                      void invoke<boolean>("probe_cloud_model", { vendor, model: cloudModel.trim() })
+                        .then(
+                          (verified) =>
+                            setCloudProbeStatus(
+                              verified ? "Appel d’outil cloud vérifié." : "Appel d’outil attendu absent.",
+                            ),
+                          (failure) =>
+                            setCloudProbeStatus(taskErrors[String(failure)] ?? "Le test du modèle a échoué."),
+                        )
+                        .finally(() => setCloudProbeBusy(false));
+                    }}
+                  >
+                    Tester les appels d’outils cloud
+                  </button>
+                  <p>Envoie une demande synthétique à {vendorName} sans exécuter l’outil proposé.</p>
+                  <p role="status">{cloudProbeStatus}</p>
                 </div>
                 <form
                   className="task-form"

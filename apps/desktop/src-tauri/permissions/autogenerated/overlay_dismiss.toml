@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-overlay-dismiss"
+description = "Enables the overlay_dismiss command without any pre-configured scope."
+commands.allow = ["overlay_dismiss"]
+
+[[permission]]
+identifier = "deny-overlay-dismiss"
+description = "Denies the overlay_dismiss command without any pre-configured scope."
+commands.deny = ["overlay_dismiss"]

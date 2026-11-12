@@ -9,9 +9,22 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::model_gateway::{open_stream, tool_catalog, Proposal, StreamSink, StreamedText};
+use crate::model_gateway::{open_stream, tool_catalog, GatewayError, Proposal, StreamSink, StreamedText};
 
 const INVALID: &str = "CLOUD_PROPOSAL_INVALID";
+
+#[cfg(test)]
+#[test]
+fn registered_cloud_adapters_use_distinct_credentials_and_fixed_https() {
+    let mut keys = std::collections::HashSet::new();
+    for entry in CLOUD_PROVIDERS {
+        assert_eq!(Vendor::from_code(entry.code), Some(entry.id));
+        assert!(keys.insert(entry.credential));
+        assert!(entry.endpoint.starts_with("https://"));
+    }
+    assert!(Vendor::Gemini.body("model", &[]).get("store").is_none());
+    assert!(Vendor::Anthropic.body("model", &[]).get("parallel_tool_calls").is_none());
+}
 
 /// Cloud providers speaking the Chat Completions protocol. One is chosen in the settings
 /// (`cloud.vendor`); each has its own key in Windows Credential Manager.
@@ -20,32 +33,71 @@ const INVALID: &str = "CLOUD_PROPOSAL_INVALID";
 pub enum Vendor {
     OpenAi,
     DeepSeek,
+    Gemini,
+    Anthropic,
 }
 
+#[derive(Clone, Copy, serde::Serialize)]
+pub struct ProviderDescriptor {
+    pub id: Vendor,
+    pub label: &'static str,
+    code: &'static str,
+    #[serde(skip)]
+    endpoint: &'static str,
+    #[serde(skip)]
+    credential: &'static str,
+}
+
+pub const CLOUD_PROVIDERS: &[ProviderDescriptor] = &[
+    ProviderDescriptor {
+        id: Vendor::OpenAi,
+        label: "OpenAI",
+        code: "openai",
+        endpoint: "https://api.openai.com/v1/chat/completions",
+        credential: "AiWin11/OpenAI",
+    },
+    ProviderDescriptor {
+        id: Vendor::DeepSeek,
+        label: "DeepSeek",
+        code: "deepseek",
+        endpoint: "https://api.deepseek.com/chat/completions",
+        credential: "AiWin11/DeepSeek",
+    },
+    ProviderDescriptor {
+        id: Vendor::Gemini,
+        label: "Google Gemini",
+        code: "gemini",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        credential: "AiWin11/Gemini",
+    },
+    ProviderDescriptor {
+        id: Vendor::Anthropic,
+        label: "Anthropic Claude",
+        code: "anthropic",
+        endpoint: "https://api.anthropic.com/v1/chat/completions",
+        credential: "AiWin11/Anthropic",
+    },
+];
+
 impl Vendor {
+    fn descriptor(self) -> &'static ProviderDescriptor {
+        CLOUD_PROVIDERS.iter().find(|entry| entry.id == self).expect("vendor in registry")
+    }
+
     pub fn code(self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::DeepSeek => "deepseek",
-        }
+        self.descriptor().code
     }
 
     pub fn from_code(code: &str) -> Option<Self> {
-        [Self::OpenAi, Self::DeepSeek].into_iter().find(|vendor| vendor.code() == code)
+        CLOUD_PROVIDERS.iter().find(|provider| provider.code == code).map(|provider| provider.id)
     }
 
     fn target(self) -> &'static str {
-        match self {
-            Self::OpenAi => "AiWin11/OpenAI",
-            Self::DeepSeek => "AiWin11/DeepSeek",
-        }
+        self.descriptor().credential
     }
 
     fn endpoint(self) -> &'static str {
-        match self {
-            Self::OpenAi => "https://api.openai.com/v1/chat/completions",
-            Self::DeepSeek => "https://api.deepseek.com/chat/completions",
-        }
+        self.descriptor().endpoint
     }
 
     /// Request body. DeepSeek is called without OpenAI-only fields (`store`,
@@ -63,7 +115,7 @@ impl Vendor {
                 // No file or window tools: file contents and screen data never go to the cloud.
                 "tools": tool_catalog(true, false, false, false)
             }),
-            Self::DeepSeek => json!({
+            Self::DeepSeek | Self::Gemini | Self::Anthropic => json!({
                 "model": model,
                 "stream": true,
                 "stream_options": { "include_usage": true },
@@ -140,7 +192,7 @@ fn read_entry(vendor: Vendor) -> Result<Option<Credential>, &'static str> {
 /// Completions format) with the tool catalog. Callers must hold a cloud approval.
 /// Sends one request and returns the proposal with the tokens it used (reported by OpenAI;
 /// when not reported, a conservative estimate: input characters / 3 + the output cap).
-pub(crate) fn propose(
+pub fn propose(
     vendor: Vendor,
     model: &str,
     messages: &[Value],
@@ -172,6 +224,66 @@ pub(crate) fn propose(
     let mut usage = None;
     let proposal = fold_with_usage(stream, sink, &mut usage)?;
     Ok((proposal, usage.unwrap_or(estimate)))
+}
+
+const LM_STUDIO: &str = "http://127.0.0.1:1234/v1";
+
+fn lm_studio_client() -> Result<Client, GatewayError> {
+    Client::builder()
+        .no_proxy()
+        .redirect(Policy::none())
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|_| GatewayError::Unavailable)
+}
+
+pub fn lm_studio_models() -> Result<Vec<String>, GatewayError> {
+    use std::io::Read;
+    let reply = lm_studio_client()?
+        .get(format!("{LM_STUDIO}/models"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .and_then(|reply| reply.error_for_status())
+        .map_err(|_| GatewayError::Unavailable)?;
+    let mut bytes = Vec::new();
+    reply.take(512 * 1024).read_to_end(&mut bytes).map_err(|_| GatewayError::InvalidResponse)?;
+    let catalog: Value = serde_json::from_slice(&bytes).map_err(|_| GatewayError::InvalidResponse)?;
+    let mut names: Vec<_> = catalog
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or(GatewayError::InvalidResponse)?
+        .iter()
+        .filter_map(|entry| entry.get("id")?.as_str())
+        .filter(|name| crate::valid_model_name(name))
+        .map(str::to_owned)
+        .take(256)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    Ok(names)
+}
+
+pub fn propose_lm_studio(
+    model: &str,
+    messages: &[Value],
+    tools: Value,
+    sink: &mut StreamSink<'_>,
+) -> Result<Proposal, GatewayError> {
+    if !lm_studio_models()?.iter().any(|name| name == model) {
+        return Err(GatewayError::UnknownModel);
+    }
+    let request = lm_studio_client()?.post(format!("{LM_STUDIO}/chat/completions")).json(&json!({
+        "model": model, "messages": messages, "tools": tools, "stream": true,
+        "max_tokens": 1024, "temperature": 0
+    }));
+    fold_with_usage(open_stream(request)?, sink, &mut None).map_err(|code| {
+        if code == "TASK_CANCELLED" {
+            GatewayError::Cancelled
+        } else {
+            GatewayError::InvalidResponse
+        }
+    })
 }
 
 #[cfg(test)]

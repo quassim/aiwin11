@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-cloud-provider-enabled"
+description = "Enables the set_cloud_provider_enabled command without any pre-configured scope."
+commands.allow = ["set_cloud_provider_enabled"]
+
+[[permission]]
+identifier = "deny-set-cloud-provider-enabled"
+description = "Denies the set_cloud_provider_enabled command without any pre-configured scope."
+commands.deny = ["set_cloud_provider_enabled"]

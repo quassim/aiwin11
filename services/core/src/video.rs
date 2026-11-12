@@ -8,6 +8,7 @@ use reqwest::{
     blocking::{Client, Response},
     redirect,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -34,8 +35,15 @@ const MAX_REPLY: usize = 512 * 1024;
 const WAIT_LIMIT: Duration = Duration::from_secs(20 * 60);
 
 pub struct VideoRequest {
-    endpoint: String,
+    port: u16,
     graph: Value,
+    output_node: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VideoTicket {
+    port: u16,
+    id: String,
     output_node: String,
 }
 
@@ -90,33 +98,44 @@ impl VideoRequest {
             }
         }
         let output_node = output_node.filter(|_| input_found).ok_or("VIDEO_WORKFLOW_INVALID")?;
-        Ok(Self { endpoint: format!("http://127.0.0.1:{port}"), graph, output_node })
+        Ok(Self { port, graph, output_node })
     }
 
     /// The caller reserves its single job slot and obtains broker authorization before dispatch.
-    pub fn run(self, queued: impl FnOnce()) -> Result<String, &'static str> {
-        let client = Client::builder()
-            .no_proxy()
-            .redirect(redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|_| "VIDEO_ENGINE_UNAVAILABLE")?;
+    pub fn submit(self) -> Result<VideoTicket, &'static str> {
+        let endpoint = format!("http://127.0.0.1:{}", self.port);
         let submitted = response_json(
-            client.post(format!("{}/prompt", self.endpoint)).json(&json!({ "prompt": self.graph })).send(),
+            video_client()?.post(format!("{endpoint}/prompt")).json(&json!({ "prompt": self.graph })).send(),
         )?;
         let id = submitted
             .get("prompt_id")
             .and_then(Value::as_str)
             .and_then(|id| Uuid::parse_str(id).ok())
-            .ok_or("VIDEO_WORKFLOW_REJECTED")?
-            .to_string();
-        queued();
+            .ok_or("VIDEO_WORKFLOW_REJECTED")?;
+        Ok(VideoTicket { port: self.port, id: id.to_string(), output_node: self.output_node })
+    }
+}
+
+fn video_client() -> Result<Client, &'static str> {
+    Client::builder()
+        .no_proxy()
+        .redirect(redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|_| "VIDEO_ENGINE_UNAVAILABLE")
+}
+
+impl VideoTicket {
+    pub fn follow(self) -> Result<String, &'static str> {
+        let id = Uuid::parse_str(&self.id).map_err(|_| "VIDEO_UNAVAILABLE")?.to_string();
+        let client = video_client()?;
+        let endpoint = format!("http://127.0.0.1:{}/history/{id}", self.port);
         let started = Instant::now();
         let mut poll_failures = 0;
         while started.elapsed() < WAIT_LIMIT {
             std::thread::sleep(Duration::from_secs(2));
-            let history = match response_json(client.get(format!("{}/history/{id}", self.endpoint)).send()) {
+            let history = match response_json(client.get(&endpoint).send()) {
                 Ok(history) => history,
                 Err("VIDEO_ENGINE_UNAVAILABLE") if poll_failures < 2 => {
                     poll_failures += 1;
@@ -138,6 +157,52 @@ impl VideoRequest {
 }
 
 impl Core {
+    pub fn video_ticket(&self) -> Result<Option<VideoTicket>, &'static str> {
+        self.setting("video.active_job")
+            .map_err(|_| "VIDEO_UNAVAILABLE")?
+            .map(|stored| serde_json::from_str(&stored).map_err(|_| "VIDEO_UNAVAILABLE"))
+            .transpose()
+    }
+
+    pub fn set_video_ticket(&mut self, ticket: Option<&VideoTicket>) -> Result<(), &'static str> {
+        if let Some(ticket) = ticket {
+            let value = serde_json::to_string(ticket).map_err(|_| "VIDEO_UNAVAILABLE")?;
+            self.db.execute(
+                "INSERT INTO settings (key, value) VALUES ('video.active_job', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [value],
+            )
+        } else {
+            self.db.execute("DELETE FROM settings WHERE key = 'video.active_job'", [])
+        }
+        .map_err(|_| "VIDEO_UNAVAILABLE")?;
+        Ok(())
+    }
+
+    pub fn reserve_video_submission(&mut self) -> Result<(), &'static str> {
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|_| "VIDEO_UNAVAILABLE")?;
+        let count: u32 = tx
+            .query_row(
+                "SELECT count(*) FROM events WHERE kind = 'video.submission.reserved'
+             AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| "VIDEO_UNAVAILABLE")?;
+        if count >= 4 {
+            return Err("VIDEO_QUOTA_EXCEEDED");
+        }
+        tx.execute(
+            "INSERT INTO events (id, session_id, kind, source) VALUES (?1, ?2, 'video.submission.reserved', 'core')",
+            rusqlite::params![Uuid::new_v4().to_string(), self.session_id],
+        )
+        .map_err(|_| "VIDEO_UNAVAILABLE")?;
+        tx.commit().map_err(|_| "VIDEO_UNAVAILABLE")
+    }
+
     pub fn authorize_video(&mut self) -> Result<Option<String>, &'static str> {
         let command = self
             .desktop_command(Operation::GenerateLocalVideo(Default::default()))
@@ -193,6 +258,20 @@ fn output_filename(entry: &Value, node: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracking_ticket_and_daily_quota_are_kept_in_the_store() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let ticket = VideoTicket { port: 8188, id: Uuid::new_v4().to_string(), output_node: "2".into() };
+        core.set_video_ticket(Some(&ticket)).unwrap();
+        assert_eq!(core.video_ticket().unwrap().unwrap().id, ticket.id);
+        core.set_video_ticket(None).unwrap();
+        assert!(core.video_ticket().unwrap().is_none());
+        for _ in 0..4 {
+            core.reserve_video_submission().unwrap();
+        }
+        assert_eq!(core.reserve_video_submission(), Err("VIDEO_QUOTA_EXCEEDED"));
+    }
 
     #[test]
     fn a_video_workflow_replaces_only_the_prompt_and_scopes_the_output() {

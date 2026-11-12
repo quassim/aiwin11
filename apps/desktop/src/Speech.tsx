@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 const AUTO_KEY = "aiwin11.speech.auto";
+const VOICE_KEY = "aiwin11.speech.voice";
 
 /** Local voices only: a voice with `localService === false` would send the text online. */
 function localVoices(): SpeechSynthesisVoice[] {
@@ -9,7 +10,55 @@ function localVoices(): SpeechSynthesisVoice[] {
 }
 
 function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
+  const saved = savedVoice();
+  if (saved) {
+    const selected = voices.find((voice) => voice.voiceURI === saved);
+    if (selected) return selected;
+  }
   return voices.find((voice) => voice.lang.toLowerCase().startsWith("fr")) ?? voices[0];
+}
+
+function savedVoice(): string {
+  try {
+    return localStorage.getItem(VOICE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function LocalVoiceSetting() {
+  const [voices, setVoices] = useState(localVoices);
+  const [selection, setSelection] = useState(savedVoice);
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    const update = () => setVoices(localVoices());
+    window.speechSynthesis.addEventListener("voiceschanged", update);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", update);
+  }, []);
+  if (!voices.length) return <p>Aucune voix Windows locale détectée.</p>;
+  return (
+    <label>
+      Voix de synthèse locale
+      <select
+        value={voices.some((voice) => voice.voiceURI === selection) ? selection : ""}
+        onChange={(event) => {
+          try {
+            localStorage.setItem(VOICE_KEY, event.target.value);
+            setSelection(event.target.value);
+          } catch {
+            setSelection(savedVoice());
+          }
+        }}
+      >
+        <option value="">Automatique</option>
+        {voices.map((voice) => (
+          <option key={voice.voiceURI} value={voice.voiceURI}>
+            {voice.name} ({voice.lang})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 /** Reads `text` aloud with a local Windows voice. Returns false when none is available. */

@@ -18,7 +18,7 @@
       "minHeight": 360
     }],
     "security": {
-      "capabilities": ["main-window"],
+      "capabilities": ["main-window", "overlay-window"],
       "csp": "default-src 'self'; img-src 'self' blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'",
       "devCsp": "default-src 'self'; img-src 'self' blob:; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'; base-uri 'none'"
     }

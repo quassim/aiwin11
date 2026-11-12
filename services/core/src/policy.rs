@@ -111,10 +111,11 @@ pub enum AgentAction {
     ListApplications,
     /// Stops one listed process of the user's session (critical: always asks).
     StopProcess,
+    PowerShellDiagnostic,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -150,6 +151,7 @@ impl AgentAction {
         Self::DescribeScreen,
         Self::ListApplications,
         Self::StopProcess,
+        Self::PowerShellDiagnostic,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -193,6 +195,7 @@ impl AgentAction {
             Self::DescribeScreen => "describe_screen",
             Self::ListApplications => "list_applications",
             Self::StopProcess => "stop_process",
+            Self::PowerShellDiagnostic => "run_powershell_diagnostic",
         }
     }
 
@@ -244,6 +247,9 @@ pub enum AgentProfile {
     Office,
     /// Diagnostics, processes, services, windows, administrator operations.
     WindowsAdmin,
+    Development,
+    Research,
+    Multimedia,
     /// Tools without side effects only.
     ReadOnly,
 }
@@ -254,6 +260,9 @@ impl AgentProfile {
             Self::General => "general",
             Self::Office => "office",
             Self::WindowsAdmin => "windows_admin",
+            Self::Development => "development",
+            Self::Research => "research",
+            Self::Multimedia => "multimedia",
             Self::ReadOnly => "read_only",
         }
     }
@@ -267,6 +276,22 @@ impl AgentProfile {
         match self {
             Self::General => true,
             Self::ReadOnly => !action.has_side_effect(),
+            Self::Development => {
+                matches!(action, A::ListFiles | A::ReadFile | A::SearchFiles | A::Recall | A::SearchMemory)
+            }
+            Self::Research => matches!(
+                action,
+                A::ListFiles
+                    | A::ReadFile
+                    | A::SearchFiles
+                    | A::Recall
+                    | A::SearchMemory
+                    | A::McpListTools
+                    | A::McpCall
+            ),
+            Self::Multimedia => {
+                matches!(action, A::GenerateImage | A::InspectWindow | A::ListWindows | A::ListFiles | A::ReadFile)
+            }
             Self::Office => matches!(
                 action,
                 A::LaunchApplication
@@ -295,6 +320,7 @@ impl AgentProfile {
                     | A::ListProcesses
                     | A::ListServices
                     | A::RunDiagnostic
+                    | A::PowerShellDiagnostic
                     | A::AdminService
                     | A::AdminCleanTemp
                     | A::ListWindows
@@ -327,7 +353,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 35] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 36] = [
+    (A::PowerShellDiagnostic, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::StopProcess, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListApplications, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::DescribeScreen, [E::Ask, E::Ask, E::Ask, E::Ask]),
@@ -442,7 +469,11 @@ mod tests {
         assert_eq!(decide(AgentProfile::Office, A::AdminService).rule, "agent_scope");
         assert_eq!(decide(AgentProfile::WindowsAdmin, A::TrashFile).rule, "agent_scope");
         assert_ne!(decide(AgentProfile::WindowsAdmin, A::ListServices).effect, E::Deny);
-        for profile in [AgentProfile::Office, AgentProfile::WindowsAdmin, AgentProfile::ReadOnly] {
+        assert_ne!(decide(AgentProfile::Development, A::ReadFile).effect, E::Deny);
+        assert_eq!(decide(AgentProfile::Development, A::PowerShellDiagnostic).rule, "agent_scope");
+        for profile in
+            [AgentProfile::Office, AgentProfile::WindowsAdmin, AgentProfile::Development, AgentProfile::ReadOnly]
+        {
             assert_eq!(decide(profile, A::Delegate).rule, "agent_scope", "no re-delegation: {profile:?}");
         }
         assert_eq!(decide(AgentProfile::General, A::Delegate).effect, E::Allow);
@@ -494,9 +525,10 @@ mod tests {
     fn assisted_is_the_default_and_asks_for_every_side_effect() {
         assert_eq!(PolicySettings::default(), PolicySettings { autonomy: P::Assisted, simulate: false });
         for action in AgentAction::ALL {
-            // Listing MCP tools starts a program the user declared: it asks too.
-            let asks =
-                action.has_side_effect() || action.reads_screen() || action.private_data() || action == A::McpListTools;
+            let asks = action.has_side_effect()
+                || action.reads_screen()
+                || action.private_data()
+                || matches!(action, A::McpListTools | A::PowerShellDiagnostic);
             let expected = if asks { E::Ask } else { E::Allow };
             assert_eq!(effect(P::Assisted, false, action, LOCAL), expected, "{action:?}");
         }
@@ -517,7 +549,7 @@ mod tests {
     #[test]
     fn no_profile_reads_the_screen_or_trashes_without_asking() {
         for autonomy in [P::Observation, P::Assisted, P::Limited, P::Advanced] {
-            for action in [A::InspectWindow, A::DescribeWindow] {
+            for action in [A::InspectWindow, A::DescribeWindow, A::PowerShellDiagnostic] {
                 assert_eq!(effect(autonomy, false, action, LOCAL), E::Ask, "{autonomy:?} {action:?}");
             }
             assert_ne!(effect(autonomy, false, A::TrashFile, LOCAL), E::Allow, "{autonomy:?}");

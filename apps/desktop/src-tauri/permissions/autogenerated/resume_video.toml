@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-video"
+description = "Enables the resume_video command without any pre-configured scope."
+commands.allow = ["resume_video"]
+
+[[permission]]
+identifier = "deny-resume-video"
+description = "Denies the resume_video command without any pre-configured scope."
+commands.deny = ["resume_video"]

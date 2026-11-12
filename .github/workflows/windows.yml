@@ -16,13 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -B services/agent/test_agent.py
-      - run: dotnet build services/windows/AiWin11.Windows.csproj --configuration Release
-      - run: dotnet build services/admin/AiWin11.Admin.csproj --configuration Release
       - run: rustup show
       - run: npm --prefix apps/desktop ci --no-audit --no-fund
-      - run: npm --prefix apps/desktop run build
-      - run: npm --prefix apps/desktop run test
-      - run: cargo test --locked -p aiwin11-core
-      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - run: npm --prefix apps/desktop run tauri -- build --no-bundle
+      - run: python -m venv .venv
+      - run: .venv/Scripts/python.exe -m pip install -r services/agent/requirements-dev.txt
+      - run: ./scripts/verify.ps1 -Ipc -Tauri

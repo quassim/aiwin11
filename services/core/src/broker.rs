@@ -84,6 +84,7 @@ pub enum Capability {
     ScreenCapture = 1 << 24,
     /// Stop one listed process of the user's session, after the user's approval.
     ProcessStop = 1 << 25,
+    PowerShellDiagnostic = 1 << 26,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -118,6 +119,24 @@ pub enum ExecutionError {
     ExecutionFailed,
     WindowUnverified,
     OutcomeUnrecorded,
+}
+
+#[cfg(windows)]
+pub type BrokerDecision = Result<(Option<String>, Option<aiwin11_contracts::v1::Result>), ExecutionError>;
+
+#[cfg(windows)]
+pub type BrokerTransport = fn(&std::path::Path, &str, u32, Policy, Peer, &Command, bool) -> BrokerDecision;
+
+#[cfg(windows)]
+impl Policy {
+    pub fn capability_bits(self) -> u32 {
+        self.grants
+    }
+
+    /// Only the authenticated supervisor can submit these already approved grants.
+    pub fn from_capability_bits(bits: u32) -> Option<Self> {
+        (bits < (Capability::PowerShellDiagnostic as u32) * 2).then_some(Self { grants: bits })
+    }
 }
 
 pub(crate) enum LaunchOutcome {
@@ -169,10 +188,20 @@ impl Policy {
             Some(Operation::GenerateImage(_)) if agent(Capability::ImageGenerate) => Ok("generate_image"),
             Some(Operation::RunDiagnostic(run))
                 if agent(Capability::Diagnostic)
-                    && aiwin11_contracts::v1::run_diagnostic::Diagnostic::try_from(run.diagnostic)
-                        .is_ok_and(|d| d != aiwin11_contracts::v1::run_diagnostic::Diagnostic::Unspecified) =>
+                    && matches!(
+                        aiwin11_contracts::v1::run_diagnostic::Diagnostic::try_from(run.diagnostic),
+                        Ok(aiwin11_contracts::v1::run_diagnostic::Diagnostic::Network
+                            | aiwin11_contracts::v1::run_diagnostic::Diagnostic::Wifi
+                            | aiwin11_contracts::v1::run_diagnostic::Diagnostic::Time)
+                    ) =>
             {
                 Ok("run_diagnostic")
+            }
+            Some(Operation::RunDiagnostic(run))
+                if agent(Capability::PowerShellDiagnostic)
+                    && run.diagnostic == aiwin11_contracts::v1::run_diagnostic::Diagnostic::PowerShellOs as i32 =>
+            {
+                Ok("run_powershell_diagnostic")
             }
             Some(Operation::RecallNotes(_)) if agent(Capability::MemoryRead) => Ok("recall_notes"),
             Some(Operation::InvokeControl(control))
@@ -237,7 +266,15 @@ impl Policy {
                 Ok("type_in_notepad")
             }
             Some(Operation::CaptureForeground(_)) if peer == Peer::DesktopInspector => Ok("capture_foreground"),
-            Some(Operation::Dictate(dictate)) if desktop && (1..=10).contains(&dictate.max_seconds) => Ok("dictate"),
+            Some(Operation::ListSpeechRecognizers(_)) if desktop => Ok("list_speech_recognizers"),
+            Some(Operation::Dictate(dictate))
+                if desktop
+                    && (1..=10).contains(&dictate.max_seconds)
+                    && dictate.recognizer_id.len() <= 512
+                    && !dictate.recognizer_id.chars().any(char::is_control) =>
+            {
+                Ok("dictate")
+            }
             Some(Operation::AnalyzeCapture(_)) if peer == Peer::DesktopInspector => Ok("analyze_capture"),
             Some(Operation::TranscribeCapture(_)) if peer == Peer::DesktopInspector => Ok("transcribe_capture"),
             Some(Operation::ListDisplays(_)) if desktop || agent(Capability::ScreenCapture) => Ok("list_displays"),
@@ -272,7 +309,90 @@ impl Policy {
 }
 
 impl Core {
+    #[cfg(windows)]
+    pub fn set_broker_transport(&mut self, transport: BrokerTransport) {
+        self.broker_transport = Some(transport);
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn dispatch_windows(&mut self, policy: Policy, peer: Peer, command: &Command) -> BrokerDecision {
+        if let Some(transport) = self.broker_transport {
+            let path = self.db.path().ok_or(ExecutionError::AuditUnavailable)?;
+            return transport(
+                std::path::Path::new(path),
+                self.session_id(),
+                self.desktop_pid,
+                policy,
+                peer,
+                command,
+                true,
+            );
+        }
+        let task = self.authorize_local(policy, peer, command)?;
+        Ok((task, crate::windows_bridge::dispatch(&trusted_windows_command(peer, command))))
+    }
+
+    #[cfg(windows)]
+    pub fn broker_dispatch(
+        &mut self,
+        policy: Policy,
+        peer: Peer,
+        command: &Command,
+        execute_windows: bool,
+    ) -> BrokerDecision {
+        if execute_windows
+            && !matches!(
+                command.operation,
+                Some(
+                    Operation::LaunchApplication(_)
+                        | Operation::CharacterMapDigit(_)
+                        | Operation::LocateWindow(_)
+                        | Operation::InspectWindow(_)
+                        | Operation::CaptureWindow(_)
+                        | Operation::InspectForeground(_)
+                        | Operation::CaptureForeground(_)
+                        | Operation::CaptureDisplay(_)
+                        | Operation::ListDisplays(_)
+                        | Operation::TypeInNotepad(_)
+                        | Operation::ListProcesses(_)
+                        | Operation::InspectProcess(_)
+                        | Operation::StopProcess(_)
+                        | Operation::ListApplications(_)
+                        | Operation::GetSystemStatus(_)
+                        | Operation::ReadClipboard(_)
+                        | Operation::WriteClipboard(_)
+                        | Operation::ListWindows(_)
+                        | Operation::ArrangeWindow(_)
+                        | Operation::ListServices(_)
+                        | Operation::InvokeControl(_)
+                        | Operation::RunDiagnostic(_)
+                        | Operation::Dictate(_)
+                        | Operation::ListSpeechRecognizers(_)
+                )
+            )
+        {
+            self.audit(None, "policy.denied", "unsupported_bridge_operation")
+                .map_err(|_| ExecutionError::AuditUnavailable)?;
+            return Err(ExecutionError::Denied("unsupported_bridge_operation"));
+        }
+        let task = self.authorize_local(policy, peer, command)?;
+        let reply = if execute_windows {
+            let reply = crate::windows_bridge::dispatch_once(&trusted_windows_command(peer, command));
+            let (kind, code) = match reply.as_ref().map(|reply| reply.status()) {
+                Some(aiwin11_contracts::v1::result::Status::Success) => ("broker.windows.completed", "success"),
+                Some(aiwin11_contracts::v1::result::Status::Partial) => ("broker.windows.partial", "partial"),
+                _ => ("broker.windows.failed", "bridge_failed"),
+            };
+            self.audit(task.as_deref(), kind, code).map_err(|_| ExecutionError::OutcomeUnrecorded)?;
+            reply
+        } else {
+            None
+        };
+        Ok((task, reply))
+    }
+
     /// The host supplies a fixed Notepad executor. The request supplies no path or arguments.
+    #[cfg(test)]
     pub(crate) fn execute(
         &mut self,
         policy: Policy,
@@ -281,14 +401,19 @@ impl Core {
         launch_notepad: impl FnOnce() -> LaunchOutcome,
     ) -> Result<u32, ExecutionError> {
         let task_id = self.authorize_dispatch(policy, peer, command)?;
-        let (kind, code, result) = match launch_notepad() {
+        self.finish_launch(task_id.as_deref(), launch_notepad())
+    }
+
+    #[cfg(any(windows, test))]
+    pub(crate) fn finish_launch(&self, task_id: Option<&str>, outcome: LaunchOutcome) -> Result<u32, ExecutionError> {
+        let (kind, code, result) = match outcome {
             LaunchOutcome::Verified(pid) => ("tool.execution.completed", "success", Ok(pid)),
             LaunchOutcome::Unverified => {
                 ("tool.execution.partial", "window_unverified", Err(ExecutionError::WindowUnverified))
             }
             LaunchOutcome::Failed => ("tool.execution.failed", "launch_failed", Err(ExecutionError::ExecutionFailed)),
         };
-        self.audit(task_id.as_deref(), kind, code).map_err(|_| ExecutionError::OutcomeUnrecorded)?;
+        self.audit(task_id, kind, code).map_err(|_| ExecutionError::OutcomeUnrecorded)?;
         result
     }
 
@@ -308,6 +433,29 @@ impl Core {
     }
 
     pub(crate) fn authorize_dispatch(
+        &mut self,
+        policy: Policy,
+        peer: Peer,
+        command: &Command,
+    ) -> Result<Option<String>, ExecutionError> {
+        #[cfg(windows)]
+        if let Some(transport) = self.broker_transport {
+            let path = self.db.path().ok_or(ExecutionError::AuditUnavailable)?;
+            return transport(
+                std::path::Path::new(path),
+                self.session_id(),
+                self.desktop_pid,
+                policy,
+                peer,
+                command,
+                false,
+            )
+            .map(|(task, _)| task);
+        }
+        self.authorize_local(policy, peer, command)
+    }
+
+    fn authorize_local(
         &mut self,
         policy: Policy,
         peer: Peer,
@@ -374,6 +522,13 @@ impl Core {
         )?;
         Ok(())
     }
+}
+
+#[cfg(windows)]
+fn trusted_windows_command(peer: Peer, command: &Command) -> Command {
+    let mut trusted = command.clone();
+    trusted.authenticated_actor_id = if peer == Peer::Agent { "agent" } else { "desktop_inspector" }.into();
+    trusted
 }
 
 #[cfg(test)]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-palette"
+description = "Enables the show_palette command without any pre-configured scope."
+commands.allow = ["show_palette"]
+
+[[permission]]
+identifier = "deny-show-palette"
+description = "Denies the show_palette command without any pre-configured scope."
+commands.deny = ["show_palette"]

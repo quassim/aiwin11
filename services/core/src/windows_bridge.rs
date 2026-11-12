@@ -104,13 +104,66 @@ pub struct Capture {
 }
 
 impl Core {
+    pub fn speech_recognizer(&self) -> String {
+        self.setting("speech.recognizer").ok().flatten().unwrap_or_default()
+    }
+
+    pub fn speech_recognizers(&mut self) -> Result<Vec<aiwin11_contracts::v1::SpeechRecognizer>, &'static str> {
+        let command = self
+            .desktop_command(Operation::ListSpeechRecognizers(Default::default()))
+            .map_err(|_| "DICTATION_FAILED")?;
+        let (task, reply) = self
+            .dispatch_windows(Policy::default(), Peer::DesktopInspector, &command)
+            .map_err(|_| "DICTATION_FAILED")?;
+        let listed = reply
+            .filter(|reply| reply.status() == Status::Success && reply.error.is_none())
+            .and_then(|reply| reply.speech_recognizers)
+            .map(|list| list.recognizers)
+            .filter(|list| list.len() <= 32);
+        self.audit(
+            task.as_deref(),
+            if listed.is_some() { "speech.list.completed" } else { "speech.list.failed" },
+            if listed.is_some() { "success" } else { "unavailable" },
+        )
+        .map_err(|_| "DICTATION_FAILED")?;
+        listed.ok_or("DICTATION_FAILED")
+    }
+
+    pub fn set_speech_recognizer(&mut self, id: &str) -> Result<(), &'static str> {
+        if !id.is_empty()
+            && (id.len() > 512
+                || id.chars().any(char::is_control)
+                || !self.speech_recognizers()?.iter().any(|recognizer| recognizer.id == id))
+        {
+            return Err("DICTATION_NO_RECOGNIZER");
+        }
+        let session = self.session_id().to_owned();
+        let transaction = self.db.transaction().map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('speech.recognizer', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [id],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+             VALUES (?1, ?2, 'settings.speech.changed', 'core', ?3)",
+                rusqlite::params![Uuid::new_v4().to_string(), session, if id.is_empty() { "auto" } else { "local" }],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction.commit().map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     pub fn enter_character_map_digit(&mut self, digit: u32) -> Result<bool, &'static str> {
         let command = self
             .desktop_command(Operation::CharacterMapDigit(CharacterMapDigit { digit: Some(digit) }))
             .map_err(|_| "INPUT_UNAVAILABLE")?;
-        let task =
-            self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command).map_err(|_| "INPUT_DENIED")?;
-        let outcome = dispatch(&command)
+        let (task, reply) =
+            self.dispatch_windows(Policy::default(), Peer::DesktopInspector, &command).map_err(|_| "INPUT_DENIED")?;
+        let outcome = reply
             .and_then(|reply| {
                 if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
                     return None;
@@ -227,7 +280,7 @@ impl Core {
 
     /// Agent tool, step 1: identifies the window the user was using before AiWin11.
     pub(crate) fn agent_locate_window(&mut self, task: &str, policy: Policy) -> Result<WindowTarget, &'static str> {
-        let operation = Operation::LocateWindow(LocateWindow { exclude_process_id: std::process::id() });
+        let operation = Operation::LocateWindow(LocateWindow { exclude_process_id: self.desktop_pid });
         let located = self.agent_bridge_call(task, policy, operation, "window.locate", |reply| {
             if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
                 return None;
@@ -261,11 +314,11 @@ impl Core {
     ) -> Result<bool, &'static str> {
         let operation = Operation::StopProcess(StopProcess { process_id, expected_name: name.to_owned() });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
-        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
             ExecutionError::Denied(_) => "PROCESS_STOP_DENIED",
             _ => "WINDOW_AUDIT_UNAVAILABLE",
         })?;
-        let outcome = match dispatch(&command) {
+        let outcome = match reply {
             Some(reply) if reply.process_list.is_none() && reply.ui_tree.is_none() => {
                 match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
                     (Status::Success, None) => Ok(true),
@@ -344,7 +397,7 @@ impl Core {
         index: u32,
         node: &NamedNode,
         value: Option<&str>,
-    ) -> Result<(), &'static str> {
+    ) -> Result<bool, &'static str> {
         self.ensure_window_unprotected(task, target)?;
         let operation = Operation::InvokeControl(InvokeControl {
             window: target.window,
@@ -355,14 +408,17 @@ impl Core {
             value: value.map(str::to_owned),
         });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
-        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
             ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
             _ => "WINDOW_AUDIT_UNAVAILABLE",
         })?;
-        let outcome = match dispatch(&command) {
+        let outcome = match reply {
             Some(reply) if reply.ui_tree.is_none() => {
                 match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
-                    (Status::Success, None) => Ok(()),
+                    (Status::Success, None) if value.is_some() || !reply.control_keyboard_verified => {
+                        Ok(reply.control_keyboard_verified)
+                    }
+                    (Status::Partial, Some("control_input_unverified")) => Err("CONTROL_INPUT_UNVERIFIED"),
                     (Status::Failed, Some("not_invokable")) => Err("CONTROL_NOT_INVOKABLE"),
                     (Status::Failed, Some("control_changed")) => Err("CONTROL_CHANGED"),
                     _ => Err("BRIDGE_FAILED"),
@@ -371,7 +427,9 @@ impl Core {
             _ => Err("BRIDGE_FAILED"),
         };
         let (kind, code) = match outcome {
-            Ok(()) => ("control.invoke.completed", "invoked"),
+            Ok(true) => ("control.invoke.completed", "keyboard_verified"),
+            Ok(false) => ("control.invoke.completed", "invoked"),
+            Err("CONTROL_INPUT_UNVERIFIED") => ("control.invoke.partial", "CONTROL_INPUT_UNVERIFIED"),
             Err(code) => ("control.invoke.failed", code),
         };
         self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
@@ -413,7 +471,7 @@ impl Core {
 
     /// Agent tool: lists application windows (titles, applications), after the user's approval.
     pub(crate) fn agent_list_windows(&mut self, task: &str, policy: Policy) -> Result<Vec<ListedWindow>, &'static str> {
-        let operation = Operation::ListWindows(ListWindows { exclude_process_id: std::process::id() });
+        let operation = Operation::ListWindows(ListWindows { exclude_process_id: self.desktop_pid });
         self.agent_bridge_call(task, policy, operation, "window.list", |reply| {
             if reply.ui_tree.is_some()
                 || reply.window_capture.is_some()
@@ -444,11 +502,11 @@ impl Core {
             arrangement: arrangement as i32,
         });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
-        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
             ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
             _ => "WINDOW_AUDIT_UNAVAILABLE",
         })?;
-        let outcome = match dispatch(&command) {
+        let outcome = match reply {
             Some(reply) if reply.window_list.is_none() && reply.ui_tree.is_none() => {
                 match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
                     (Status::Success, None) => Ok(true),
@@ -498,11 +556,11 @@ impl Core {
     ) -> Result<bool, &'static str> {
         let operation = Operation::WriteClipboard(WriteClipboard { text: text.to_owned() });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
-        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
             ExecutionError::Denied(_) => "CLIPBOARD_ACCESS_DENIED",
             _ => "CLIPBOARD_AUDIT_UNAVAILABLE",
         })?;
-        let outcome = match dispatch(&command) {
+        let outcome = match reply {
             Some(reply) if reply.clipboard_content.is_none() && reply.ui_tree.is_none() => {
                 match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
                     (Status::Success, None) => Ok(true),
@@ -563,7 +621,7 @@ impl Core {
     pub(crate) fn agent_capture_screen(&mut self, task: &str, policy: Policy) -> Result<Vec<u8>, &'static str> {
         if !self.protected_windows().is_empty() {
             let check = Policy::granting(&[crate::broker::Capability::WindowList]);
-            let operation = Operation::ListWindows(ListWindows { exclude_process_id: std::process::id() });
+            let operation = Operation::ListWindows(ListWindows { exclude_process_id: self.desktop_pid });
             let windows = self.agent_bridge_call(task, check, operation, "window.list", |reply| {
                 if reply.ui_tree.is_some() || reply.window_capture.is_some() {
                     return None;
@@ -626,11 +684,11 @@ impl Core {
     ) -> Result<bool, &'static str> {
         let operation = Operation::TypeInNotepad(TypeInNotepad { process_id, text: text.to_owned() });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
-        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
             ExecutionError::Denied(_) => "INPUT_ACCESS_DENIED",
             _ => "INPUT_AUDIT_UNAVAILABLE",
         })?;
-        let outcome = match dispatch(&command) {
+        let outcome = match reply {
             Some(reply)
                 if reply.ui_tree.is_none()
                     && reply.window_capture.is_none()
@@ -665,13 +723,11 @@ impl Core {
         accept: impl FnOnce(BridgeReply) -> Option<T>,
     ) -> Result<T, &'static str> {
         let command = self.agent_command(task, operation).map_err(|_| "WINDOW_UNAVAILABLE")?;
-        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
             ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
             _ => "WINDOW_AUDIT_UNAVAILABLE",
         })?;
-        let result = dispatch(&command)
-            .filter(|reply| reply.status() == Status::Success && reply.error.is_none())
-            .and_then(accept);
+        let result = reply.filter(|reply| reply.status() == Status::Success && reply.error.is_none()).and_then(accept);
         let (suffix, code) = if result.is_some() { ("completed", "success") } else { ("failed", "window_unavailable") };
         self.audit(task_id.as_deref(), &format!("{event}.{suffix}"), code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
         result.ok_or("WINDOW_UNAVAILABLE")
@@ -680,23 +736,23 @@ impl Core {
     /// Desktop only, after the user's click: one phrase from the microphone, recognized
     /// offline by Windows. Neither audio nor text is stored or journaled.
     pub fn dictate(&mut self) -> Result<String, &'static str> {
-        let mut command =
-            self.desktop_command(Operation::Dictate(Dictate { max_seconds: 10 })).map_err(|_| "DICTATION_FAILED")?;
-        command.deadline_ms = unix_millis().ok_or("DICTATION_FAILED")? + 14_000;
-        let task = self
-            .authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
+        let mut command = self
+            .desktop_command(Operation::Dictate(Dictate { max_seconds: 10, recognizer_id: self.speech_recognizer() }))
             .map_err(|_| "DICTATION_FAILED")?;
-        let outcome =
-            match dispatch(&command).filter(|reply| reply.status() == Status::Success).and_then(|r| r.dictation) {
-                Some(result) => match result.status() {
-                    DictationStatus::Recognized if result.text.chars().count() <= 2000 => Ok(result.text),
-                    DictationStatus::Silence => Err("DICTATION_SILENCE"),
-                    DictationStatus::NoRecognizer => Err("DICTATION_NO_RECOGNIZER"),
-                    DictationStatus::NoMicrophone => Err("DICTATION_NO_MICROPHONE"),
-                    _ => Err("DICTATION_FAILED"),
-                },
-                None => Err("DICTATION_FAILED"),
-            };
+        command.deadline_ms = unix_millis().ok_or("DICTATION_FAILED")? + 14_000;
+        let (task, reply) = self
+            .dispatch_windows(Policy::default(), Peer::DesktopInspector, &command)
+            .map_err(|_| "DICTATION_FAILED")?;
+        let outcome = match reply.filter(|reply| reply.status() == Status::Success).and_then(|r| r.dictation) {
+            Some(result) => match result.status() {
+                DictationStatus::Recognized if result.text.chars().count() <= 2000 => Ok(result.text),
+                DictationStatus::Silence => Err("DICTATION_SILENCE"),
+                DictationStatus::NoRecognizer => Err("DICTATION_NO_RECOGNIZER"),
+                DictationStatus::NoMicrophone => Err("DICTATION_NO_MICROPHONE"),
+                _ => Err("DICTATION_FAILED"),
+            },
+            None => Err("DICTATION_FAILED"),
+        };
         let (kind, code) = match &outcome {
             Ok(_) => ("dictation.completed", "recognized"),
             Err(code) => ("dictation.failed", *code),
@@ -724,8 +780,8 @@ impl Core {
     fn capture_desktop(&mut self, operation: Operation) -> Result<Capture, ExecutionError> {
         let display = matches!(&operation, Operation::CaptureDisplay(_));
         let command = self.desktop_command(operation)?;
-        let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
-        let capture = dispatch(&command).and_then(|reply| {
+        let (task, reply) = self.dispatch_windows(Policy::default(), Peer::DesktopInspector, &command)?;
+        let capture = reply.and_then(|reply| {
             if reply.status() != Status::Success
                 || reply.error.is_some()
                 || reply.process_id.is_some()
@@ -753,10 +809,10 @@ impl Core {
     pub fn list_displays(&mut self) -> Result<Vec<Display>, &'static str> {
         let command =
             self.desktop_command(Operation::ListDisplays(Default::default())).map_err(|_| "DISPLAYS_UNAVAILABLE")?;
-        let task = self
-            .authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
+        let (task, reply) = self
+            .dispatch_windows(Policy::default(), Peer::DesktopInspector, &command)
             .map_err(|_| "DISPLAYS_NOT_AUTHORIZED")?;
-        let displays = dispatch(&command).and_then(|reply| {
+        let displays = reply.and_then(|reply| {
             if reply.status() != Status::Success || reply.error.is_some() {
                 return None;
             }
@@ -795,9 +851,9 @@ impl Core {
 
     pub fn inspect_foreground(&mut self) -> Result<Inspection, ExecutionError> {
         let command = self.desktop_command(Operation::InspectForeground(InspectForeground {}))?;
-        let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
+        let (task, reply) = self.dispatch_windows(Policy::default(), Peer::DesktopInspector, &command)?;
         let tree =
-            dispatch(&command).and_then(|reply| {
+            reply.and_then(|reply| {
                 if reply.status() != Status::Success
                     || reply.error.is_some()
                     || reply.process_id.is_some()
@@ -838,22 +894,18 @@ impl Core {
     }
 
     pub fn execute_windows(&mut self, policy: Policy, peer: Peer, command: &Command) -> Result<u32, ExecutionError> {
-        self.execute(policy, peer, command, || {
-            let mut trusted_command = command.clone();
-            trusted_command.authenticated_actor_id = "agent".into();
-            match dispatch(&trusted_command) {
-                Some(reply) if reply.ui_tree.is_none() && reply.window_capture.is_none() => {
-                    match (reply.status(), reply.process_id) {
-                        (Status::Success, Some(pid)) if pid != 0 && reply.error.is_none() => {
-                            LaunchOutcome::Verified(pid)
-                        }
-                        (Status::Partial, None) => LaunchOutcome::Unverified,
-                        _ => LaunchOutcome::Failed,
-                    }
+        let (task_id, reply) = self.dispatch_windows(policy, peer, command)?;
+        let outcome = match reply {
+            Some(reply) if reply.ui_tree.is_none() && reply.window_capture.is_none() => {
+                match (reply.status(), reply.process_id) {
+                    (Status::Success, Some(pid)) if pid != 0 && reply.error.is_none() => LaunchOutcome::Verified(pid),
+                    (Status::Partial, None) => LaunchOutcome::Unverified,
+                    _ => LaunchOutcome::Failed,
                 }
-                _ => LaunchOutcome::Failed,
             }
-        })
+            _ => LaunchOutcome::Failed,
+        };
+        self.finish_launch(task_id.as_deref(), outcome)
     }
 }
 
@@ -1276,7 +1328,15 @@ fn take_bridge() -> Option<std::process::Child> {
     child
 }
 
-fn dispatch(command: &Command) -> Option<BridgeReply> {
+pub(crate) fn dispatch(command: &Command) -> Option<BridgeReply> {
+    dispatch_with(command, take_bridge)
+}
+
+pub(crate) fn dispatch_once(command: &Command) -> Option<BridgeReply> {
+    dispatch_with(command, spawn_bridge)
+}
+
+fn dispatch_with(command: &Command, spawn: impl FnOnce() -> Option<std::process::Child>) -> Option<BridgeReply> {
     let bytes = command.encode_to_vec();
     if bytes.len() > MAX_COMMAND_BYTES {
         return None;
@@ -1284,7 +1344,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     // The bridge stops working at the command deadline, then reports. Wait for that report
     // instead of a fixed delay, so a slow .NET cold start yields a result rather than a kill.
     let deadline = Instant::now() + bridge_wait(command.deadline_ms, unix_millis()?);
-    let mut child = take_bridge()?;
+    let mut child = spawn()?;
 
     // The bridge reads its whole stdin before writing anything, so this write cannot deadlock.
     // Close the writer to delimit the frame.
@@ -1293,7 +1353,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
         Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_) | Operation::CaptureDisplay(_)) => {
             MAX_JPEG_BYTES + MAX_MESSAGE_BYTES
         }
-        Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
+        Some(Operation::InspectWindow(_) | Operation::ListSpeechRecognizers(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
         Some(Operation::ReadClipboard(_) | Operation::RunDiagnostic(_) | Operation::Dictate(_)) => {
             MAX_CLIPBOARD_REPLY_BYTES * 3
@@ -1367,6 +1427,28 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires the published Windows bridge"]
+    fn approved_powershell_diagnostic_reads_windows_version() {
+        use crate::broker::Capability;
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        assert_eq!(
+            core.agent_run_diagnostic(&task, Policy::granting(&[Capability::Diagnostic]), Diagnostic::PowerShellOs),
+            Err("WINDOW_ACCESS_DENIED")
+        );
+        let (text, truncated) = core
+            .agent_run_diagnostic(
+                &task,
+                Policy::granting(&[Capability::PowerShellDiagnostic]),
+                Diagnostic::PowerShellOs,
+            )
+            .unwrap();
+        assert!(!truncated);
+        let result: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(result.get("BuildNumber").and_then(serde_json::Value::as_str).is_some());
+    }
 
     #[test]
     #[ignore = "requires the published bridge and an interactive Windows session"]

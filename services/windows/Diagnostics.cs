@@ -6,7 +6,7 @@ using System.Text;
 using Protocol = Aiwin11.V1;
 
 /// ShellService.ExecuteApprovedCommand: a closed list of read-only Windows diagnostics, each a
-/// fixed System32 executable with fixed arguments. No shell, no argument from the model.
+/// fixed System32 executable with fixed arguments. PowerShell runs only a compiled-in query.
 static class Diagnostics
 {
     const int MaxOutput = 12_000;
@@ -17,6 +17,12 @@ static class Diagnostics
             Protocol.RunDiagnostic.Types.Diagnostic.Network => ("ipconfig.exe", "/all"),
             Protocol.RunDiagnostic.Types.Diagnostic.Wifi => ("netsh.exe", "wlan show interfaces"),
             Protocol.RunDiagnostic.Types.Diagnostic.Time => ("w32tm.exe", "/query /status"),
+            Protocol.RunDiagnostic.Types.Diagnostic.PowerShellOs =>
+                (@"WindowsPowerShell\v1.0\powershell.exe",
+                 "-NoLogo -NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'Stop'; " +
+                 "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+                 "Get-CimInstance -ClassName Win32_OperatingSystem | " +
+                 "Select-Object Caption,Version,BuildNumber | ConvertTo-Json -Compress\""),
             _ => null,
         };
 
@@ -34,7 +40,8 @@ static class Diagnostics
             RedirectStandardError = true,
             CreateNoWindow = true,
             WorkingDirectory = Environment.SystemDirectory,
-            StandardOutputEncoding = Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage),
+            StandardOutputEncoding = diagnostic == Protocol.RunDiagnostic.Types.Diagnostic.PowerShellOs
+                ? Encoding.UTF8 : Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage),
         };
         try
         {
@@ -49,6 +56,8 @@ static class Diagnostics
                 return null;
             }
             var text = new string(output.Result.Where(c => c == '\n' || !char.IsControl(c)).ToArray()).Trim();
+            if (diagnostic == Protocol.RunDiagnostic.Types.Diagnostic.PowerShellOs && (process.ExitCode != 0 || text.Length == 0))
+                return null;
             return text.Length <= MaxOutput ? (text, false) : (text[..MaxOutput], true);
         }
         catch (Exception error) when (error is Win32Exception or InvalidOperationException or IOException)

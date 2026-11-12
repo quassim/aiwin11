@@ -79,6 +79,7 @@ pub enum CapabilityName {
     Delegation,
     ScreenCapture,
     ProcessStop,
+    PowerShellDiagnostic,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -109,7 +110,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 35] = [
+pub const MANIFESTS: [ToolManifest; 36] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -614,6 +615,20 @@ pub const MANIFESTS: [ToolManifest; 35] = [
         reversibility: R::Irreversible,
         timeout_ms: 20_000,
         capabilities: &[C::ProcessStop],
+    },
+    ToolManifest {
+        action: AgentAction::PowerShellDiagnostic,
+        tool: "run_powershell_diagnostic",
+        version: 1,
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 15_000,
+        capabilities: &[C::PowerShellDiagnostic],
     },
 ];
 

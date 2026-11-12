@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
 type Routine = { id: string; text: string; createdAt: string; schedule?: string };
-type WorkflowStep = { text: string; onFailure: boolean };
+type WorkflowStep = { text: string; onFailure: boolean; branches?: [number, number] };
 const workflowHeader = "Exécute ces étapes dans l’ordre. Si une étape échoue, arrête-toi et explique pourquoi.";
 const failurePrefix = "[si échec] ";
 const maxRoutineChars = 1000;
@@ -20,7 +20,10 @@ const weekdays = [
 function formatWorkflow(steps: WorkflowStep[]) {
   return [
     workflowHeader,
-    ...steps.map((step, index) => `${index + 1}. ${step.onFailure ? failurePrefix : ""}${step.text.trim()}`),
+    ...steps.map(
+      (step, index) =>
+        `${index + 1}. ${step.onFailure ? failurePrefix : ""}${step.branches ? `[suite:${step.branches.join("/")}] ` : ""}${step.text.trim()}`,
+    ),
   ].join("\n");
 }
 
@@ -45,6 +48,7 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
         (index > 0 || !step.onFailure) &&
         step.text.trim() &&
         !step.text.trim().startsWith(failurePrefix) &&
+        !step.text.trim().startsWith("[suite:") &&
         !/[\r\n\0]/.test(step.text),
     ) && workflowLength <= maxRoutineChars;
 
@@ -80,7 +84,11 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
         .map((line) => {
           const text = line.replace(/^\d+\. /, "");
           const onFailure = text.startsWith(failurePrefix);
-          return { text: onFailure ? text.slice(failurePrefix.length) : text, onFailure };
+          const body = onFailure ? text.slice(failurePrefix.length) : text;
+          const route = /^\[suite:(\d+)\/(\d+)\] (.*)$/.exec(body);
+          return route
+            ? { text: route[3], onFailure, branches: [Number(route[1]), Number(route[2])] }
+            : { text: body, onFailure };
         }),
     );
     setStatus("");
@@ -114,6 +122,23 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
       [next[index], next[target]] = [next[target], next[index]];
       return next;
     });
+  }
+
+  function updateStep(index: number, change: Partial<WorkflowStep>) {
+    setSteps((current) => current?.map((step, position) => (position === index ? { ...step, ...change } : step)));
+  }
+
+  function removeStep(index: number) {
+    const adjust = (target: number) => (target === index + 1 ? 0 : target > index + 1 ? target - 1 : target);
+    setSteps((current) =>
+      current
+        ?.filter((_, position) => position !== index)
+        .map((step, position) => ({
+          ...step,
+          onFailure: position > 0 && step.onFailure,
+          branches: step.branches && [adjust(step.branches[0]), adjust(step.branches[1])],
+        })),
+    );
   }
 
   async function remove(id: string) {
@@ -159,68 +184,129 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
       {steps && (
         <fieldset className="task-form" disabled={saving}>
           <legend>{editing ? "Modifier le workflow" : "Nouveau workflow"}</legend>
-          <p>Les étapes s’exécutent avec Ollama. Ajoute une étape « Si échec » juste après l’action à traiter.</p>
-          {steps.map((step, index) => (
-            <div key={index} className="task-form">
-              <label htmlFor={`workflow-step-${index}`}>Étape {index + 1}</label>
-              <input
-                id={`workflow-step-${index}`}
-                value={step.text}
-                maxLength={maxRoutineChars}
-                onChange={(event) =>
-                  setSteps(
-                    steps.map((value, position) =>
-                      position === index ? { ...value, text: event.target.value } : value,
-                    ),
-                  )
-                }
-              />
-              {(index > 0 || step.onFailure) && (
-                <label className="approval">
+          <p>
+            Les étapes s’exécutent avec Ollama. Un branchement direct peut mener à une étape suivante ou terminer le
+            parcours. Un refus d’autorisation arrête le workflow.
+          </p>
+          <ol className="workflow-nodes" aria-label="Parcours du workflow">
+            {steps.map((step, index) => (
+              <li key={index} className="workflow-node">
+                <p className="workflow-transition">
+                  {index === 0
+                    ? "Départ"
+                    : step.onFailure
+                      ? "Après un échec ou un branchement direct"
+                      : "Après une réussite ou un branchement direct"}
+                </p>
+                <div className="task-form workflow-step">
+                  <label htmlFor={`workflow-step-${index}`}>Étape {index + 1}</label>
                   <input
-                    type="checkbox"
-                    checked={step.onFailure}
-                    disabled={index === 0 && !step.onFailure}
+                    id={`workflow-step-${index}`}
+                    value={step.text}
+                    maxLength={maxRoutineChars}
                     onChange={(event) =>
                       setSteps(
                         steps.map((value, position) =>
-                          position === index ? { ...value, onFailure: event.target.checked } : value,
+                          position === index ? { ...value, text: event.target.value } : value,
                         ),
                       )
                     }
                   />
-                  <span>Si échec de la dernière étape exécutée</span>
-                </label>
-              )}
-              <div>
-                <button type="button" disabled={index === 0} onClick={() => moveStep(index, -1)}>
-                  Monter
-                </button>
-                <button type="button" disabled={index === steps.length - 1} onClick={() => moveStep(index, 1)}>
-                  Descendre
-                </button>
-                {editing && index > 0 && (
-                  <button
-                    type="button"
-                    disabled={!canSaveWorkflow || step.onFailure}
-                    onClick={() => {
-                      onPick(formatWorkflow(steps.slice(index)));
-                      setStatus(`Reprise préparée depuis l’étape ${index + 1}. Vérifie la demande avant de l’envoyer.`);
-                    }}
-                  >
-                    Préparer la reprise ici
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={steps.length === 1}
-                  onClick={() => setSteps(steps.filter((_, position) => position !== index))}
-                >
-                  Retirer
-                </button>
-              </div>
-            </div>
-          ))}
+                  {(index > 0 || step.onFailure) && (
+                    <label className="approval">
+                      <input
+                        type="checkbox"
+                        checked={step.onFailure}
+                        disabled={index === 0 && !step.onFailure}
+                        onChange={(event) =>
+                          setSteps(
+                            steps.map((value, position) =>
+                              position === index ? { ...value, onFailure: event.target.checked } : value,
+                            ),
+                          )
+                        }
+                      />
+                      <span>Si échec de la dernière étape exécutée</span>
+                    </label>
+                  )}
+                  <label className="approval">
+                    <input
+                      type="checkbox"
+                      checked={!!step.branches}
+                      onChange={(event) =>
+                        updateStep(index, {
+                          branches: event.target.checked ? [index + 1 < steps.length ? index + 2 : 0, 0] : undefined,
+                        })
+                      }
+                    />
+                    <span>Choisir les étapes suivantes</span>
+                  </label>
+                  {step.branches &&
+                    ([0, 1] as const).map((branch) => (
+                      <label key={branch}>
+                        {branch === 0 ? "En cas de réussite" : "En cas d’échec"}
+                        <select
+                          value={step.branches?.[branch]}
+                          onChange={(event) => {
+                            const target = Number(event.target.value);
+                            const [success, failure] = step.branches!;
+                            updateStep(index, { branches: branch === 0 ? [target, failure] : [success, target] });
+                          }}
+                        >
+                          <option value={0}>Terminer</option>
+                          {steps.slice(index + 1).map((_, relative) => (
+                            <option key={relative} value={index + relative + 2}>
+                              Étape {index + relative + 2}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  <div>
+                    <button
+                      type="button"
+                      disabled={index === 0 || steps.some((step) => step.branches)}
+                      onClick={() => moveStep(index, -1)}
+                    >
+                      Monter
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === steps.length - 1 || steps.some((step) => step.branches)}
+                      onClick={() => moveStep(index, 1)}
+                    >
+                      Descendre
+                    </button>
+                    {editing && index > 0 && (
+                      <button
+                        type="button"
+                        disabled={!canSaveWorkflow || step.onFailure}
+                        onClick={() => {
+                          const rebase = (target: number) => (target === 0 ? 0 : target - index);
+                          onPick(
+                            formatWorkflow(
+                              steps.slice(index).map((step) => ({
+                                ...step,
+                                branches: step.branches && [rebase(step.branches[0]), rebase(step.branches[1])],
+                              })),
+                            ),
+                          );
+                          setStatus(
+                            `Reprise préparée depuis l’étape ${index + 1}. Vérifie la demande avant de l’envoyer.`,
+                          );
+                        }}
+                      >
+                        Préparer la reprise ici
+                      </button>
+                    )}
+                    <button type="button" disabled={steps.length === 1} onClick={() => removeStep(index)}>
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
           <p>
             {workflowLength} / {maxRoutineChars} caractères
           </p>

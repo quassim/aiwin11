@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 type Job =
   | { status: "idle" | "submitting" | "queued" }
   | { status: "completed"; filename: string }
-  | { status: "failed"; code: string };
+  | { status: "failed"; code: string; canResume: boolean };
 
 const errors: Record<string, string> = {
   VIDEO_INVALID: "Vérifie le port et la description de la vidéo.",
@@ -18,6 +18,8 @@ const errors: Record<string, string> = {
   VIDEO_OUTPUT_MISSING: "ComfyUI a terminé sans produire le MP4 attendu.",
   VIDEO_TIMEOUT: "Le suivi a expiré. Consulte la file de ComfyUI pour connaître l’état de la génération.",
   VIDEO_BUSY: "Une génération est déjà suivie.",
+  VIDEO_TRACKING_PENDING: "Une vidéo soumise à ComfyUI attend la reprise du suivi.",
+  VIDEO_QUOTA_EXCEEDED: "Quatre tentatives d’envoi ont déjà été réservées dans les dernières 24 heures.",
 };
 
 export function Video({ onFinished }: { onFinished: () => void }) {
@@ -28,9 +30,11 @@ export function Video({ onFinished }: { onFinished: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const busy = submitting || job.status === "submitting" || job.status === "queued";
+  const pending = job.status === "failed" && job.canResume;
   const portNumber = Number(port);
   const canSubmit =
     !busy &&
+    !pending &&
     !!workflow.trim() &&
     !!prompt.trim() &&
     Number.isInteger(portNumber) &&
@@ -71,6 +75,19 @@ export function Video({ onFinished }: { onFinished: () => void }) {
       setJob({ status: "submitting" });
     } catch (failure) {
       setError(errors[String(failure)] ?? "La génération n’a pas pu démarrer.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function tracking(action: "resume_video" | "forget_video_tracking") {
+    setSubmitting(true);
+    setError("");
+    try {
+      await invoke(action);
+      setJob(await invoke<Job>("video_status"));
+    } catch (failure) {
+      setError(errors[String(failure)] ?? "Impossible de modifier le suivi.");
     } finally {
       setSubmitting(false);
     }
@@ -136,6 +153,23 @@ export function Video({ onFinished }: { onFinished: () => void }) {
           <p>{errors[job.code] ?? "La génération n’a pas pu être confirmée."}</p>
         ) : null}
       </div>
+      {pending && (
+        <div className="section-header">
+          <button disabled={busy} onClick={() => void tracking("resume_video")}>
+            Reprendre le suivi
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              if (window.confirm("Oublier le suivi ? Le travail peut encore continuer dans ComfyUI.")) {
+                void tracking("forget_video_tracking");
+              }
+            }}
+          >
+            Oublier le suivi
+          </button>
+        </div>
+      )}
     </section>
   );
 }

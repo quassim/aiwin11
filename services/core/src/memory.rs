@@ -5,7 +5,7 @@
 use std::{ptr, slice};
 
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use windows_sys::Win32::{
     Foundation::LocalFree,
@@ -19,6 +19,8 @@ type StoredEntry = (String, String, Vec<u8>, Option<String>);
 
 pub const MAX_NOTE_CHARS: usize = 1000;
 pub const MAX_NOTES: u32 = 200;
+const MAX_INDEXED_FILES: usize = 32;
+const MAX_INDEXED_CHARS: usize = 4000;
 const ENTROPY: &[u8] = b"AiWin11.memory.v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -30,6 +32,12 @@ pub struct MemoryEntry {
     /// Local time "HH:MM", optionally followed by "@12345" for selected weekdays.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct IndexedFile {
+    pub name: String,
+    pub excerpt: String,
 }
 
 pub fn valid_schedule(value: &str) -> bool {
@@ -166,6 +174,72 @@ pub(crate) fn rank(
 }
 
 impl Core {
+    pub fn index_file(&mut self, files: &crate::local_files::LocalFiles, name: &str) -> Result<(), &'static str> {
+        let excerpt: String = files.preview(self, name)?.chars().take(MAX_INDEXED_CHARS).collect();
+        if excerpt.trim().is_empty() {
+            return Err("MEMORY_INVALID");
+        }
+        let document = IndexedFile { name: name.into(), excerpt };
+        let json = serde_json::to_vec(&document).map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let cipher = protect(&json).ok_or("MEMORY_UNAVAILABLE")?;
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let entries = Self::indexed_entries(&tx)?;
+        let existing = entries.iter().find(|(_, file)| file.name.eq_ignore_ascii_case(name));
+        if existing.is_none() && entries.len() >= MAX_INDEXED_FILES {
+            return Err("MEMORY_FULL");
+        }
+        let id = existing.map(|(id, _)| id.clone()).unwrap_or_else(|| Uuid::new_v4().to_string());
+        tx.execute(
+            "INSERT INTO memory_entries (id, content, kind) VALUES (?1, ?2, 'indexed_file')
+             ON CONFLICT(id) DO UPDATE SET content = excluded.content",
+            params![id, cipher],
+        )
+        .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        tx.execute(
+            "INSERT INTO events (id, session_id, kind, source) VALUES (?1, ?2, 'memory.file.indexed', 'core')",
+            params![Uuid::new_v4().to_string(), self.session_id],
+        )
+        .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        tx.commit().map_err(|_| "MEMORY_UNAVAILABLE")
+    }
+
+    fn indexed_entries(db: &rusqlite::Connection) -> Result<Vec<(String, IndexedFile)>, &'static str> {
+        let mut statement = db
+            .prepare("SELECT id, content FROM memory_entries WHERE kind = 'indexed_file' ORDER BY rowid")
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)))
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let mut entries = Vec::new();
+        for row in rows {
+            let (id, cipher) = row.map_err(|_| "MEMORY_UNAVAILABLE")?;
+            if let Some(file) = unprotect(&cipher).and_then(|plain| serde_json::from_slice(&plain).ok()) {
+                entries.push((id, file));
+            }
+        }
+        Ok(entries)
+    }
+
+    pub fn indexed_file_names(&self) -> Result<Vec<String>, &'static str> {
+        Ok(Self::indexed_entries(&self.db)?.into_iter().map(|(_, file)| file.name).collect())
+    }
+
+    pub fn indexed_files(&self) -> Result<Vec<IndexedFile>, &'static str> {
+        Ok(Self::indexed_entries(&self.db)?.into_iter().map(|(_, file)| file).collect())
+    }
+
+    pub fn remove_indexed_file(&mut self, name: &str) -> Result<(), &'static str> {
+        let (id, _) = Self::indexed_entries(&self.db)?
+            .into_iter()
+            .find(|(_, file)| file.name == name)
+            .ok_or("MEMORY_NOT_FOUND")?;
+        self.forget(Some(&id))?;
+        Ok(())
+    }
+
     /// Optional local embedding model for semantic memory search (none: keyword search).
     pub fn embedding_model(&self) -> Option<String> {
         self.setting("memory.embedding_model")
@@ -229,7 +303,7 @@ impl Core {
         }
         let count: u32 = self
             .db
-            .query_row("SELECT COUNT(*) FROM memory_entries", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM memory_entries WHERE kind <> 'indexed_file'", [], |row| row.get(0))
             .map_err(|_| "MEMORY_UNAVAILABLE")?;
         if count >= MAX_NOTES {
             return Err("MEMORY_FULL");
@@ -298,7 +372,7 @@ impl Core {
     }
 
     /// Saved requests due now (local time), not yet run today; marks them as run.
-    pub fn take_due_routines(&mut self, startup: bool) -> Result<Vec<MemoryEntry>, &'static str> {
+    pub fn take_due_routine(&mut self, startup: bool) -> Result<Option<MemoryEntry>, &'static str> {
         let (today, now, weekday): (String, String, String) = self
             .db
             .query_row(
@@ -318,7 +392,6 @@ impl Core {
                     .is_some_and(|value| (startup && value == "startup") || schedule_due(value, &now, &weekday))
             })
             .collect();
-        let mut taken = Vec::new();
         for routine in due {
             let marked = self
                 .db
@@ -328,10 +401,10 @@ impl Core {
                 )
                 .map_err(|_| "MEMORY_UNAVAILABLE")?;
             if marked == 1 {
-                taken.push(routine);
+                return Ok(Some(routine));
             }
         }
-        Ok(taken)
+        Ok(None)
     }
 
     fn entries(&self, kind: &str) -> Result<Vec<MemoryEntry>, &'static str> {
@@ -372,10 +445,62 @@ impl Core {
     }
 }
 
+pub fn search_indexed_files(query: &str, mut files: Vec<IndexedFile>, model: Option<&str>) -> Vec<IndexedFile> {
+    let query = query.trim();
+    if query.is_empty() || query.chars().count() > MAX_NOTE_CHARS {
+        return Vec::new();
+    }
+    let vectors = model.and_then(|model| {
+        let texts =
+            std::iter::once(query.to_owned()).chain(files.iter().map(|file| file.excerpt.clone())).collect::<Vec<_>>();
+        crate::model_gateway::Ollama::connect().and_then(|ollama| ollama.embed(model, &texts)).ok()
+    });
+    let mut scores: Vec<_> = files
+        .drain(..)
+        .enumerate()
+        .filter_map(|(index, file)| {
+            let score = vectors.as_ref().map_or_else(
+                || keyword_score(query, &format!("{} {}", file.name, file.excerpt)),
+                |vectors| cosine(&vectors[0], &vectors[index + 1]),
+            );
+            (score > 0.0).then_some((score, file))
+        })
+        .collect();
+    scores.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scores.into_iter().take(8).map(|(_, file)| file).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn indexing_is_bounded_encrypted_and_removable() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-index-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("store.sqlite3");
+        let files = crate::local_files::LocalFiles::open(&directory).unwrap();
+        let mut core = Core::open(&path).unwrap();
+        std::fs::write(files.root().join("rapport.txt"), "État de la collection Zéphyrin").unwrap();
+        assert!(core.index_file(&files, "../rapport.txt").is_err());
+        core.index_file(&files, "rapport.txt").unwrap();
+        let results = search_indexed_files("Zéphyrin", core.indexed_files().unwrap(), None);
+        assert_eq!(results[0].name, "rapport.txt");
+        assert!(core.memories().unwrap().is_empty());
+        std::fs::write(files.root().join("rapport.txt"), "Nouveau rapport").unwrap();
+        core.index_file(&files, "rapport.txt").unwrap();
+        assert_eq!(core.indexed_file_names().unwrap(), ["rapport.txt"]);
+        assert_eq!(core.indexed_files().unwrap()[0].excerpt, "Nouveau rapport");
+        drop(core);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("Nouveau rapport"));
+        let mut core = Core::open(&path).unwrap();
+        core.remove_indexed_file("rapport.txt").unwrap();
+        assert!(core.indexed_files().unwrap().is_empty());
+        drop(core);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn notes_are_encrypted_at_rest_and_can_be_forgotten() {
@@ -422,22 +547,22 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let id = core.save_routine("Quel est l'état du PC ?").unwrap();
         assert_eq!(core.set_routine_schedule(&id, Some("25:00")), Err("SCHEDULE_INVALID"));
-        assert!(core.take_due_routines(false).unwrap().is_empty(), "not scheduled");
+        assert!(core.take_due_routine(false).unwrap().is_none(), "not scheduled");
         core.set_routine_schedule(&id, Some("00:00")).unwrap();
         assert_eq!(core.routines().unwrap()[0].schedule.as_deref(), Some("00:00"));
-        assert_eq!(core.take_due_routines(false).unwrap().len(), 1);
+        assert_eq!(core.take_due_routine(false).unwrap().unwrap().id, id);
         core.update_routine(&id, "Lis le rapport du PC.").unwrap();
         let updated = &core.routines().unwrap()[0];
         assert_eq!(updated.text, "Lis le rapport du PC.");
         assert_eq!(updated.schedule.as_deref(), Some("00:00"));
-        assert!(core.take_due_routines(false).unwrap().is_empty(), "once per day");
+        assert!(core.take_due_routine(false).unwrap().is_none(), "once per day");
         core.set_routine_schedule(&id, Some("00:00@0123456")).unwrap();
-        assert!(core.take_due_routines(false).unwrap().is_empty(), "editing keeps today's execution");
+        assert!(core.take_due_routine(false).unwrap().is_none(), "editing keeps today's execution");
         let startup = core.save_routine("Vérifie l’état du PC").unwrap();
         core.set_routine_schedule(&startup, Some("startup")).unwrap();
-        assert!(core.take_due_routines(false).unwrap().is_empty());
-        assert_eq!(core.take_due_routines(true).unwrap()[0].id, startup);
-        assert!(core.take_due_routines(true).unwrap().is_empty());
+        assert!(core.take_due_routine(false).unwrap().is_none());
+        assert_eq!(core.take_due_routine(true).unwrap().unwrap().id, startup);
+        assert!(core.take_due_routine(true).unwrap().is_none());
         core.save_report("Tout va bien").unwrap();
         assert_eq!(core.reports().unwrap()[0].text, "Tout va bien");
         assert!(core.memories().unwrap().is_empty() && core.routines().unwrap().len() == 2);

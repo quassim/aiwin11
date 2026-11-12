@@ -9,6 +9,13 @@
 .PARAMETER Tauri
   Also builds the release desktop executable (slower).
 
+.PARAMETER Ipc
+  Runs the Windows gRPC named-pipe transport probe.
+
+.PARAMETER CloudVendor
+  Runs T-003 with the selected provider and the saved Windows credential.
+  Sends one synthetic prompt and may use paid tokens. Requires CloudModel.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
   powershell -ExecutionPolicy Bypass -File scripts/verify.ps1 -Live -Tauri
@@ -16,11 +23,15 @@
 param(
     [switch]$Live,
     [switch]$Tauri,
+    [switch]$Ipc,
+    [ValidateSet('openai', 'deepseek', 'gemini', 'anthropic')][string]$CloudVendor,
+    [string]$CloudModel,
     [string]$Model = 'qwen3:8b',
     [string]$VisionModel = 'gemma3:4b'
 )
 
 $ErrorActionPreference = 'Stop'
+if ([bool]$CloudVendor -ne [bool]$CloudModel) { throw 'Pass CloudVendor and CloudModel together for T-003.' }
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $env:Path = "$env:ProgramFiles\nodejs;$env:Path"
@@ -55,6 +66,23 @@ Step 'Pont .NET' { dotnet build services/windows/AiWin11.Windows.csproj --config
 Step 'Assistant administrateur .NET' { dotnet build services/admin/AiWin11.Admin.csproj --configuration Release -nologo -v q }
 Step 'Tests Rust' { cargo test --locked -p aiwin11-core }
 Step 'Clippy' { cargo clippy --locked --workspace --all-targets -- -D warnings }
+
+if ($Ipc) {
+    Step 'Transport gRPC Windows' { dotnet run --project services/ipc-probe/AiWin11.IpcProbe.csproj --configuration Release }
+    Step 'Services gRPC Rust' { cargo test --locked -p aiwin11-model-ipc }
+}
+
+if ($CloudVendor) {
+    $env:AIWIN11_TEST_CLOUD_VENDOR = $CloudVendor
+    $env:AIWIN11_TEST_CLOUD_MODEL = $CloudModel
+    try {
+        Step 'T-003 fournisseur cloud réel' {
+            cargo test --locked -p aiwin11-model-ipc grpc_catalog_contract_in_another_process
+        }
+    } finally {
+        Remove-Item Env:AIWIN11_TEST_CLOUD_VENDOR, Env:AIWIN11_TEST_CLOUD_MODEL
+    }
+}
 
 if ($Live) {
     $env:AIWIN11_TEST_MODEL = $Model

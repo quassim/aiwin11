@@ -1,0 +1,26 @@
+[package]
+name = "aiwin11-model-ipc"
+version = "0.1.0"
+edition = "2021"
+
+[target.'cfg(windows)'.dependencies]
+aiwin11-core = { path = "../core" }
+aiwin11-contracts = { path = "../../contracts/rust" }
+hyper-util = { version = "=0.1.21", features = ["tokio"] }
+prost = "=0.14.1"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+tokio = { version = "=1.54.1", features = ["macros", "net", "process", "rt", "sync", "time"] }
+tokio-stream = "=0.1.18"
+tonic = { version = "=0.14.2", features = ["transport"] }
+tonic-prost = "=0.14.2"
+tower = { version = "=0.5.3", features = ["util"] }
+uuid = { version = "=1.19.0", features = ["v4"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Authorization", "Win32_System_Pipes", "Win32_System_Threading"] }
+
+[build-dependencies]
+protoc-bin-vendored = "=3.2.0"
+tonic-prost-build = "=0.14.2"
+
+[dev-dependencies]
+tempfile = "=3.27.0"

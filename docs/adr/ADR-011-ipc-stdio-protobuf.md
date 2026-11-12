@@ -30,3 +30,5 @@ Raisons :
 ## Quand revenir à ADR-007
 
 Passer à des services séparés (gRPC sur canaux nommés avec ACL par utilisateur) quand l’un de ces besoins apparaît : un agent permanent en arrière-plan sans fenêtre, plusieurs clients (overlay séparé, autre application), ou l’isolation du broker dans un processus distinct de la WebView.
+
+R4 utilise gRPC pour l’initialisation de session, le cœur des tâches, le broker, le journal et la passerelle de modèles. Chaque canal nommé est réservé au compte courant et ses deux extrémités vérifient leur PID. Le broker parle au pont .NET sur Protobuf et les flux privés du processus enfant. L’agent Python, l’assistant élevé et les serveurs MCP utilisent aussi leurs flux privés.

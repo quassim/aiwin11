@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package aiwin11.model.v1;
+
+service CoreSession {
+  rpc Initialize (InitializeSession) returns (InitializedSession);
+}
+
+message InitializeSession {
+  uint32 schema_version = 1;
+}
+
+message InitializedSession {
+  string session_id = 1;
+}
+
+service ExecutionBroker {
+  rpc Dispatch (BrokerRequest) returns (BrokerReply);
+}
+
+message BrokerRequest {
+  enum Peer {
+    UNKNOWN = 0;
+    AGENT = 1;
+    DESKTOP_INSPECTOR = 2;
+  }
+  Peer peer = 1;
+  uint32 capability_bits = 2;
+  bytes command = 3; // aiwin11.v1.Command
+  bool execute_windows = 4;
+}
+
+message BrokerReply {
+  enum Status {
+    UNKNOWN = 0;
+    AUTHORIZED = 1;
+    DENIED = 2;
+    AUDIT_UNAVAILABLE = 3;
+  }
+  Status status = 1;
+  optional string task_id = 2;
+  bytes windows_result = 3; // aiwin11.v1.Result, if the bridge reported an outcome
+  string denial_code = 4;
+}
+
+service TaskHost {
+  rpc Start (TaskStart) returns (TaskAck);
+  rpc Page (TaskCursor) returns (TaskPage);
+  rpc Control (TaskControl) returns (TaskAck);
+}
+
+message TaskStart {
+  string run_id = 1;
+  bytes request_json = 2;
+}
+
+message TaskCursor {
+  string run_id = 1;
+  uint32 after_sequence = 2;
+}
+
+message TaskPage {
+  uint32 sequence = 1;
+  repeated bytes updates_json = 2;
+  optional bytes outcome_json = 3;
+  optional string error = 4;
+}
+
+message TaskControl {
+  enum Action {
+    UNSPECIFIED = 0;
+    CANCEL = 1;
+    PAUSE = 2;
+    RESUME = 3;
+    STOP = 4;
+    APPROVE = 5;
+    DECLINE = 6;
+  }
+  string run_id = 1;
+  Action action = 2;
+  string approval_id = 3;
+}
+
+message TaskAck {
+  bool accepted = 1;
+  string code = 2;
+}
+
+service Journal {
+  rpc Read (JournalRequest) returns (JournalReply);
+}
+
+message JournalRequest {
+  uint32 schema_version = 1;
+  string session_id = 2;
+  optional uint64 after_sequence = 3;
+}
+
+message JournalReply {
+  repeated JournalEvent events = 1;
+}
+
+message JournalEvent {
+  uint64 sequence = 1;
+  string kind = 2;
+  string timestamp = 3;
+  optional string task_id = 4;
+  optional string code = 5;
+}
+
+service ModelCatalog {
+  rpc ListLocalModels (ListLocalModelsRequest) returns (ListLocalModelsReply);
+  rpc ListLmStudioModels (ListLocalModelsRequest) returns (ListLocalModelsReply);
+  rpc ListLoadedModels (ListLocalModelsRequest) returns (ListLoadedModelsReply);
+  rpc RouteLocalModel (RouteLocalModelRequest) returns (RouteLocalModelReply);
+  rpc ProposeLocal (LocalProposalRequest) returns (stream LocalProposalUpdate);
+  rpc ProposeCloud (CloudProposalRequest) returns (stream LocalProposalUpdate);
+}
+
+message CloudProposalRequest {
+  uint32 schema_version = 1;
+  string vendor = 2;
+  string model = 3;
+  bytes messages_json = 4;
+}
+
+message LocalProposalRequest {
+  uint32 schema_version = 1;
+  string model = 2;
+  // Ollama's message and tool schemas, prepared by the trusted core.
+  bytes messages_json = 3;
+  bytes tools_json = 4;
+  string runtime = 5;
+}
+
+message LocalProposalUpdate {
+  oneof update {
+    string delta = 1;
+    bytes proposal_json = 2;
+  }
+  uint64 used_tokens = 3;
+}
+
+message RouteLocalModelRequest {
+  uint32 schema_version = 1;
+  string strategy = 2;
+  string preferred = 3;
+  repeated string excluded = 4;
+}
+
+message RouteLocalModelReply {
+  optional string selected_model = 1;
+}
+
+message ListLocalModelsRequest {
+  uint32 schema_version = 1;
+}
+
+message ListLocalModelsReply {
+  repeated string names = 1;
+}
+
+message ListLoadedModelsReply {
+  repeated LoadedModel models = 1;
+}
+
+message LoadedModel {
+  string name = 1;
+  uint64 size = 2;
+  uint64 size_vram = 3;
+}

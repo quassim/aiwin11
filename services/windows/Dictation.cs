@@ -6,11 +6,26 @@ using Protocol = Aiwin11.V1;
 /// the user's click in the main window; listens to the default microphone for one phrase.
 static class Dictation
 {
-    public static Protocol.DictationResult Listen(uint maxSeconds, long deadlineMs)
+    public static Protocol.SpeechRecognizerList List()
+    {
+        var result = new Protocol.SpeechRecognizerList();
+        foreach (var info in SpeechRecognitionEngine.InstalledRecognizers().Take(32))
+        {
+            if (info.Id.Length is < 1 or > 512 || info.Id.Any(char.IsControl)) continue;
+            result.Recognizers.Add(new Protocol.SpeechRecognizer {
+                Id = info.Id, Label = info.Description, Language = info.Culture.Name
+            });
+        }
+        return result;
+    }
+
+    public static Protocol.DictationResult Listen(uint maxSeconds, long deadlineMs, string recognizerId)
     {
         var result = new Protocol.DictationResult();
         var recognizers = SpeechRecognitionEngine.InstalledRecognizers();
-        var info = recognizers.FirstOrDefault(r => r.Culture.TwoLetterISOLanguageName == CultureInfo.CurrentUICulture.TwoLetterISOLanguageName)
+        var info = recognizerId.Length != 0
+            ? recognizers.FirstOrDefault(r => string.Equals(r.Id, recognizerId, StringComparison.Ordinal))
+            : recognizers.FirstOrDefault(r => r.Culture.TwoLetterISOLanguageName == CultureInfo.CurrentUICulture.TwoLetterISOLanguageName)
                    ?? recognizers.FirstOrDefault(r => r.Culture.TwoLetterISOLanguageName == "fr")
                    ?? recognizers.FirstOrDefault();
         if (info is null)

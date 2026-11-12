@@ -1,0 +1,13 @@
+{
+  "identifier": "overlay-window",
+  "description": "The palette can show task status and transfer a draft to the desktop.",
+  "windows": ["overlay"],
+  "permissions": [
+    "allow-overlay-status",
+    "allow-overlay-dismiss",
+    "allow-overlay-open-workspace",
+    "allow-overlay-rendered",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

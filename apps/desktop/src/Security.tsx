@@ -84,6 +84,7 @@ const actionNames: Record<string, string> = {
   generateImage: "Générer une image (moteur local)",
   delegate: "Déléguer à un agent spécialisé",
   runDiagnostic: "Diagnostic Windows de la liste fermée (réseau, Wi-Fi, heure)",
+  powerShellDiagnostic: "Diagnostic PowerShell de la version Windows",
   remember: "Retenir une information (mémoire chiffrée)",
   recall: "Relire la mémoire",
   searchMemory: "Chercher dans la mémoire",

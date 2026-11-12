@@ -46,6 +46,39 @@ pub struct ModelPreferences {
     pub vision_model: String,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentModels {
+    pub office: String,
+    pub windows_admin: String,
+    pub development: String,
+    pub research: String,
+    pub multimedia: String,
+    pub read_only: String,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalRuntimePreferences {
+    pub runtime: model_gateway::LocalRuntime,
+    pub lm_studio_model: String,
+}
+
+impl AgentModels {
+    pub fn for_profile(&self, profile: policy::AgentProfile) -> Option<&str> {
+        let model = match profile {
+            policy::AgentProfile::General => "",
+            policy::AgentProfile::Office => self.office.as_str(),
+            policy::AgentProfile::WindowsAdmin => self.windows_admin.as_str(),
+            policy::AgentProfile::Development => self.development.as_str(),
+            policy::AgentProfile::Research => self.research.as_str(),
+            policy::AgentProfile::Multimedia => self.multimedia.as_str(),
+            policy::AgentProfile::ReadOnly => self.read_only.as_str(),
+        };
+        valid_model_name(model).then_some(model)
+    }
+}
+
 /// Default retention of the history (tasks, events) of past sessions, in days.
 pub const DEFAULT_RETENTION_DAYS: u32 = 90;
 /// Accepted retention range, in days.
@@ -63,6 +96,44 @@ pub struct AuditEntry {
     pub source: String,
     pub code: Option<String>,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<AuditPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum AuditPayload {
+    Provider { provider: &'static str },
+    TaskStep { current: u8, total: u8 },
+    RenderTime { elapsed_ms: u32 },
+}
+
+fn audit_payload(kind: &str, code: Option<&str>) -> Option<AuditPayload> {
+    let code = code?;
+    match kind {
+        "task.started" | "model.provider.unavailable" | "model.cloud.request" => {
+            let provider = match code {
+                "ollama" => "ollama",
+                "lm_studio" => "lm_studio",
+                "openai" => "openai",
+                "deepseek" => "deepseek",
+                "gemini" => "gemini",
+                "anthropic" => "anthropic",
+                _ => return None,
+            };
+            Some(AuditPayload::Provider { provider })
+        }
+        "task.progress" => {
+            let (current, total) = code.strip_prefix("step:")?.split_once('/')?;
+            let current = current.parse().ok()?;
+            let total = total.parse().ok()?;
+            (current > 0 && current <= total).then_some(AuditPayload::TaskStep { current, total })
+        }
+        "ui.ready" | "ui.navigation" | "ui.palette.ready" => {
+            Some(AuditPayload::RenderTime { elapsed_ms: code.strip_prefix("ms:")?.parse().ok()? })
+        }
+        _ => None,
+    }
 }
 
 /// Journal guard: event kinds, codes and task IDs are short machine codes. Anything else
@@ -195,7 +266,7 @@ pub fn matches_pattern(pattern: &str, name: &str) -> bool {
 }
 
 /// Public model identifiers as Ollama lists them: letters, digits and `-_.:/`, 1 to 256 bytes.
-fn valid_model_name(name: &str) -> bool {
+pub fn valid_model_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 256
         && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:/".contains(&byte))
@@ -217,6 +288,9 @@ const MIGRATIONS: [&str; 9] = [
 pub struct Core {
     db: Connection,
     session_id: String,
+    desktop_pid: u32,
+    #[cfg(windows)]
+    broker_transport: Option<broker::BrokerTransport>,
 }
 
 #[derive(Debug)]
@@ -277,6 +351,60 @@ pub struct TaskRecord {
 }
 
 impl Core {
+    pub fn local_runtime_preferences(&self) -> LocalRuntimePreferences {
+        self.setting("model.local_runtime")
+            .ok()
+            .flatten()
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn set_local_runtime_preferences(&mut self, preferences: LocalRuntimePreferences) -> Result<(), &'static str> {
+        if !preferences.lm_studio_model.is_empty() && !valid_model_name(&preferences.lm_studio_model) {
+            return Err("SETTINGS_INVALID");
+        }
+        let value = serde_json::to_string(&preferences).map_err(|_| "SETTINGS_INVALID")?;
+        let session = self.session_id().to_owned();
+        let transaction = self.db.transaction().map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('model.local_runtime', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [value],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+             VALUES (?1, ?2, 'settings.model.runtime.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, preferences.runtime.code()],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction.commit().map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+    /// The desktop owns session creation and migrations. The task worker joins that exact session.
+    pub fn attach_task_worker(path: &Path, session_id: &str, desktop_pid: u32) -> rusqlite::Result<Self> {
+        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        db.busy_timeout(Duration::from_secs(5))?;
+        db.pragma_update(None, "foreign_keys", true)?;
+        db.query_row("SELECT id FROM sessions WHERE id = ?1", [session_id], |_| Ok(()))?;
+        Ok(Self {
+            db,
+            session_id: session_id.to_owned(),
+            desktop_pid,
+            #[cfg(windows)]
+            broker_transport: None,
+        })
+    }
+
+    /// Close tasks left by a failed worker without retrying their effects.
+    pub fn recover_task_worker(&mut self) -> rusqlite::Result<()> {
+        let transaction = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::recover_interrupted_tasks(&transaction, &self.session_id, Some(&self.session_id))?;
+        transaction.commit()
+    }
+
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         let db = Connection::open(path)?;
         // Restore point: an existing store about to be migrated is copied first. A failed copy
@@ -315,21 +443,32 @@ impl Core {
             "INSERT INTO events (id, session_id, kind, source) VALUES (?1, ?2, 'session.started', 'core')",
             params![Uuid::new_v4().to_string(), session_id],
         )?;
-        Self::recover_interrupted_tasks(&transaction, &session_id)?;
+        Self::recover_interrupted_tasks(&transaction, &session_id, None)?;
         Self::apply_retention(&transaction, &session_id)?;
         transaction.commit()?;
-        Ok(Self { db, session_id })
+        Ok(Self {
+            db,
+            session_id,
+            desktop_pid: std::process::id(),
+            #[cfg(windows)]
+            broker_transport: None,
+        })
     }
 
     /// A task still in progress at startup was interrupted by a crash or a forced exit. It is
     /// closed as `interrupted` (its last state kept as outcome) and journaled in the new
     /// session. Nothing is re-run: a side effect that may have happened is never repeated.
-    fn recover_interrupted_tasks(transaction: &rusqlite::Transaction<'_>, session_id: &str) -> rusqlite::Result<()> {
+    fn recover_interrupted_tasks(
+        transaction: &rusqlite::Transaction<'_>,
+        session_id: &str,
+        only_session: Option<&str>,
+    ) -> rusqlite::Result<()> {
         let open: Vec<(String, String)> = {
             let mut statement = transaction.prepare(
-                "SELECT id, state FROM tasks WHERE state NOT IN ('completed', 'failed', 'cancelled', 'interrupted')",
+                "SELECT id, state FROM tasks WHERE (?1 IS NULL OR session_id = ?1)
+                 AND state NOT IN ('completed', 'failed', 'cancelled', 'interrupted')",
             )?;
-            let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            let rows = statement.query_map([only_session], |row| Ok((row.get(0)?, row.get(1)?)))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
         for (task, state) in open {
@@ -414,7 +553,57 @@ impl Core {
     /// provider is unreachable may continue with OpenAI, only before any step ran, only with
     /// the request's cloud approval and never in private mode. Off by default.
     pub fn cloud_fallback_enabled(&self) -> bool {
+        match self.local_strategy() {
+            LocalStrategy::LocalFirst => true,
+            LocalStrategy::Manual => self.legacy_cloud_fallback(),
+            _ => false,
+        }
+    }
+
+    pub fn legacy_cloud_fallback(&self) -> bool {
         matches!(self.setting("routing.cloud_fallback"), Ok(Some(value)) if value == "true")
+    }
+
+    pub fn agent_models(&self) -> AgentModels {
+        self.setting("routing.agent_models")
+            .ok()
+            .flatten()
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn set_agent_models(&mut self, models: AgentModels) -> Result<(), &'static str> {
+        if [
+            &models.office,
+            &models.windows_admin,
+            &models.development,
+            &models.research,
+            &models.multimedia,
+            &models.read_only,
+        ]
+        .into_iter()
+        .any(|model| !model.is_empty() && !valid_model_name(model))
+        {
+            return Err("SETTINGS_INVALID");
+        }
+        let value = serde_json::to_string(&models).map_err(|_| "SETTINGS_INVALID")?;
+        let transaction = self.db.transaction().map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('routing.agent_models', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [value],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+             VALUES (?1, ?2, 'settings.routing.agents.changed', 'core', 'saved')",
+                params![Uuid::new_v4().to_string(), self.session_id],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction.commit().map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
     /// Records what a tool-call probe established about a local model ([S1 §4.2] manifest).
@@ -497,6 +686,47 @@ impl Core {
             })
         })?;
         rows.collect()
+    }
+
+    #[cfg(windows)]
+    pub fn cloud_tool_capability_verified(&self, vendor: openai::Vendor, model: &str) -> bool {
+        self.db
+            .query_row(
+                "SELECT tool_calling FROM models WHERE provider = ?1 AND name = ?2",
+                params![vendor.code(), model],
+                |row| row.get::<_, String>(0),
+            )
+            .is_ok_and(|value| value == ToolCalling::Verified.code())
+    }
+
+    #[cfg(windows)]
+    pub fn record_cloud_tool_capability(
+        &self,
+        vendor: openai::Vendor,
+        model: &str,
+        verified: bool,
+    ) -> rusqlite::Result<()> {
+        if !valid_model_name(model) {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        self.db.execute(
+            "INSERT INTO models (id, provider, name, tool_calling, vision, probed_at)
+             VALUES (?1, ?2, ?3, ?4, 'not_advertised', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(id) DO UPDATE SET tool_calling = excluded.tool_calling,
+             probed_at = excluded.probed_at, updated_at = excluded.probed_at",
+            params![
+                format!("{}:{model}", vendor.code()),
+                vendor.code(),
+                model,
+                if verified { "verified" } else { "failed" }
+            ],
+        )?;
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub fn record_cloud_probe_usage(&self, tokens: u64) -> rusqlite::Result<()> {
+        self.audit(None, "model.usage", &format!("tokens:{tokens}"))
     }
 
     /// Local models whose last probe failed or that do not advertise tool calling: routing
@@ -714,6 +944,9 @@ impl Core {
 
     #[cfg(windows)]
     pub fn set_cloud_vendor(&mut self, vendor: openai::Vendor) -> Result<(), &'static str> {
+        if !self.cloud_vendor_enabled(vendor) {
+            return Err("CLOUD_PROVIDER_DISABLED");
+        }
         let session = self.session_id.clone();
         let write = |db: &mut Connection| -> rusqlite::Result<()> {
             let transaction = db.transaction()?;
@@ -731,6 +964,36 @@ impl Core {
             transaction.commit()
         };
         write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
+    #[cfg(windows)]
+    pub fn cloud_vendor_enabled(&self, vendor: openai::Vendor) -> bool {
+        match self.setting(&format!("cloud.disabled.{}", vendor.code())) {
+            Ok(None) => true,
+            Ok(Some(value)) => value == "false",
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn set_cloud_vendor_enabled(&mut self, vendor: openai::Vendor, enabled: bool) -> Result<(), &'static str> {
+        let session = self.session_id.clone();
+        let transaction = self.db.transaction().map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET
+             value = excluded.value, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                params![format!("cloud.disabled.{}", vendor.code()), if enabled { "false" } else { "true" }],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+             VALUES (?1, ?2, 'settings.cloud.provider.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, vendor.code()],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction.commit().map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
     /// The folder the user chose for the agent's file tools, if any (applied at startup).
@@ -944,15 +1207,19 @@ impl Core {
                 "SELECT sequence, id, session_id, task_id, kind, source, code, timestamp FROM events ORDER BY sequence",
             )?;
             let rows = statement.query_map([], |row| {
+                let kind: String = row.get(4)?;
+                let code: Option<String> = row.get(6)?;
+                let payload = audit_payload(&kind, code.as_deref());
                 Ok(AuditEntry {
                     sequence: row.get(0)?,
                     id: row.get(1)?,
                     session_id: row.get(2)?,
                     task_id: row.get(3)?,
-                    kind: row.get(4)?,
+                    kind,
                     source: row.get(5)?,
-                    code: row.get(6)?,
+                    code,
                     timestamp: row.get(7)?,
+                    payload,
                 })
             })?;
             rows.collect()
@@ -1026,6 +1293,23 @@ impl Core {
     pub fn record_ui_ready(&self, elapsed_ms: u64) -> rusqlite::Result<()> {
         self.db.execute(
             "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'ui.ready', 'desktop', ?3)",
+            params![Uuid::new_v4().to_string(), self.session_id, format!("ms:{elapsed_ms}")],
+        )?;
+        Ok(())
+    }
+
+    /// Records render latency only. Page names and user content stay out of the journal.
+    pub fn record_ui_navigation(&self, elapsed_ms: u32) -> rusqlite::Result<()> {
+        self.db.execute(
+            "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'ui.navigation', 'desktop', ?3)",
+            params![Uuid::new_v4().to_string(), self.session_id, format!("ms:{elapsed_ms}")],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_palette_ready(&self, elapsed_ms: u32) -> rusqlite::Result<()> {
+        self.db.execute(
+            "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'ui.palette.ready', 'desktop', ?3)",
             params![Uuid::new_v4().to_string(), self.session_id, format!("ms:{elapsed_ms}")],
         )?;
         Ok(())
@@ -1134,21 +1418,36 @@ impl Core {
     }
 
     pub fn activity(&self) -> rusqlite::Result<Vec<Activity>> {
-        let mut statement = self.db.prepare(
-            "SELECT sequence, kind, timestamp, task_id, code FROM events
-             WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 100",
-        )?;
-        let events = statement.query_map([&self.session_id], |row| {
-            Ok(Activity {
-                sequence: row.get(0)?,
-                kind: row.get(1)?,
-                timestamp: row.get(2)?,
-                task_id: row.get(3)?,
-                code: row.get(4)?,
-            })
-        })?;
-        events.collect()
+        read_activity(&self.db, &self.session_id, None)
     }
+}
+
+/// Reads committed audit records without starting a new core session or running migrations.
+pub fn read_committed_activity(path: &Path, session: &str, after: Option<u64>) -> rusqlite::Result<Vec<Activity>> {
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    db.busy_timeout(Duration::from_secs(2))?;
+    read_activity(&db, session, after)
+}
+
+fn read_activity(db: &Connection, session: &str, after: Option<u64>) -> rusqlite::Result<Vec<Activity>> {
+    let sql = if after.is_some() {
+        "SELECT sequence, kind, timestamp, task_id, code FROM events
+         WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT 100"
+    } else {
+        "SELECT sequence, kind, timestamp, task_id, code FROM events
+         WHERE session_id = ?1 AND ?2 IS NULL ORDER BY sequence DESC LIMIT 100"
+    };
+    let mut statement = db.prepare(sql)?;
+    let events = statement.query_map(params![session, after], |row| {
+        Ok(Activity {
+            sequence: row.get(0)?,
+            kind: row.get(1)?,
+            timestamp: row.get(2)?,
+            task_id: row.get(3)?,
+            code: row.get(4)?,
+        })
+    })?;
+    events.collect()
 }
 
 #[cfg(test)]
@@ -1223,6 +1522,43 @@ mod tests {
         assert_eq!(core.recent_tasks(10).unwrap().iter().find(|task| task.id == "a").unwrap().state, "interrupted");
         drop(core);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_failed_task_worker_can_be_replaced_within_the_same_session() {
+        let path = std::env::temp_dir().join(format!("aiwin11-worker-recovery-{}.sqlite3", Uuid::new_v4()));
+        let mut desktop = Core::open(&path).unwrap();
+        let session = desktop.session_id().to_owned();
+        let worker = Core::attach_task_worker(&path, &session, std::process::id()).unwrap();
+        worker.task_created("first").unwrap();
+        worker.task_state("first", "dispatching", None).unwrap();
+        drop(worker);
+
+        desktop.recover_task_worker().unwrap();
+        desktop.recover_task_worker().unwrap();
+        let replacement = Core::attach_task_worker(&path, &session, std::process::id()).unwrap();
+        replacement.task_created("second").unwrap();
+        let tasks = desktop.recent_tasks(10).unwrap();
+        let first = tasks.iter().find(|task| task.id == "first").unwrap();
+        assert_eq!(first.state, "interrupted");
+        assert_eq!(first.outcome.as_deref(), Some("dispatching"));
+        assert_eq!(tasks.iter().find(|task| task.id == "second").unwrap().state, "created");
+        assert_eq!(desktop.activity().unwrap().iter().filter(|event| event.kind == "task.recovered").count(), 1);
+        drop(replacement);
+        drop(desktop);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn audit_export_adds_only_recognized_structured_payloads() {
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        core.journal("task.progress", Some("step:2/16")).unwrap();
+        core.journal("model.provider.unavailable", Some("unrecognized")).unwrap();
+        core.record_ui_navigation(32).unwrap();
+        let events = serde_json::to_value(core.export_audit().unwrap()).unwrap();
+        assert_eq!(events[1]["payload"], serde_json::json!({"type":"taskStep","current":2,"total":16}));
+        assert!(events[2].get("payload").is_none());
+        assert_eq!(events[3]["payload"], serde_json::json!({"type":"renderTime","elapsedMs":32}));
     }
 
     #[test]
@@ -1432,8 +1768,30 @@ mod tests {
             (event.kind.as_str(), event.code.as_deref()),
             ("settings.routing.strategy.changed", Some("quality_first"))
         );
-        core.db.execute("UPDATE settings SET value = 'cloud_only' WHERE key = 'routing.local_strategy'", []).unwrap();
+        core.db.execute("UPDATE settings SET value = 'invalid' WHERE key = 'routing.local_strategy'", []).unwrap();
         assert_eq!(core.local_strategy(), LocalStrategy::Manual, "unknown codes fall back to manual");
+    }
+
+    #[test]
+    fn local_profiles_and_provider_capabilities_are_scoped() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        core.set_agent_models(AgentModels { office: "local:office".into(), ..Default::default() }).unwrap();
+        assert_eq!(core.agent_models().for_profile(policy::AgentProfile::Office), Some("local:office"));
+        assert_eq!(core.agent_models().for_profile(policy::AgentProfile::General), None);
+        assert_eq!(
+            core.set_agent_models(AgentModels { office: "not a model".into(), ..Default::default() }),
+            Err("SETTINGS_INVALID")
+        );
+        core.record_cloud_tool_capability(openai::Vendor::DeepSeek, "fixture", true).unwrap();
+        assert!(core.cloud_tool_capability_verified(openai::Vendor::DeepSeek, "fixture"));
+        assert!(!core.cloud_tool_capability_verified(openai::Vendor::OpenAi, "fixture"));
+        core.record_cloud_tool_capability(openai::Vendor::DeepSeek, "fixture", false).unwrap();
+        assert!(!core.cloud_tool_capability_verified(openai::Vendor::DeepSeek, "fixture"));
+        assert!(core.model_manifests().unwrap().is_empty());
+        core.set_local_strategy(LocalStrategy::LocalFirst).unwrap();
+        assert!(core.cloud_fallback_enabled());
+        core.set_local_strategy(LocalStrategy::LocalOnly).unwrap();
+        assert!(!core.cloud_fallback_enabled());
     }
 
     #[test]

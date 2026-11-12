@@ -31,6 +31,14 @@ pub struct McpServer {
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+fn enabled_by_default() -> bool {
+    true
 }
 
 pub fn valid_name(name: &str) -> bool {
@@ -42,13 +50,22 @@ pub fn valid_tool_name(name: &str) -> bool {
 }
 
 impl McpServer {
+    pub(crate) fn permits(&self, tool: &str) -> bool {
+        self.allowed_tools.as_ref().is_none_or(|tools| tools.iter().any(|allowed| allowed == tool))
+    }
+
     fn validated(self) -> Result<Self, &'static str> {
         let command = Path::new(&self.command);
         let ok = valid_name(&self.name)
             && command.is_absolute()
             && command.is_file()
+            && command.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
             && self.args.len() <= 16
-            && self.args.iter().all(|arg| arg.len() <= 512 && !arg.contains('\0'));
+            && self.args.iter().all(|arg| arg.len() <= 512 && !arg.contains('\0'))
+            && self
+                .allowed_tools
+                .as_ref()
+                .is_none_or(|tools| tools.len() <= 64 && tools.iter().all(|tool| valid_tool_name(tool)));
         ok.then_some(self).ok_or("MCP_SERVER_INVALID")
     }
 }
@@ -87,12 +104,13 @@ impl Core {
     }
 
     pub(crate) fn mcp_server(&self, name: &str) -> Option<McpServer> {
-        self.mcp_servers().into_iter().find(|server| server.name == name)
+        self.mcp_servers().into_iter().find(|server| server.enabled && server.name == name)
     }
 }
 
 /// Starts the server, initializes the session, sends one request and returns its result.
 pub(crate) fn request(server: &McpServer, method: &str, params: Value) -> Result<Value, &'static str> {
+    server.clone().validated()?;
     let mut process = Process::new(&server.command);
     process.args(&server.args).env_clear();
     for key in ["SystemRoot", "PATH", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"] {
@@ -154,7 +172,14 @@ pub(crate) fn request(server: &McpServer, method: &str, params: Value) -> Result
                 "clientInfo": { "name": "AiWin11", "version": env!("CARGO_PKG_VERSION") }
             }
         }))?;
-        answer(1)?;
+        let initialized = answer(1)?;
+        if !matches!(
+            initialized.get("protocolVersion").and_then(Value::as_str),
+            Some(PROTOCOL_VERSION | "2025-03-26" | "2024-11-05")
+        ) || !initialized.pointer("/capabilities/tools").is_some_and(Value::is_object)
+        {
+            return Err("MCP_PROTOCOL_ERROR");
+        }
         send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))?;
         send(json!({ "jsonrpc": "2.0", "id": 2, "method": method, "params": params }))?;
         answer(2)
@@ -173,6 +198,9 @@ pub(crate) fn list_tools(server: &McpServer) -> Result<String, &'static str> {
         .take(50)
         .filter_map(|tool| {
             let name = tool.get("name").and_then(Value::as_str).filter(|name| valid_tool_name(name))?;
+            if !server.permits(name) {
+                return None;
+            }
             let description: String =
                 tool.get("description").and_then(Value::as_str).unwrap_or("").chars().take(200).collect();
             let schema: String =
@@ -185,6 +213,9 @@ pub(crate) fn list_tools(server: &McpServer) -> Result<String, &'static str> {
 
 /// Calls one tool and returns its text content, bounded.
 pub(crate) fn call_tool(server: &McpServer, tool: &str, arguments: &Value) -> Result<String, &'static str> {
+    if !server.enabled || !server.permits(tool) {
+        return Err("MCP_TOOL_DISABLED");
+    }
     let result = request(server, "tools/call", json!({ "name": tool, "arguments": arguments }))?;
     let texts: Vec<&str> = result
         .get("content")
@@ -207,7 +238,13 @@ mod tests {
     fn servers_are_validated_before_being_stored() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let system = std::env::var("SystemRoot").unwrap();
-        let ok = McpServer { name: "demo".into(), command: format!(r"{system}\System32\where.exe"), args: vec![] };
+        let ok = McpServer {
+            name: "demo".into(),
+            command: format!(r"{system}\System32\where.exe"),
+            args: vec![],
+            enabled: true,
+            allowed_tools: None,
+        };
         core.set_mcp_servers(vec![ok.clone()]).unwrap();
         assert_eq!(core.mcp_server("demo"), Some(ok.clone()));
         for bad in [
@@ -224,7 +261,24 @@ mod tests {
     #[test]
     fn a_server_that_is_not_mcp_fails_cleanly() {
         let system = std::env::var("SystemRoot").unwrap();
-        let server = McpServer { name: "x".into(), command: format!(r"{system}\System32\where.exe"), args: vec![] };
+        let server = McpServer {
+            name: "x".into(),
+            command: format!(r"{system}\System32\where.exe"),
+            args: vec![],
+            enabled: true,
+            allowed_tools: None,
+        };
         assert!(list_tools(&server).is_err());
+    }
+
+    #[test]
+    fn legacy_mcp_entries_remain_enabled_and_restricted_tools_fail_before_start() {
+        let legacy = json!({"name":"demo","command":"unavailable.exe","args":[]});
+        let mut server: McpServer = serde_json::from_value(legacy).unwrap();
+        assert!(server.enabled && server.permits("read"));
+        server.allowed_tools = Some(vec!["read".into()]);
+        assert_eq!(call_tool(&server, "write", &json!({})), Err("MCP_TOOL_DISABLED"));
+        server.enabled = false;
+        assert_eq!(call_tool(&server, "read", &json!({})), Err("MCP_TOOL_DISABLED"));
     }
 }

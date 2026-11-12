@@ -19,9 +19,9 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | État | Lignes | Part |
 |---|---|---|
 | ✅ Terminé et validé | 53 | 29 % |
-| 🧪 Terminé, test utilisateur à faire | 21 | 12 % |
-| 🟡 Partiel | 90 | 50 % |
-| ❌ À faire | 16 | 9 % |
+| 🧪 Terminé, test utilisateur à faire | 23 | 13 % |
+| 🟡 Partiel | 89 | 49 % |
+| ❌ À faire | 15 | 8 % |
 
 Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance de test ci-dessous.
 
@@ -29,6 +29,9 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 
 À essayer dans l’application lancée, avec Ollama démarré ; une ligne passe à ✅ une fois essayée sans problème.
 
+- [ ] R1. Après un redémarrage de Windows, lancer `scripts/measure.ps1 -Runs 1` avant d’ouvrir AiWin11 et relever `ReadyFromStartMs`.
+- [ ] R1. Avec Narrateur ou NVDA, vérifier l’annonce du titre via le lien d’évitement, de la demande d’accord et du changement d’état après **Refuser**.
+- [ ] Architecture gRPC. Dans la release, lister les écrans dans **Inspecteur**, puis lancer une tâche avec approbation et vérifier l’action et le journal.
 - [ ] Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia)
 - [ ] Arrêt d’urgence
 - [ ] Tableau de bord
@@ -43,13 +46,14 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 - [ ] Service privilégié facultatif
 - [ ] Admin futur via composant dédié limité en durée et périmètre
 - [ ] Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`)
-- [ ] Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first 🧪, cost_optimized 🧪, adaptive 🧪 ; élimination (capacité d’appel d’outil, sonde) puis classement
+- [ ] Hub. Vérifier le modèle de l’agent Développement et la dictée avec un moteur SAPI choisi. Essayer LM Studio réel et les sondes Gemini et Claude avec leurs clés. Vérifier le mode Mixte avec et sans accord cloud, ainsi que la génération avec un modèle d’images choisi.
 - [ ] Aucun repli local → cloud en mode privé strict
 - [ ] Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud
 - [ ] Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud
 - [ ] « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées
 - [ ] « Stoppe toutes les tâches »
-- [ ] T-008
+- [ ] Lot C (AW-013 à AW-017). Inspecter et décrire une fenêtre avec le modèle local. Rechercher un contrôle, approuver un clic puis une saisie et vérifier le journal. Copier, renommer et mettre un fichier de test à la corbeille dans un dossier autorisé. Relancer AiWin11 après une tâche interrompue et vérifier son état dans l’historique.
+- [ ] PowerShell approuvé. Demander l’édition et le numéro de build de Windows via PowerShell, puis essayer **Autoriser** et **Refuser**.
 - [ ] Sous-points 🧪 des lignes partielles : applications interdites et fenêtres protégées (Sécurité), placement GPU, manifestes (débit, VRAM), modèle local de secours, fichiers protégés, sauvegardes et restauration, temps « interface prête », paramètres Windows dans l’état du PC
 
 ---
@@ -60,12 +64,12 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 |---|---|
 | Socle (lots A et B : AW-001 à AW-012) | ✅ Application Tauri, contrats Protobuf, broker, pont .NET, passerelle Ollama/OpenAI, agent, streaming, scénario « Ouvre le Bloc-notes » validé en réel |
 | Moteur de politiques, profils d’autonomie, approbations, simulation | ✅ |
-| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers texte/Markdown/CSV du dossier dédié ou choisi, lecture UIA de la fenêtre précédente avec clic et saisie sur un contrôle, recherche de contrôle 🧪, vision locale, opérations administrateur via l’assistant élevé ; redimensionnement 🧪, détail d’un processus 🧪, capture de l’écran pour l’agent 🧪, plusieurs dossiers 🧪, découverte des applications 🧪, arrêt d’un processus approuvé 🧪 ; manquent (périmètre fixé le 13/11) : souris/clavier en dernier recours, PowerShell depuis une liste fermée |
-| Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
+| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🧪 Inspection et recherche UIA, capture et vision locales, clic et saisie sur un contrôle avec recours Win32 ciblé, opérations sur les fichiers des dossiers autorisés, audit et reprise. Inclut la découverte des applications, l’organisation des fenêtres, le détail et l’arrêt approuvé d’un processus et le diagnostic PowerShell sur accord. |
+| Consolidation R1 | 🧪 Réglages, arrêt global, export, annulation gRPC, injections ciblées, fournisseur DeepSeek réel et parcours de refus dans la release validés. Premier rendu après redémarrage et annonces du lecteur d’écran à vérifier. |
 | Autorisations temporaires, manifestes d’outils | ✅ |
-| Architecture multi-processus gRPC [S1 §2–3] | 🔷 Décision ADR-011 : Protobuf sur stdio, un processus par commande (pont, agent, assistant, MCP) ; cœur et broker dans le processus Tauri ; retour à gRPC prévu si un service permanent devient nécessaire |
-| Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies locales `manual`, `adaptive`, `quality_first`, `cost_optimized` 🧪 et `local_first` avec secours cloud explicite, modèle local de secours 🧪, manifestes de modèles 🧪, placement GPU 🧪 ; budget en jetons ✅ et plafond de coût en euros 🧪 par demande cloud ; voix/image/vidéo par tâche 🟡, classement mixte local/cloud ❌ |
-| Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification ✅, raccourci global Ctrl+Alt+Espace ouvrant le champ de demande (palette simple) ✅ ; mode flottant (petite fenêtre toujours au premier plan) ✅ ; overlay contextuel dédié ❌ |
+| Architecture multi-processus gRPC [S1 §2–3] | 🧪 Cœur, broker, passerelle de modèles, pont Windows et agent dans des processus distincts de Tauri. Session, tâches, autorisations, modèles et journal sur gRPC local. Reprise par curseur et validation Windows automatisées. |
+| Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🧪 Routage local, cloud et mixte, registre de fournisseurs avec activation et sonde, modèles par agent dont Développement, dictée SAPI sélectionnable, voix et images. ComfyUI utilise le modèle du workflow. Nouveaux moteurs à essayer avec leurs configurations réelles. |
+| Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🧪 Terminé, test utilisateur à faire. Palette contextuelle dédiée, brouillon à relire, mode flottant, raccourcis globaux, menu de la zone de notification et notifications Windows. |
 | Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 Mémoire durable chiffrée (DPAPI) ✅, client MCP stdio (extensions déclarées, appel approuvé) ✅, recherche sémantique locale dans la mémoire ✅, synthèse vocale locale ✅, dictée locale (SAPI) ✅, génération d’images via un moteur local (API AUTOMATIC1111, non testée faute de moteur installé) ✅, demandes enregistrées et planifiées (quotidien, lecture seule) ✅ ; indexation de fichiers, MCP, voix, image, vidéo, workflows, multi-agents ❌ |
 | Distribution (installateur, mises à jour) | 🟡 Installateur NSIS par utilisateur (`scripts/package.ps1`) avec pont, assistant et agent embarqués, Python détecté automatiquement ; signature, mises à jour, Python/.NET embarqués ❌ |
 
@@ -85,12 +89,12 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Contrôle des logiciels (lancer, gérer) | 🟡 Bloc-notes seulement | R2 |
 | Contrôle des fenêtres | ✅ Lister, premier plan, réduire, restaurer, agrandir (jamais fermer) ; lecture de la fenêtre précédente | — |
 | Paramètres système | 🟡 Lecture ✅ dans `get_system_status` : thème clair/sombre, transparence, langue d’affichage, fuseau horaire, alimentation et batterie (testé en réel sur la machine de référence) ; modification ❌ | R2 (lecture) / R9 (modification, composant privilégié) |
-| Terminal / PowerShell | ❌ | R2 |
+| Terminal / PowerShell | 🧪 Diagnostic PowerShell de la version Windows, en lecture seule et sur accord | R2 |
 | Navigateur | ❌ | R6 (via MCP) ou R2 |
 | Périphériques | ❌ | R7+ |
 | Presse-papiers | ✅ Lecture et écriture de texte, accord à chaque fois (lecture réelle testée ; écriture réelle en test opt-in `AIWIN11_TEST_CLIPBOARD=1`) | — |
 | Automatisations | 🟡 Workflows enregistrés (8 étapes, branche après échec), planifiés par jour ou au démarrage, en lecture seule | R8 |
-| APIs natives, puis vision + souris/clavier | 🟡 APIs natives et UIA ; pas de souris/clavier génériques | R2 |
+| APIs natives, puis vision + souris/clavier | 🟡 APIs natives, UIA et recours Win32 ciblé 🧪. Entrée générique à développer. | R2 |
 | Providers locaux : Ollama ✅, LM Studio ❌ ; cloud : OpenAI ✅, Anthropic ❌, Google ❌ | 🟡 | R3 |
 | Sélection manuelle **ou routage automatique** | 🟡 Manuelle seulement | R3 |
 | Multimodal : texte ✅, voix STT/TTS ❌, image ❌, vidéo ❌, compréhension d’écran 🟡 (fenêtre), analyse de documents ❌, temps réel ❌ | 🟡 | R7 |
@@ -137,9 +141,9 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
 | M07 Déclencheurs ✅ (jours, démarrage), planification ✅, conditions 🟡 (branche après échec), tâches répétitives ✅, reprise sur erreur 🟡, éditeur visuel 🟡 | 🟡 | R8 |
 | M08 Installation, activation, mise à jour, permissions des plugins et serveurs MCP | 🟡 Serveurs MCP déclarés (exécutable et arguments fixes), appels toujours approuvés ; installation et mise à jour ❌ | R6 |
-| M09 App ✅, overlay, palette, barre système, notifications, thème, raccourcis, visualisation des agents 🟡 | 🟡 | R5 |
+| M09 App ✅, overlay, palette, barre système, notifications et raccourcis 🧪, thème et visualisation des agents 🟡 | 🟡 | R5 |
 | M10 Journaux 🟡, suivi des coûts, statistiques modèles, traces d’agents 🟡, ressources, diagnostics | 🟡 | R9 |
-| Ordre d’exécution : API native → API appli → UIA → vision + souris/clavier → script contrôlé ; **changer de méthode sans élargir les autorisations** | 🟡 API native et UIA seulement | R2 |
+| Ordre d’exécution : API native → API appli → UIA → vision + souris/clavier → script contrôlé ; **changer de méthode sans élargir les autorisations** | 🟡 Recours Win32 ciblé après UIA 🧪. Chaînage avec la vision à développer. | R2 |
 | Passerelle : modalités (dont **embeddings**), contraintes (VRAM, latence, coût, confidentialité, **quotas**), politiques de routage, détection réelle des capacités | 🟡 | R3 |
 | Configuration YAML validée par schéma, générée par l’UI (execution_mode, privacy_mode, providers, routage par tâche, require_approval_for) | ❌ | R3 |
 | Décision = identité + action + ressource + contexte + risque → ALLOW/DENY/ASK/SIMULATE | 🟡 Action, profil, contexte et risque du manifeste (journalisé avec chaque décision) ; ressource : fichiers protégés, fenêtres protégées et applications interdites refusés à l’exécution 🧪, serveurs MCP à venir | R2 |
@@ -168,18 +172,18 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 
 | Point | État | Phase |
 |---|---|---|
-| 6 processus (desktop, core, broker, windows, agent, model) | 🟡 desktop+core+broker+model dans Tauri ; windows et agent séparés | R4 |
+| 6 processus (desktop, core, broker, windows, agent, model) | 🧪 Six rôles isolés, démarrés à la demande. Tauri conserve les préférences de bureau et le rendu. Le broker exécute les commandes Windows, y compris celles de l’Inspecteur. | R4 |
 | Admin futur via composant dédié limité en durée et périmètre | 🧪 Assistant élevé à la demande (option B), une opération par lancement | — |
 | Frontend sans terminal ni système de fichiers direct, commandes Tauri restreintes | ✅ Capacités Tauri par commande | — |
-| Transport : Tauri IPC ✅, **gRPC sur named pipes avec ACL et identité** ❌, Protobuf ✅, flux d’événements ✅, HTTP local pour runtimes ✅ ; rien exposé au LAN ✅ | 🟡 | R4 |
+| Transport : Tauri IPC pour le WebView, gRPC sur canaux nommés réservés au compte courant avec vérification mutuelle des PID. Protobuf sur flux privés pour le pont et HTTP en boucle locale pour Ollama. | 🧪 | R4 |
 | Enveloppe avec `payload`, identité attribuée par une couche de confiance | 🟡 Opérations typées ; identité fixée par l’hôte | R4 |
 | Réponse normalisée (statuts, erreur code/message/retryable, durée) | ✅ Contrat v1 | — |
-| Événements : `event_id`, `sequence`, `timestamp`, session, tâche, type, source ✅ ; **payload** ❌ (codes seulement) | 🟡 | R1 |
+| Événements : identifiant, séquence, horodatage, session, tâche, type et source. L’export JSON décode les payloads connus à partir des codes d’audit. | ✅ | R1 |
 | Types `task.started`, `task.progress`, `model.provider.unavailable` | ✅ | — |
 | Ordre par tâche ✅ ; tolérance aux doublons après reconnexion | 🟡 | R4 |
 | Model Gateway : ProviderRegistry, ModelCatalog 🟡, ModelRouter (Resolve, Rank, Select, **ExplainSelection**), InferenceService (Generate, Stream ✅, Cancel 🟡), ResourceMonitor, UsageService | 🟡 | R3 |
 | Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | 🧪 table `models` (migration 007) : appels d’outils `unverified`/`not_advertised`/`verified`/`failed`, vision, durée et date du dernier test ; fenêtre de contexte, nombre de paramètres, quantification et taille sur disque (migration 008), débit mesuré pendant le test et VRAM utilisée une fois chargé (migration 009) ; modèles en échec exclus du routage | R3 |
-| Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first 🧪, cost_optimized 🧪, adaptive 🧪 ; élimination (capacité d’appel d’outil, sonde) puis classement | 🧪 Pour les modèles locaux ; pas encore de classement mixte local/cloud | R3 |
+| Stratégies : manual, local_only, cloud_only, local_first, quality_first, cost_optimized, adaptive et mixte. Le classement mixte exige des appels d’outils vérifiés et un accord explicite avant le cloud. | 🧪 | R3 |
 | Aucun repli local → cloud en mode privé strict | 🧪 Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
 | HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | 🟡 Cartes, pilote et mémoire (WMI) ✅, modèles chargés et VRAM ✅, placement par modèle (GPU, partiel, processeur seul) avec conseil ✅ ; backend d’inférence (CUDA/ROCm) non lu | R3 |
 | Agent défini en YAML (rôle, profil de modèle, capacités, limites, vérification, `retry_limit`, profil de politique) | ❌ Limites fixes dans le code | R8 |
@@ -196,8 +200,8 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | ProcessService (List ✅ lecture seule, Inspect 🧪 `inspect_process` sur un processus de la dernière liste, Terminate 🧪 `stop_process` : accord à chaque fois, fermeture demandée sans forcer pour un programme avec fenêtre, processus système, de sécurité et d’AiWin11 refusés) | 🧪 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre ✅ ; écran principal pour l’agent 🧪 (`describe_screen`, vision locale, refus si une fenêtre protégée est visible) ; écrans et capture d’un écran choisi dans l’Inspecteur | R2 |
 | UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement 🧪 `find_control` par nom ou type dans la fenêtre lue) | 🧪 | R2 |
-| InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
-| ShellService (ExecuteApprovedCommand) | 🟡 Liste fermée de diagnostics en lecture seule (réseau, Wi-Fi, heure) ; pas de PowerShell libre (volontaire) | R2 |
+| InputService (MovePointer, Click, Type, Hotkey) | 🟡 Clic et saisie Win32 ciblés 🧪. Déplacement du pointeur et raccourcis à développer. | R2 |
+| ShellService (ExecuteApprovedCommand) | 🟡 Diagnostics réseau, Wi-Fi et heure. Le diagnostic PowerShell de la version Windows demande un accord 🧪 | R2 |
 | SystemService (GetSystemMetrics ✅ mémoire, processeur, disques, durée de fonctionnement ; GetHardwareInfo ❌) | 🟡 | R2, R3 |
 | DPI, multi-écran, défilement, focus, références UIA périmées, dialogues modaux | ❌ Non testé | R2 |
 | Capture jamais envoyée au cloud sans politique | ✅ Vision locale seulement | — |
@@ -219,7 +223,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Point | État | Phase |
 |---|---|---|
 | Dépôt privé pour versionner le travail de Codex | ✅ Dépôt GitHub `quassim/aiwin11` (branche `main`), poussé à la demande de l’utilisateur le 13/11/2026 ; `scripts/verify.ps1` reste la vérification de référence | — |
-| CI sur un vrai runner Windows 11 | 🟡 Workflow présent mais pas exécuté (dépôt local) ; remplacé par `scripts/verify.ps1` sur la machine de référence | R1 |
+| CI sur un vrai runner Windows 11 | 🟡 Le workflow cible Windows Server 2025. `scripts/verify.ps1` est également exécuté sur le poste Windows 11 de référence. | R1 |
 | Code linté et typé | ✅ clippy, TypeScript strict, ESLint (règles typées) + Prettier, ruff + mypy strict, `cargo fmt --check`, tous dans `scripts/verify.ps1` ; 🟡 pas d’analyseurs .NET supplémentaires | — |
 | Tests unitaires, intégration, sécurité | ✅ 82 tests Rust, 11 Python, 19 tests réels | — |
 | Aucune opération hors broker | ✅ | — |
@@ -258,16 +262,16 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | — | Provider indisponible : bascule autorisée ou erreur compréhensible | 🟡 Erreur ✅, bascule ❌ — R3 |
 | — | Instruction malveillante dans une page | 🟡 Fichiers ✅ ; pages web ❌ — R6 |
 | — | Redémarrage après interruption | ✅ |
-| T-001 | Démarrage à froid, services démarrés et états visibles | 🟡 Fenêtre principale créée en 2,9 s à froid, 0,05 s à chaud (`scripts/measure.ps1`, 12/11/2026) ; « interface prête » instrumentée (événement `ui.ready`, durée depuis le lancement du processus jusqu’au premier rendu, affichée dans le Centre de contrôle), pas encore mesurée sur la version release — R1 |
+| T-001 | Démarrage à froid, services démarrés et états visibles | 🟡 Release mesurée sous Windows 11. Premier rendu à chaud en 333 à 340 ms depuis la création du processus, sur trois essais. Première fenêtre observée à 3,51 s lors du premier lancement de la série précédente. Mesure du premier rendu après démarrage à froid de Windows à faire. |
 | T-002 | Provider local | ✅ |
-| T-003 | Provider cloud | ❌ Jamais testé avec une vraie clé — R1 |
+| T-003 | Provider cloud | ✅ DeepSeek réel via gRPC et via le parcours dans la release Windows. Test OpenAI disponible séparément avec `verify.ps1 -CloudVendor openai -CloudModel <modèle>` si une clé OpenAI est configurée. |
 | T-004 | Changement de modèle sans redémarrage | ✅ |
 | T-005 | Action Windows simple vérifiée | ✅ |
 | T-006 | Action non autorisée refusée et journalisée | ✅ |
 | T-007 | Aucune exécution avant approbation | ✅ |
-| T-008 | Annulation | 🧪 Unitaires ; réel ❌ — R1 |
+| T-008 | Annulation | ✅ Processus gRPC et agent Python réels. Annulation pendant une approbation, refus de l’ancienne décision et absence de copie sur un fichier de test. |
 | T-009 | Panne du modèle | 🟡 Erreur contrôlée ; modèle local de secours configurable, utilisé une fois si le modèle choisi échoue avant la première étape (après un appel d’outil de test réussi) ; non testé avec Ollama réel — R3 |
-| T-010 | Injection de prompt | 🟡 Fichiers ✅ ; suite complète AW-024 — R1 |
+| T-010 | Injection de prompt | 🟡 Tests ciblés sur les réponses, les autorisations injectées, les appels imbriqués ou multiples et les chemins hors dossier. Suite complète AW-024 à poursuivre. |
 | T-011 | Mode privé : aucun transfert réseau cloud | 🟡 Garanti par conception ; pas de test réseau ni de mode privé explicite — R3 |
 | T-012 | Reprise après crash | ✅ |
 | T-013 | Multi-écran / DPI | ❌ — R2 |
@@ -277,10 +281,10 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 
 | Exigence | État |
 |---|---|
-| Palette p95 < 200 ms | ❌ Pas de palette — R5 |
+| Palette p95 < 200 ms | ✅ 44 ms sur 22 ouvertures de la release Windows locale — R5 |
 | Évaluation d’une permission p95 < 50 ms | ✅ p95 7,1 ms, p50 6,6 ms (politique + autorisation du broker journalisée sur SQLite disque, 500 essais, release, machine de référence, 12/11/2026) |
-| Navigation p95 < 150 ms | ❌ Non mesuré — R1 |
-| Interface prête < 3 s | 🟡 Fenêtre créée en 2,9 s au premier démarrage à froid ; premier rendu React horodaté (`ui.ready`, Centre de contrôle), valeur release encore à relever — R1 |
+| Navigation p95 < 150 ms | ✅ 31 ms sur 24 transitions Accueil ↔ Modèles, répété sur deux séries release sous Windows 11. |
+| Interface prête < 3 s | 🟡 333 à 340 ms sur trois lancements release à chaud. Mesure du premier rendu à froid à faire. |
 | RAM au repos < 350 Mo hors modèles | ✅ 178–182 Mo de mémoire privée pour 9 processus (application, WebView2, pont de réserve) après 15 s ; ensemble de travail cumulé 358–366 Mo, qui compte plusieurs fois les pages partagées de WebView2 |
 | Crash d’un agent : cœur et UI fonctionnels | ✅ L’agent Python est un processus séparé, borné dans le temps |
 | 100 % des appels d’outils par le broker, 100 % des actions tracées | ✅ |
@@ -294,18 +298,18 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 
 L’ordre suit le principe de la conversation : sécurité et fiabilité avant l’autonomie avancée, une version testable à chaque étape. Les phases R1 à R3 terminent la « Phase 1–2 » de la roadmap initiale [S0 §9] ; R4 à R9 couvrent les phases 3 à 5.
 
-### R1 — Consolider le produit (prochaine étape)
+### R1 — Consolider le produit
 
-- Distribution de développement simplifiée : embarquer l’agent Python et le pont .NET, supprimer `AIWIN11_PYTHON` manuel ; script de démarrage unique (`scripts/`).
+- ✅ `scripts/start.ps1` publie les compagnons et démarre le bureau. Le cœur détecte Python sur le PATH et accepte une surcharge facultative.
 - ✅ Réglages mémorisés : fournisseur, modèle, modèle de vision (table `settings`, événement `settings.models.changed`).
 - ✅ **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
 - ✅ **Durée de conservation et effacement** de l’historique ; export du journal d’audit (JSON).
-- ✅ Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; charge utile = code non sensible (fournisseur, numéro d’étape). 🟡 Pas de payload JSON structuré.
-- ✅ Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`, tests de composants React (Vitest + Testing Library, commandes Tauri simulées) dans `verify.ps1`. ❌ Test E2E de l’application complète.
-- 🟡 Mesures : RAM au repos ✅, évaluation de politique ✅, démarrage (fenêtre) 🟡 ; navigation et « interface prête » ❌ (`scripts/measure.ps1`, test `measure_permission_decision_latency`).
-- Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).
-- Audit d’accessibilité au lecteur d’écran (Narrateur, NVDA).
-- Script local `scripts/verify.ps1` qui remplace la CI (dépôt local) : builds, analyse statique, tests unitaires et, en option, tests réels.
+- ✅ Événements de tâche et de fournisseur. L’export ajoute un payload structuré pour les fournisseurs connus, les numéros d’étape et les durées de rendu. SQLite conserve les codes.
+- ✅ Qualité : linters, tests React, Rust, Python et .NET dans `verify.ps1`. `scripts/smoke-desktop.ps1` couvre la saisie, le consentement cloud, la proposition d’action, le refus et le journal dans la release Windows.
+- 🟡 Mesures release avec `scripts/measure.ps1`. Navigation p95 à 31 ms. Premier rendu à chaud en 333 à 340 ms, mesure à froid à faire. Au repos, mémoire privée agrégée de 201 à 204 Mio et working set agrégé de 374 à 377 Mio sur la dernière série.
+- ✅ T-008 sous Windows et premiers cas d’injection AW-024. T-003 validé avec le fournisseur configuré, DeepSeek.
+- 🧪 UI Automation a vérifié le focus du lien d’évitement et du bouton **Refuser**. Avec Narrateur ou NVDA, vérifier l’annonce du titre, de la demande d’accord et du changement d’état après refus.
+- ✅ `scripts/verify.ps1 -Ipc -Tauri` sert à la vérification locale et au workflow GitHub Actions sur Windows Server 2025.
 - ✅ Test qui garantit l’invariant « rien de sensible dans SQLite » (voir §6) : schéma revu colonne par colonne, garde `journal_code` qui remplace tout texte libre par `REDACTED`, scan du fichier de base.
 
 ### R2 — Politiques par ressource et contrôle Windows étendu (fin du lot C, début de M02/M04)
@@ -318,8 +322,8 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
   - 🟡 WindowService : lister ✅, focus ✅, réduire/restaurer/agrandir ✅ ; redimensionner 🧪 (dispositions sur l’écran de la fenêtre) ; fermer ❌ (risque de perte de données, à décider) ;
   - 🧪 ProcessService : lister ✅, inspecter 🧪, arrêter (avec approbation) 🧪 ;
   - UIAutomationService : FindElement, Invoke, SetValue ;
-  - InputService : clic, saisie, raccourcis, en dernier recours ;
-  - ShellService : commandes PowerShell **approuvées** depuis une liste ;
+  - 🟡 InputService : clic et saisie sur un contrôle Win32 inspecté 🧪 ; déplacement du pointeur et raccourcis ❌ ;
+  - 🧪 ShellService : diagnostic PowerShell local depuis une liste fermée, sur accord ;
   - ✅ Presse-papiers (lecture et écriture avec approbation) ;
   - 🟡 SystemService : métriques ✅ (mémoire, processeur, disques), matériel ❌ ;
   - DesktopService : écrans, capture d’écran complète.
@@ -333,10 +337,10 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 ### R3 — Hub de modèles (M01, AW-020)
 
 - Tables `providers`, `models`, `model_profiles` ; ProviderRegistry, ModelCatalog avec manifeste (statut `unverified` jusqu’au test).
-- **Modèle par tâche** : planification, contrôle Windows, développement, vision, STT, TTS, image, vidéo, embeddings.
-- Stratégies de routage : manual, local_only, cloud_only, local_first, quality_first, cost_optimized, adaptive ; **ExplainSelection**.
+- 🧪 Modèles Ollama par agent et délégation, profil Développement, modèle de vision et d’embeddings, moteur SAPI, voix locale et modèle d’images. ComfyUI utilise le modèle du workflow.
+- 🧪 Stratégies manual, local_only, cloud_only, local_first, quality_first, cost_optimized, adaptive et mixte. La tâche indique le modèle retenu et le motif.
 - **Mode privé** explicite, repli autorisé ou non, jamais de repli local → cloud en mode strict (test réseau T-011).
-- Providers : LM Studio, Anthropic, Google Gemini.
+- 🧪 LM Studio en boucle locale, Gemini et Claude via leurs interfaces de compatibilité Chat Completions. Le registre permet d’activer les fournisseurs cloud et de sonder leurs appels d’outils.
 - HAL GPU NVIDIA/AMD : pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic (T-014).
 - UsageService : coûts estimés, **budget par tâche** vérifié avant chaque appel, quotas.
 - Configuration exportable/copiable, validée par schéma (YAML).
@@ -344,15 +348,21 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 
 ### R4 — Architecture multi-processus (ADR-002, ADR-007)
 
-- Prototype puis mise en place de gRPC sur named pipes avec ACL et vérification de l’identité de chaque processus.
-- Séparer `aiwin11-core`, `aiwin11-broker`, `aiwin11-model` du processus Tauri ; supervision et redémarrage.
+- ✅ Prototype gRPC sur canal nommé Windows, limité au compte courant, avec vérification mutuelle des PID. `scripts/verify.ps1 -Ipc` couvre le protocole, les PID erronés et l’arrêt du processus enfant.
+- 🧪 Catalogue Ollama : découverte et ressources des modèles en cours d’exécution dans un processus Rust lancé à la demande. Vérifier les deux listes dans la page Modèles avec Ollama en cours d’exécution.
+- 🧪 Routage des tâches Ollama en processus séparé pour les stratégies adaptative, qualité et coût. Le processus s’arrête si la tâche est annulée ou si le parent ferme son flux de supervision.
+- 🧪 Inférence des tâches Ollama en processus séparé, avec flux des fragments et proposition finale. La validation des outils, les approbations et l’exécution passent toujours par le cœur et le broker.
+- 🧪 Inférence OpenAI et DeepSeek dans le processus de modèles. La clé reste dans le Gestionnaire d’identifiants Windows et le cœur conserve les contrôles de confidentialité, de budget et de coût.
+- 🧪 Reprise du journal d’activité après interruption de la connexion. Le service de lecture ouvre SQLite en lecture seule et reprend à la dernière séquence reçue. La vue Activité déduplique les entrées.
+- 🧪 Le cœur initialise la session, applique les migrations ou la restauration et orchestre les tâches hors de Tauri. Une panne de tâche la marque comme interrompue. La suivante démarre un nouveau processus.
+- 🧪 Le broker indépendant autorise, réserve et journalise les commandes. Il exécute les commandes Windows via le pont .NET. Les adaptateurs fichiers et administrateur exécutent l’action approuvée dans leur processus d’origine.
 - Déplacer la planification dans le runtime d’agent Python (ADR-005), le broker restant seul juge.
-- Livraison des événements tolérante aux doublons après reconnexion ; tests de contrats.
+- 🧪 Reprise des fragments et des approbations par curseur tant que le superviseur Tauri tourne. Le test Windows coupe gRPC pendant une approbation puis vérifie une seule copie de fichier après reconnexion.
 - Bac à sable renforcé pour les tâches risquées.
 
 ### R5 — Expérience bureau (M09, AW-022)
 
-- Overlay / assistant flottant, **palette de commandes** (raccourci global, p95 < 200 ms), icône de barre système, notifications.
+- 🧪 Overlay contextuel, assistant flottant, palette de commandes, raccourcis globaux, zone de notification et notifications Windows. À vérifier en usage réel sur plusieurs écrans et avec les notifications Windows activées. Test ciblé `scripts/smoke-desktop.ps1 -PaletteOnly`.
 - Tableau de bord (Control Center) : modèles, agents, permissions, tâches, ressources.
 - Mode simple / mode expert ; **état de l’agent toujours visible** ; indicateur local / cloud / transfert de données.
 - 🔷 Design system (Tailwind + composants accessibles, ou alternative) ; thème proche de Windows 11 avec une identité propre.

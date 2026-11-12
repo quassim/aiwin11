@@ -39,6 +39,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
         && command.InvokeControl is null && command.RunDiagnostic is null && command.Dictate is null
+        && command.ListSpeechRecognizers is null
         && command.ListDisplays is null && command.CaptureDisplay is null && command.InspectProcess is null
         && command.ListApplications is null && command.StopProcess is null
         && (command.LaunchApplication is null
@@ -139,11 +140,14 @@ else if (command.ListProcesses is { } listing)
         result.Status = Protocol.Result.Types.Status.Success;
     }
 }
-else if (command.Dictate is { } dictate)
+else if (command.ListSpeechRecognizers is not null || command.Dictate is not null)
 {
     try
     {
-        result.Dictation = Dictation.Listen(dictate.MaxSeconds, command.DeadlineMs);
+        if (command.Dictate is { } dictate)
+            result.Dictation = Dictation.Listen(dictate.MaxSeconds, command.DeadlineMs, dictate.RecognizerId);
+        else
+            result.SpeechRecognizers = Dictation.List();
         result.Status = Protocol.Result.Types.Status.Success;
     }
     catch (Exception error) when (error is InvalidOperationException or ArgumentException
@@ -171,11 +175,18 @@ else if (command.InvokeControl is { } control)
         switch (WindowInspector.Invoke(control.Window, control.ProcessId, control.Index, control.ControlType,
                     control.Name, command.DeadlineMs, control.HasValue ? control.Value : null))
         {
-            case true:
+            case WindowInspector.ControlResult.Invoked:
                 result.Status = Protocol.Result.Types.Status.Success;
                 break;
-            case false:
-                Reject(Protocol.Result.Types.Status.Failed, "not_invokable", "The control cannot be clicked.");
+            case WindowInspector.ControlResult.KeyboardVerified:
+                result.ControlKeyboardVerified = true;
+                result.Status = Protocol.Result.Types.Status.Success;
+                break;
+            case WindowInspector.ControlResult.InputUnverified:
+                Reject(Protocol.Result.Types.Status.Partial, "control_input_unverified", "The input outcome could not be verified.");
+                break;
+            case WindowInspector.ControlResult.Unavailable:
+                Reject(Protocol.Result.Types.Status.Failed, "not_invokable", "The requested control action is unavailable.");
                 break;
             default:
                 Reject(Protocol.Result.Types.Status.Failed, "control_changed", "The window or control changed.");

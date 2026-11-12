@@ -177,47 +177,51 @@ internal static class WindowInspector
     internal static Protocol.UiTree? Inspect(ulong handle, uint processId, long deadline) =>
         Inspect(handle, processId, deadline, null);
 
-    /// <summary>
-    /// Invokes control number `index` of the same walk as Inspect, if its type and name still
-    /// match. Null: window or control gone or changed; false: the control cannot be invoked.
-    /// </summary>
-    internal static bool? Invoke(ulong handle, uint processId, uint index, uint controlType, string name, long deadline,
+    internal enum ControlResult { Changed, Unavailable, Invoked, KeyboardVerified, InputUnverified }
+
+    /// <summary>Invokes the previously inspected control if its type and name still match.</summary>
+    internal static ControlResult Invoke(ulong handle, uint processId, uint index, uint controlType, string name, long deadline,
         string? value = null)
     {
         var elements = new List<AutomationElement>();
         var tree = Inspect(handle, processId, deadline, elements);
         if (tree is null || index == 0 || index > elements.Count)
-            return null;
+            return ControlResult.Changed;
         var node = tree.Nodes[(int)index - 1];
         if (node.ControlType != controlType || node.Name != name)
-            return null;
+            return ControlResult.Changed;
         var element = elements[(int)index - 1];
-        if (!element.Current.IsEnabled || element.Current.IsPassword)
-            return false;
+        var current = element.Current;
+        if (!current.IsEnabled || current.IsPassword || DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= deadline)
+            return ControlResult.Unavailable;
         if (value is not null)
         {
-            if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)
-                || ((ValuePattern)pattern).Current.IsReadOnly)
-                return false;
+            if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+                return Fallback();
+            if (((ValuePattern)pattern).Current.IsReadOnly)
+                return ControlResult.Unavailable;
             ((ValuePattern)pattern).SetValue(value);
-            return ((ValuePattern)pattern).Current.Value == value;
+            return ((ValuePattern)pattern).Current.Value == value ? ControlResult.Invoked : ControlResult.InputUnverified;
         }
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
             ((InvokePattern)invoke).Invoke();
-            return true;
+            return ControlResult.Invoked;
         }
         if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
         {
             ((TogglePattern)toggle).Toggle();
-            return true;
+            return ControlResult.Invoked;
         }
         if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var select))
         {
             ((SelectionItemPattern)select).Select();
-            return true;
+            return ControlResult.Invoked;
         }
-        return false;
+        return Fallback();
+
+        ControlResult Fallback() => current.IsOffscreen ? ControlResult.Unavailable
+            : ControlInput.Apply((nint)handle, processId, current.NativeWindowHandle, controlType, value, deadline);
     }
 
     private static Protocol.UiTree? Inspect(ulong handle, uint processId, long deadline, List<AutomationElement>? elements)
