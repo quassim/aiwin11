@@ -51,6 +51,15 @@ def is_window_number(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_LISTED_WINDOWS
 
 
+def is_service_name(value: object) -> bool:
+    """Windows service key name: 1 to 64 ASCII letters, digits, '_', '.' or '-'."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 64
+        and all(char.isascii() and (char.isalnum() or char in "_.-") for char in value)
+    )
+
+
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
 Rule = tuple[str, ...] | Callable[[object], bool]
@@ -70,6 +79,11 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "write_clipboard": {"text": is_typed_text},
     "list_windows": {},
     "list_services": {},
+    "admin_service": {
+        "service": is_service_name,
+        "operation": ("start", "stop", "restart", "automatic", "manual", "disabled"),
+    },
+    "admin_clean_temp": {},
     "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }
 

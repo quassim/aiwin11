@@ -1,3 +1,5 @@
+#[cfg(windows)]
+pub mod admin;
 pub mod broker;
 pub mod grants;
 #[cfg(windows)]

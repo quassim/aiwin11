@@ -293,6 +293,17 @@ fn create_grant(state: State<'_, Arc<AppState>>, action: AgentAction, minutes: u
 }
 
 #[tauri::command]
+fn get_admin_helper(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.admin_helper_enabled())
+}
+
+/// Main window only: turns the elevated helper (closed list of administrator operations) on or off.
+#[tauri::command]
+fn set_admin_helper(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_admin_helper_enabled(enabled)
+}
+
+#[tauri::command]
 fn revoke_grant(state: State<'_, Arc<AppState>>, id: String) -> Result<(), &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.revoke_grant(&id)
 }
@@ -378,6 +389,8 @@ fn main() {
             cancel_task,
             stop_all_tasks,
             get_grants,
+            get_admin_helper,
+            set_admin_helper,
             create_grant,
             revoke_grant,
             get_history_settings,

@@ -51,6 +51,7 @@ Step 'ESLint + Prettier' { npm --prefix apps/desktop run lint }
 Step 'Interface (tsc + vite)' { npm --prefix apps/desktop run build }
 Step 'cargo fmt --check' { cargo fmt --all --check }
 Step 'Pont .NET' { dotnet build services/windows/AiWin11.Windows.csproj --configuration Release -nologo -v q }
+Step 'Assistant administrateur .NET' { dotnet build services/admin/AiWin11.Admin.csproj --configuration Release -nologo -v q }
 Step 'Tests Rust' { cargo test --locked -p aiwin11-core }
 Step 'Clippy' { cargo clippy --locked --workspace --all-targets -- -D warnings }
 

@@ -20,7 +20,7 @@ pub enum Peer {
 /// Agent capabilities the broker can grant for one command. The host requests a capability
 /// only when the policy engine allowed the action, or the user approved it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u16)]
+#[repr(u32)]
 pub enum Capability {
     /// Start Windows Notepad (fixed executable, no arguments).
     LaunchNotepad = 1 << 0,
@@ -54,17 +54,19 @@ pub enum Capability {
     WindowArrange = 1 << 14,
     /// Read a snapshot of Windows services (names, state, start mode). Read-only.
     ServiceList = 1 << 15,
+    /// Run one approved operation of the elevated helper's closed list.
+    AdminOperation = 1 << 16,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
-    grants: u16,
+    grants: u32,
 }
 
 impl Policy {
     pub fn granting(capabilities: &[Capability]) -> Self {
-        Self { grants: capabilities.iter().fold(0, |grants, capability| grants | *capability as u16) }
+        Self { grants: capabilities.iter().fold(0, |grants, capability| grants | *capability as u32) }
     }
 
     /// Grants `capability` only if `condition` holds, e.g. the user approved.
@@ -77,7 +79,7 @@ impl Policy {
     }
 
     pub fn allows(self, capability: Capability) -> bool {
-        self.grants & capability as u16 != 0
+        self.grants & capability as u32 != 0
     }
 }
 
@@ -128,6 +130,9 @@ impl Policy {
             Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
             Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
             Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
+            Some(Operation::AdminService(_) | Operation::AdminCleanTemp(_)) if agent(Capability::AdminOperation) => {
+                Ok("admin_operation")
+            }
             Some(Operation::ListServices(listing))
                 if agent(Capability::ServiceList) && (1..=25).contains(&listing.limit) =>
             {

@@ -51,6 +51,8 @@ type ApprovalAction =
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
   | { kind: "listServices" }
+  | { kind: "adminService"; service: string; operation: string }
+  | { kind: "adminCleanTemp" }
   | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
 type Arrangement = "focus" | "minimize" | "restore" | "maximize";
 const arrangementNames: Record<Arrangement, string> = {
@@ -79,6 +81,16 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "adminService" || action.kind === "adminCleanTemp") {
+    return {
+      title: "L’agent propose une opération administrateur",
+      detail:
+        (action.kind === "adminService"
+          ? `Action : ${action.operation} sur le service « ${action.service} ».`
+          : "Action : supprimer les fichiers temporaires de Windows de plus d’un jour (C:\\Windows\\Temp).") +
+        " Si tu autorises, Windows te demandera aussi une confirmation (UAC). Une seule opération, puis l’assistant s’arrête.",
     };
   }
   if (action.kind === "listServices") {
@@ -204,6 +216,9 @@ const activityNames: Record<string, string> = {
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
   "window.list.completed": "Fenêtres listées par l’agent",
   "service.list.completed": "Services listés par l’agent",
+  "admin.operation.completed": "Opération administrateur effectuée",
+  "admin.operation.failed": "Opération administrateur échouée ou refusée",
+  "settings.admin.changed": "Opérations administrateur activées ou désactivées",
   "service.list.failed": "Liste des services impossible",
   "window.list.failed": "Liste des fenêtres impossible",
   "window.arrange.completed": "Fenêtre modifiée par l’agent",

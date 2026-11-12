@@ -142,6 +142,30 @@ avec list_windows dans cette demande, désignée par son numéro. Ne ferme jamai
             }
         }));
         functions.push(json!({
+            "name": "admin_service",
+            "description": "Opération administrateur sur un service Windows : start, stop, restart, ou démarrage \
+automatic, manual, disabled. Demande l’accord de l’utilisateur puis une confirmation Windows (UAC). Les services de \
+sécurité, de mise à jour et les services vitaux de Windows sont toujours refusés.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service": { "type": "string", "description": "Nom court du service (list_services)" },
+                    "operation": {
+                        "type": "string",
+                        "enum": ["start", "stop", "restart", "automatic", "manual", "disabled"]
+                    }
+                },
+                "required": ["service", "operation"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
+            "name": "admin_clean_temp",
+            "description": "Opération administrateur : supprime les fichiers temporaires de Windows de plus d’un jour \
+        (C:\\Windows\\Temp). Demande l’accord de l’utilisateur puis une confirmation Windows (UAC).",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
             "name": "list_services",
             "description": "Liste, en lecture seule, les services Windows : d’abord les services automatiques \
         arrêtés (souvent signe d’un problème), puis des services en cours d’exécution, avec les totaux. N’arrête ni ne \
@@ -742,6 +766,8 @@ mod tests {
                 "arrange_window",
                 "read_clipboard",
                 "write_clipboard",
+                "admin_service",
+                "admin_clean_temp",
                 "list_services",
                 "get_system_status",
                 "list_processes",
@@ -758,6 +784,8 @@ mod tests {
                 "arrange_window",
                 "read_clipboard",
                 "write_clipboard",
+                "admin_service",
+                "admin_clean_temp",
                 "list_services",
                 "get_system_status",
                 "list_processes",

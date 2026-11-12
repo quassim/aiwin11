@@ -12,8 +12,8 @@ use std::{
 };
 
 use aiwin11_contracts::v1::{
-    arrange_window::Arrangement, command::Operation, launch_application::Application, service_entry::StartMode,
-    LaunchApplication,
+    admin_service::Action as ServiceAction, arrange_window::Arrangement, command::Operation,
+    launch_application::Application, service_entry::StartMode, AdminCleanTemp, AdminService, LaunchApplication,
 };
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::{
+    admin,
     broker::{Capability, ExecutionError, Peer, Policy},
     local_files::LocalFiles,
     model_gateway::{tool_catalog, GatewayError, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
@@ -143,6 +144,12 @@ pub enum ApprovalAction {
     },
     /// Read-only; allowed in every profile by the default matrix.
     ListServices,
+    /// Elevated: approved here, then confirmed again in the Windows UAC prompt.
+    AdminService {
+        service: String,
+        operation: &'static str,
+    },
+    AdminCleanTemp,
     /// Always asks: window titles are screen data.
     ListWindows,
     ArrangeWindow {
@@ -201,6 +208,11 @@ enum PlannedAction {
     ReadClipboard,
     WriteClipboard(String),
     ListServices,
+    AdminService {
+        service: String,
+        action: ServiceAction,
+    },
+    AdminCleanTemp,
     ListWindows,
     /// Window number in this task's last `list_windows` result (1-based) and target state.
     ArrangeWindow {
@@ -596,6 +608,12 @@ impl TaskSlot {
             PlannedAction::ReadClipboard => ("read_clipboard", json!({}), self.read_clipboard(run)?),
             PlannedAction::ListWindows => ("list_windows", json!({}), self.list_windows(run)?),
             PlannedAction::ListServices => ("list_services", json!({}), self.list_services(run)?),
+            PlannedAction::AdminCleanTemp => ("admin_clean_temp", json!({}), self.admin(run, None)?),
+            PlannedAction::AdminService { service, action } => {
+                let observation = self.admin(run, Some((&service, action)))?;
+                let operation = admin::service_action_code(action);
+                ("admin_service", json!({ "service": service, "operation": operation }), observation)
+            }
             PlannedAction::ArrangeWindow { window, arrangement } => {
                 let observation = self.arrange_window(run, window, arrangement)?;
                 (
@@ -860,6 +878,62 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    /// One operation of the elevated helper's closed list: a service operation, or cleaning
+    /// Windows temporary files (`None`).
+    fn admin<F: Fn(TaskUpdate)>(
+        &self,
+        run: &mut Run<'_, F>,
+        service: Option<(&str, ServiceAction)>,
+    ) -> Result<String, &'static str> {
+        let (action, summary, approval, operation) = match service {
+            Some((name, service_action)) => {
+                let code = admin::service_action_code(service_action);
+                (
+                    AgentAction::AdminService,
+                    format!("Service « {name} » : {code} (administrateur)"),
+                    ApprovalAction::AdminService { service: name.to_owned(), operation: code },
+                    Operation::AdminService(AdminService { service: name.to_owned(), action: service_action as i32 }),
+                )
+            }
+            None => (
+                AgentAction::AdminCleanTemp,
+                "Supprimer les fichiers temporaires de Windows (administrateur)".to_owned(),
+                ApprovalAction::AdminCleanTemp,
+                Operation::AdminCleanTemp(AdminCleanTemp {}),
+            ),
+        };
+        if !lock(run.core)?.admin_helper_enabled() {
+            run.report(action, &summary, ActionStatus::Denied, Some("ADMIN_HELPER_DISABLED"));
+            return Ok("Les opérations administrateur sont désactivées (page Sécurité). Rien n’a été exécuté.".into());
+        }
+        if let Some((name, _)) = service {
+            if admin::protected_service(name) {
+                run.report(action, &summary, ActionStatus::Denied, Some("ADMIN_REFUSED"));
+                return Ok(format!("Le service « {name} » est protégé : AiWin11 n’y touche jamais."));
+            }
+        }
+        let grant = match self.gate(run, action, &summary, Capability::AdminOperation, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result =
+            self.dispatching(run.core, run.task, || lock(run.core)?.agent_admin(run.task, grant, operation))?;
+        Ok(match result {
+            Ok(()) => {
+                run.report(action, &summary, ActionStatus::Done, None);
+                format!("{summary} : fait.")
+            }
+            Err(code) => {
+                let status = match code {
+                    "ADMIN_ACCESS_DENIED" | "ADMIN_UAC_DECLINED" | "ADMIN_REFUSED" => ActionStatus::Denied,
+                    _ => ActionStatus::Failed,
+                };
+                run.report(action, &summary, status, Some(code));
+                format!("{summary} : échec ({code}).")
+            }
+        })
     }
 
     fn list_services<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>) -> Result<String, &'static str> {
@@ -1676,6 +1750,28 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         ("tool", Some("list_windows"), Some(arguments), None) if arguments.is_empty() => Ok(PlannedAction::ListWindows),
         ("tool", Some("list_services"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::ListServices)
+        }
+        ("tool", Some("admin_clean_temp"), Some(arguments), None) if arguments.is_empty() => {
+            Ok(PlannedAction::AdminCleanTemp)
+        }
+        ("tool", Some("admin_service"), Some(arguments), None) if arguments.len() == 2 => {
+            let service =
+                arguments.get("service").and_then(Value::as_str).filter(|name| admin::valid_service_name(name));
+            let action = match arguments.get("operation").and_then(Value::as_str) {
+                Some("start") => Some(ServiceAction::Start),
+                Some("stop") => Some(ServiceAction::Stop),
+                Some("restart") => Some(ServiceAction::Restart),
+                Some("automatic") => Some(ServiceAction::SetAutomatic),
+                Some("manual") => Some(ServiceAction::SetManual),
+                Some("disabled") => Some(ServiceAction::SetDisabled),
+                _ => None,
+            };
+            match (service, action) {
+                (Some(service), Some(action)) => {
+                    Ok(PlannedAction::AdminService { service: service.to_owned(), action })
+                }
+                _ => Err("AGENT_REJECTED"),
+            }
         }
         ("tool", Some("arrange_window"), Some(arguments), None) if arguments.len() == 2 => {
             let window = arguments

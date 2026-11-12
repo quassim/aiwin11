@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { AdminToggle } from "./AdminToggle";
 import { Grants } from "./Grants";
 
 type Autonomy = "observation" | "assisted" | "limited" | "advanced";
@@ -71,6 +72,8 @@ const actionNames: Record<string, string> = {
   writeClipboard: "Copier un texte dans le presse-papiers",
   listWindows: "Lister les fenêtres ouvertes",
   listServices: "Lister les services Windows (lecture seule)",
+  adminService: "Démarrer, arrêter ou configurer un service (administrateur)",
+  adminCleanTemp: "Vider les fichiers temporaires de Windows (administrateur)",
   arrangeWindow: "Réduire, restaurer, agrandir ou mettre au premier plan une fenêtre",
 };
 
@@ -185,6 +188,7 @@ export function Security({ onFinished }: { onFinished: () => void }) {
           </tbody>
         </table>
       </div>
+      <AdminToggle />
       <Grants actionNames={actionNames} onChange={onFinished} />
       <h3>Fiche de chaque outil</h3>
       <p>

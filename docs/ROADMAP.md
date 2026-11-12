@@ -114,14 +114,14 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
 | Licence : open source, privée ou hybride | ✅ Sans objet (usage personnel) | — |
-| Service privilégié facultatif | ✅ Décidé : assistant élevé **à la demande** (option B, §6), pas de service ; réalisation ❌ | R2 |
+| Service privilégié facultatif | ✅ Assistant élevé à la demande (option B) : `AiWin11.Admin.exe`, liste fermée (services, fichiers temporaires), désactivé par défaut, accord + UAC ; 🟡 UAC réel non testé | — |
 
 ### 2.3 Spécification v1.0 [S1]
 
 | Point | État | Phase |
 |---|---|---|
 | 6 processus (desktop, core, broker, windows, agent, model) | 🟡 desktop+core+broker+model dans Tauri ; windows et agent séparés | R4 |
-| Admin futur via composant dédié limité en durée et périmètre | ❌ Décidé : assistant élevé à la demande (option B, §6) | R2 |
+| Admin futur via composant dédié limité en durée et périmètre | ✅ Assistant élevé à la demande (option B), une opération par lancement | — |
 | Frontend sans terminal ni système de fichiers direct, commandes Tauri restreintes | ✅ Capacités Tauri par commande | — |
 | Transport : Tauri IPC ✅, **gRPC sur named pipes avec ACL et identité** ❌, Protobuf ✅, flux d’événements ✅, HTTP local pour runtimes ✅ ; rien exposé au LAN ✅ | 🟡 | R4 |
 | Enveloppe avec `payload`, identité attribuée par une couche de confiance | 🟡 Opérations typées ; identité fixée par l’hôte | R4 |
@@ -259,7 +259,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
   - ✅ Presse-papiers (lecture et écriture avec approbation) ;
   - 🟡 SystemService : métriques ✅ (mémoire, processeur, disques), matériel ❌ ;
   - DesktopService : écrans, capture d’écran complète.
-- **Assistant élevé à la demande** (option B, §6) pour les opérations administrateur d’une liste fermée : double validation AiWin11 + UAC, une opération par lancement, puis arrêt.
+- ✅ **Assistant élevé à la demande** (option B, §6) pour les opérations administrateur d’une liste fermée : double validation AiWin11 + UAC, une opération par lancement, puis arrêt.
 - Changement de méthode (API → UIA → vision → souris/clavier) **sans élargir les autorisations**.
 - Fichiers : plusieurs dossiers autorisés, recherche, autres formats ; restauration et vidage de la corbeille ; sauvegarde avant modification (`require_backup`).
 - Scénarios « Range ces fichiers » (plan prévisualisé, approbation groupée) et « PC lent » (diagnostic, actions sûres, rapport).

@@ -57,6 +57,7 @@ pub enum CapabilityName {
     WindowList,
     WindowArrange,
     ServiceList,
+    AdminOperation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -87,7 +88,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 16] = [
+pub const MANIFESTS: [ToolManifest; 18] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -312,6 +313,35 @@ pub const MANIFESTS: [ToolManifest; 16] = [
         reversibility: R::NoEffect,
         timeout_ms: 15_000,
         capabilities: &[C::ServiceList],
+    },
+    ToolManifest {
+        action: AgentAction::AdminService,
+        tool: "admin_service",
+        version: 1,
+        // Elevated: always asks, never grantable, plus the Windows UAC prompt.
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Reversible,
+        timeout_ms: 90_000,
+        capabilities: &[C::AdminOperation],
+    },
+    ToolManifest {
+        action: AgentAction::AdminCleanTemp,
+        tool: "admin_clean_temp",
+        version: 1,
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Irreversible,
+        timeout_ms: 90_000,
+        capabilities: &[C::AdminOperation],
     },
 ];
 

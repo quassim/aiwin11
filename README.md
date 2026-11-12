@@ -12,6 +12,7 @@ Installez aussi Python 3.13 et Ollama, puis préparez un modèle local qui gère
 npm --prefix apps/desktop ci
 $env:AIWIN11_PYTHON = (Get-Command python.exe -CommandType Application | Select-Object -First 1).Source
 dotnet publish services/windows/AiWin11.Windows.csproj --configuration Debug --runtime win-x64 --self-contained false --output target/debug
+dotnet publish services/admin/AiWin11.Admin.csproj --configuration Debug --runtime win-x64 --self-contained false --output target/debug
 Copy-Item -LiteralPath services/agent/agent.py -Destination target/debug/aiwin11_agent.py
 npm --prefix apps/desktop run tauri -- dev
 ```
@@ -71,6 +72,10 @@ Le bouton **Stoppe toutes les tâches**, toujours visible dans la barre latéral
 Toujours dans **Sécurité**, **Autorisations temporaires** permet de laisser une action (par exemple copier un fichier) se faire sans demander pendant 15 minutes à 2 heures. Cela ne vaut que là où ton profil demande ton accord, jamais pour la corbeille ni la lecture de l’écran ; **Révoquer** l’arrête dès l’action suivante.
 
 La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque, possibilité d’annuler, simulation, usage local uniquement et délai maximal. Un outil **critique** demande toujours ton accord.
+
+### Opérations administrateur (désactivées par défaut)
+
+AiWin11 tourne sans droits administrateur. Dans **Sécurité → Opérations administrateur**, tu peux autoriser l’agent à proposer une liste fermée d’opérations : démarrer, arrêter, redémarrer un service ou changer son démarrage (automatique, manuel, désactivé), et vider les fichiers temporaires de Windows de plus d’un jour. Chaque opération demande ton accord dans AiWin11, puis la confirmation Windows (UAC). Elle est exécutée par un programme séparé, `AiWin11.Admin.exe`, qui fait une seule opération puis s’arrête. Les services de sécurité (Defender, pare-feu), de mise à jour et les services vitaux de Windows sont toujours refusés.
 
 ### Fournisseur cloud optionnel
 
@@ -134,6 +139,7 @@ $env:AIWIN11_TEST_MODEL = 'qwen3:8b'
 $env:AIWIN11_TEST_VISION_MODEL = 'gemma3:4b'
 $env:AIWIN11_PYTHON = (Get-Command python.exe -CommandType Application | Select-Object -First 1).Source
 dotnet publish services/windows/AiWin11.Windows.csproj --configuration Debug --runtime win-x64 --self-contained false --output target/debug/deps
+dotnet publish services/admin/AiWin11.Admin.csproj --configuration Debug --runtime win-x64 --self-contained false --output target/debug/deps
 Copy-Item -LiteralPath services/agent/agent.py -Destination target/debug/deps/aiwin11_agent.py
 cargo test --locked -p aiwin11-core -- --ignored --test-threads=1
 ```

@@ -86,10 +86,12 @@ pub enum AgentAction {
     ListWindows,
     ArrangeWindow,
     ListServices,
+    AdminService,
+    AdminCleanTemp,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 18] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -106,6 +108,8 @@ impl AgentAction {
         Self::ListWindows,
         Self::ArrangeWindow,
         Self::ListServices,
+        Self::AdminService,
+        Self::AdminCleanTemp,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -130,6 +134,8 @@ impl AgentAction {
             Self::ListWindows => "list_windows",
             Self::ArrangeWindow => "arrange_window",
             Self::ListServices => "list_services",
+            Self::AdminService => "admin_service",
+            Self::AdminCleanTemp => "admin_clean_temp",
         }
     }
 
@@ -186,7 +192,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 16] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 18] = [
+    (A::AdminService, [E::Deny, E::Ask, E::Ask, E::Ask]),
+    (A::AdminCleanTemp, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListServices, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ListWindows, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::ArrangeWindow, [E::Deny, E::Ask, E::Allow, E::Allow]),
