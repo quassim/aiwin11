@@ -447,13 +447,16 @@ impl Core {
         Self::recover_interrupted_tasks(&transaction, &session_id, None)?;
         Self::apply_retention(&transaction, &session_id)?;
         transaction.commit()?;
-        Ok(Self {
+        let mut core = Self {
             db,
             session_id,
             desktop_pid: std::process::id(),
             #[cfg(windows)]
             broker_transport: None,
-        })
+        };
+        // A failure leaves old notes in place until the next start; never blocks starting.
+        let _ = core.apply_memory_retention();
+        Ok(core)
     }
 
     /// A task still in progress at startup was interrupted by a crash or a forced exit. It is

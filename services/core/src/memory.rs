@@ -22,6 +22,8 @@ pub const MAX_NOTES: u32 = 200;
 const MAX_INDEXED_FILES: usize = 32;
 const MAX_INDEXED_CHARS: usize = 4000;
 const ENTROPY: &[u8] = b"AiWin11.memory.v1";
+/// Longest retention the user may choose for notes and reports, in days (0: kept until erased).
+pub const MAX_MEMORY_RETENTION_DAYS: u32 = 3650;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -521,6 +523,66 @@ impl Core {
         tx.commit().map_err(|_| "MEMORY_UNAVAILABLE")
     }
 
+    /// Days notes and routine reports are kept; 0 keeps them until the user erases them.
+    pub fn memory_retention_days(&self) -> u32 {
+        self.setting("memory.retention_days")
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse().ok())
+            .filter(|days| *days <= MAX_MEMORY_RETENTION_DAYS)
+            .unwrap_or(0)
+    }
+
+    /// Changes the retention of notes and reports and applies it at once.
+    pub fn set_memory_retention_days(&mut self, days: u32) -> Result<usize, &'static str> {
+        if days > MAX_MEMORY_RETENTION_DAYS {
+            return Err("SETTINGS_INVALID");
+        }
+        self.db
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('memory.retention_days', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [days.to_string()],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.db
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.memory.retention.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), self.session_id, format!("days:{days}")],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.apply_memory_retention()
+    }
+
+    /// Erases notes and routine reports older than the retention (with their vectors). Saved
+    /// requests and indexed files are kept: the user removes them. Journals the count only.
+    pub fn apply_memory_retention(&mut self) -> Result<usize, &'static str> {
+        let days = self.memory_retention_days();
+        if days == 0 {
+            return Ok(0);
+        }
+        let removed = self
+            .db
+            .execute(
+                "DELETE FROM memory_entries WHERE kind IN ('note', 'report')
+                 AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?1)",
+                [format!("-{days} days")],
+            )
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        if removed > 0 {
+            self.db
+                .execute(
+                    "INSERT INTO events (id, session_id, kind, source, code)
+                     VALUES (?1, ?2, 'memory.purged', 'core', ?3)",
+                    params![Uuid::new_v4().to_string(), self.session_id, format!("entries:{removed}")],
+                )
+                .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        }
+        Ok(removed)
+    }
+
     /// Indexed files with the id of their memory entry (for the vector index).
     pub fn indexed_files_with_ids(&self) -> Result<Vec<(String, IndexedFile)>, &'static str> {
         Self::indexed_entries(&self.db)
@@ -612,6 +674,28 @@ mod tests {
         let plain = vector_bytes(&[24.0, 1.0]);
         assert!(!bytes.windows(plain.len()).any(|window| window == plain), "vectors are encrypted");
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn old_notes_and_reports_expire_but_saved_requests_and_indexed_files_stay() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let old = core.remember("Ancienne information").unwrap();
+        let recent = core.remember("Information récente").unwrap();
+        let report = core.save_report("Ancien rapport").unwrap();
+        let routine = core.save_routine("Résume mes notes").unwrap();
+        for id in [&old, &report, &routine] {
+            core.db
+                .execute("UPDATE memory_entries SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1", [id])
+                .unwrap();
+        }
+        assert_eq!(core.memory_retention_days(), 0, "kept until erased by default");
+        assert_eq!(core.apply_memory_retention(), Ok(0));
+        assert_eq!(core.set_memory_retention_days(MAX_MEMORY_RETENTION_DAYS + 1), Err("SETTINGS_INVALID"));
+        assert_eq!(core.set_memory_retention_days(30), Ok(2));
+        assert_eq!(core.memories().unwrap().iter().map(|note| note.id.as_str()).collect::<Vec<_>>(), [recent.as_str()]);
+        assert!(core.reports().unwrap().is_empty());
+        assert_eq!(core.routines().unwrap().len(), 1, "saved requests are never expired");
+        assert_eq!(core.memory_retention_days(), 30);
     }
 
     #[test]

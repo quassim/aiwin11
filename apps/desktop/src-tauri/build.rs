@@ -84,6 +84,8 @@ fn main() {
         "clear_session_context",
         "set_extra_folders",
         "get_embedding_model",
+        "get_memory_retention",
+        "set_memory_retention",
         "set_embedding_model",
         "save_routine",
         "update_routine",

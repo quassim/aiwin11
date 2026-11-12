@@ -19,8 +19,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | État | Lignes | Part |
 |---|---|---|
 | ✅ Terminé et validé | 53 | 29 % |
-| 🧪 Terminé, test utilisateur à faire | 23 | 13 % |
-| 🟡 Partiel | 89 | 49 % |
+| 🧪 Terminé, test utilisateur à faire | 25 | 14 % |
+| 🟡 Partiel | 87 | 48 % |
 | ❌ À faire | 15 | 8 % |
 
 Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance de test ci-dessous.
@@ -53,6 +53,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 - [ ] « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées
 - [ ] « Stoppe toutes les tâches »
 - [ ] Lot C (AW-013 à AW-017). Inspecter et décrire une fenêtre avec le modèle local. Rechercher un contrôle, approuver un clic puis une saisie et vérifier le journal. Copier, renommer et mettre un fichier de test à la corbeille dans un dossier autorisé. Relancer AiWin11 après une tâche interrompue et vérifier son état dans l’historique.
+- [ ] Mémoire (lot D). Avec un modèle d’embeddings local choisi, retenir deux informations, indexer un fichier texte, puis demander à l’agent de chercher dans sa mémoire : il cite la note et l’extrait du fichier. Poser une question de suivi (« et ensuite ? ») : l’agent tient compte de l’échange précédent ; **Nouvelle conversation** l’oublie. Choisir une durée de conservation.
 - [ ] PowerShell approuvé. Demander l’édition et le numéro de build de Windows via PowerShell, puis essayer **Autoriser** et **Refuser**.
 - [ ] Sous-points 🧪 des lignes partielles : applications interdites et fenêtres protégées (Sécurité), placement GPU, manifestes (débit, VRAM), modèle local de secours, fichiers protégés, sauvegardes et restauration, temps « interface prête », paramètres Windows dans l’état du PC
 
@@ -70,7 +71,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Architecture multi-processus gRPC [S1 §2–3] | 🧪 Cœur, broker, passerelle de modèles, pont Windows et agent dans des processus distincts de Tauri. Session, tâches, autorisations, modèles et journal sur gRPC local. Reprise par curseur et validation Windows automatisées. |
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🧪 Routage local, cloud et mixte, registre de fournisseurs avec activation et sonde, modèles par agent dont Développement, dictée SAPI sélectionnable, voix et images. ComfyUI utilise le modèle du workflow. Nouveaux moteurs à essayer avec leurs configurations réelles. |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🧪 Terminé, test utilisateur à faire. Palette contextuelle dédiée, brouillon à relire, mode flottant, raccourcis globaux, menu de la zone de notification et notifications Windows. |
-| Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 Mémoire durable chiffrée (DPAPI) ✅, client MCP stdio (extensions déclarées, appel approuvé) ✅, recherche sémantique locale dans la mémoire ✅, synthèse vocale locale ✅, dictée locale (SAPI) ✅, génération d’images via un moteur local (API AUTOMATIC1111, non testée faute de moteur installé) ✅, demandes enregistrées et planifiées (quotidien, lecture seule) ✅ ; indexation de fichiers, MCP, voix, image, vidéo, workflows, multi-agents ❌ |
+| Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 **Mémoire 🧪** : notes chiffrées (DPAPI), mémoire de session (4 derniers échanges, jamais enregistrés, échanges locaux jamais envoyés au cloud, bouton « Nouvelle conversation »), index de fichiers choisis, index vectoriel chiffré (embeddings locaux mis en cache), recherche par l’agent dans les notes et les fichiers indexés, durée de conservation des notes et rapports. Client MCP stdio approuvé ✅, synthèse vocale et dictée locales ✅, images (AUTOMATIC1111, ComfyUI) et vidéo (ComfyUI) non testées faute de moteur, workflows enregistrés et planifiés ✅, délégation à des agents spécialisés ✅. Reste à terminer, dans l’ordre : MCP, voix, image, vidéo, workflows, multi-agents |
 | Distribution (installateur, mises à jour) | 🟡 Installateur NSIS par utilisateur (`scripts/package.ps1`) avec pont, assistant et agent embarqués, Python détecté automatiquement ; signature, mises à jour, Python/.NET embarqués ❌ |
 
 ---
@@ -117,7 +118,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Détection des modèles installés ✅, capacités 🟡, conso GPU/RAM/VRAM 🧪 (VRAM et placement par modèle), coûts API 🧪 (tarif saisi par l’utilisateur), tests de performance 🧪 (débit mesuré pendant la sonde), modèles de secours 🧪 (local), restrictions de confidentialité 🟡 | 🟡 | R3 |
 | Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques, services ; tests réels) ; actions correctives et rapport ❌ | R2 |
 | Toujours protégés, même en Avancé : suppression massive, élévation de privilèges, sécurité Windows, transactions financières, transfert de données confidentielles | 🟡 Refus par défaut (aucun outil de ce type) ; règles explicites à écrire quand ces outils existeront | R2 |
-| Mémoire : SQLite + recherche vectorielle | 🟡 SQLite ; pas de vectoriel | R6 |
+| Mémoire : SQLite + recherche vectorielle | 🧪 Index vectoriel dans SQLite (migration 010), vecteurs chiffrés par entrée et modèle local, supprimés avec l’entrée ou à la réindexation | R6 |
 | Plugins / MCP | 🧪 Client MCP stdio, serveurs déclarés par l’utilisateur | — |
 | Moteur de permissions indépendant | ✅ | — |
 
@@ -129,7 +130,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Fonctionnement entièrement local possible | ✅ Avec Ollama | — |
 | Couches : Dashboard, Chat ✅, Voice, Overlay, Settings 🟡, Workflow Editor | 🟡 | R5, R7, R8 |
 | Core : Sessions ✅, Events ✅, Tasks ✅, State 🟡, Configuration 🟡, IPC 🟡 (Tauri seulement) | 🟡 | R4 |
-| Context & Memory (RAG, index), Workflow Engine (triggers, jobs, scheduler) | 🟡 Mémoire chiffrée avec recherche sémantique locale ; planificateur de workflows (jours, démarrage) | R6, R8 |
+| Context & Memory (RAG, index), Workflow Engine (triggers, jobs, scheduler) | 🟡 Mémoire chiffrée, index vectoriel et fichiers indexés consultés par l’agent 🧪 ; planificateur de workflows (jours, démarrage) | R6, R8 |
 | Broker : Policy Engine ✅, Approvals ✅, Sandboxing 🟡, Audit ✅, Secrets ✅ | 🟡 | R4 |
 | Stack : Tailwind CSS + composants accessibles | 🔷 CSS sans framework aujourd’hui ; décider du design system en R5 | R5 |
 | Installateur signé, MSIX selon besoins | ✅ Décidé : installateur **classique** ; réalisation ❌ | R9 |
@@ -137,7 +138,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
 | M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ✅, vérification 🟡, interruption ✅ (pause, reprise, annulation), **reprise** 🟡 (pause/reprise, reprise manuelle des workflows) | 🟡 | R2, R8 |
 | M04 Sécurité : règles par ressource 🟡 (fichiers protégés par modèle de nom 🧪, fenêtres protégées 🧪, applications interdites 🧪), permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
-| M05 Mémoire de session, préférences durables, indexation sélective, historique ✅, recherche sémantique | 🟡 | R6 |
+| M05 Mémoire de session 🧪, préférences durables ✅, indexation sélective 🧪, historique ✅, recherche sémantique 🧪, conservation 🧪 | 🧪 | R6 |
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
 | M07 Déclencheurs ✅ (jours, démarrage), planification ✅, conditions 🟡 (branche après échec), tâches répétitives ✅, reprise sur erreur 🟡, éditeur visuel 🟡 | 🟡 | R8 |
 | M08 Installation, activation, mise à jour, permissions des plugins et serveurs MCP | 🟡 Serveurs MCP déclarés (exécutable et arguments fixes), appels toujours approuvés ; installation et mise à jour ❌ | R6 |

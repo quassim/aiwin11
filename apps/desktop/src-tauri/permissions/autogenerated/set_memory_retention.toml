@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-memory-retention"
+description = "Enables the set_memory_retention command without any pre-configured scope."
+commands.allow = ["set_memory_retention"]
+
+[[permission]]
+identifier = "deny-set-memory-retention"
+description = "Denies the set_memory_retention command without any pre-configured scope."
+commands.deny = ["set_memory_retention"]

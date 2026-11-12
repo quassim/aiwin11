@@ -2,6 +2,15 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-13, point « Mémoire, MCP, voix, image, vidéo, workflows, multi-agents » (lots D et E)
+
+Travail de Codex non commité enregistré tel quel (`9747305`, formatage corrigé pour que `verify.ps1` passe). Puis un sous-point à la fois, en commençant par Mémoire.
+
+- `6828e85` Index vectoriel (migration 010, `memory_vectors`) : un vecteur chiffré DPAPI par entrée et modèle local, supprimé avec l’entrée ou à la réindexation d’un fichier ; seuls la requête et les nouvelles entrées sont recalculées. `search_memory` cite aussi jusqu’à 3 extraits de fichiers indexés, présentés comme données non fiables.
+- `552991e` Mémoire de session : les 4 derniers échanges, gardés en mémoire vive par l’hôte (jamais enregistrés, jamais fournis par l’interface), aucun pour les tâches planifiées et les sous-agents, et seuls les échanges déjà traités dans le cloud partent vers un modèle cloud. Bouton **Nouvelle conversation**.
+- Conservation : durée au choix (30 jours, 90 jours, 1 an, ou jusqu’à effacement) pour les notes et les rapports, appliquée au démarrage et au changement ; demandes enregistrées et index jamais effacés automatiquement.
+- Non testé en réel : Ollama n’était pas démarré (pas de modèle d’embeddings). Ligne de test ajoutée à la liste.
+
 ## 2026-11-13, point « Contrôle Windows par l’agent » (lot C)
 
 Périmètre fixé avec l’utilisateur : terminer la ligne, y compris arrêt de processus approuvé, souris/clavier en dernier recours et PowerShell depuis une liste fermée. Avancement, un élément par commit :

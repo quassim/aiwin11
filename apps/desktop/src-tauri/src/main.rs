@@ -1073,6 +1073,18 @@ fn set_embedding_model(state: State<'_, Arc<AppState>>, model: String) -> Result
     lock_core(&state.core).set_embedding_model(&model)
 }
 
+/// Main window only: days notes and reports are kept (0: until erased).
+#[tauri::command]
+fn get_memory_retention(state: State<'_, Arc<AppState>>) -> u32 {
+    lock_core(&state.core).memory_retention_days()
+}
+
+/// Main window only: changes the retention and returns how many entries were erased now.
+#[tauri::command]
+fn set_memory_retention(state: State<'_, Arc<AppState>>, days: u32) -> Result<usize, &'static str> {
+    lock_core(&state.core).set_memory_retention_days(days)
+}
+
 /// Main window only: chooses the agent's folder (empty: AiWin11's dedicated folder). Applies at
 /// the next start.
 #[tauri::command]
@@ -1536,6 +1548,8 @@ fn main() {
             clear_session_context,
             set_extra_folders,
             get_embedding_model,
+            get_memory_retention,
+            set_memory_retention,
             set_embedding_model,
             save_routine,
             update_routine,

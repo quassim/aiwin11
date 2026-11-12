@@ -4,6 +4,14 @@ import { useEffect, useState } from "react";
 type MemoryEntry = { id: string; createdAt: string; text: string };
 type IndexedFile = { name: string; excerpt: string };
 
+/** Retention choices for notes and reports, in days (0: until erased). */
+const RETENTION_CHOICES: [number, string][] = [
+  [0, "Jusqu’à ce que je les efface"],
+  [30, "30 jours"],
+  [90, "90 jours"],
+  [365, "1 an"],
+];
+
 /** Notes the agent was allowed to keep, encrypted on this PC. */
 export function Memory() {
   const [notes, setNotes] = useState<MemoryEntry[]>();
@@ -15,6 +23,7 @@ export function Memory() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<IndexedFile[]>();
   const [busy, setBusy] = useState(false);
+  const [retention, setRetention] = useState<number>();
 
   async function editIndex(name: string, remove: boolean) {
     setBusy(true);
@@ -52,6 +61,7 @@ export function Memory() {
   useEffect(() => {
     void load();
     void invoke<string>("get_embedding_model").then(setEmbedding, () => undefined);
+    void invoke<number>("get_memory_retention").then(setRetention, () => undefined);
     void invoke<string[]>("indexed_file_names").then(setIndexed, () => setStatus("L’index est indisponible."));
   }, []);
 
@@ -98,6 +108,34 @@ export function Memory() {
         ) : (
           <button onClick={() => setConfirming(true)}>Tout effacer…</button>
         ))}
+      <div className="task-form">
+        <label htmlFor="memory-retention">Conserver les informations et les rapports des demandes planifiées</label>
+        <select
+          id="memory-retention"
+          value={retention ?? 0}
+          disabled={retention === undefined}
+          onChange={(event) => {
+            const days = Number(event.target.value);
+            void invoke<number>("set_memory_retention", { days }).then(
+              (removed) => {
+                setRetention(days);
+                setStatus(
+                  removed ? `${removed} élément(s) ancien(s) effacé(s).` : "Durée de conservation enregistrée.",
+                );
+                void load();
+              },
+              () => setStatus("La durée de conservation n’a pas pu être enregistrée."),
+            );
+          }}
+        >
+          {RETENTION_CHOICES.map(([days, label]) => (
+            <option key={days} value={days}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <p>Les demandes enregistrées et l’index de fichiers ne sont jamais effacés automatiquement.</p>
+      </div>
       <div className="task-form">
         <label htmlFor="embedding-model">Modèle d’embedding local pour la recherche (facultatif)</label>
         <input
