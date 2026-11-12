@@ -2,6 +2,16 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, nuit (suite)
+
+**Fait** : `419bc77` mode flottant (R5) ; `a1760c3` agents spécialisés limités à leurs outils (règle `agent_scope`) ; `f3a9d82` génération d’images via un moteur Stable Diffusion local (127.0.0.1 seulement ; non testé, aucun moteur installé) ; `b860265` le verrou du cœur se rétablit après une panique.
+
+**Vérifié** : `verify.ps1` (95 tests Rust).
+
+**Attention** : le catalogue compte maintenant une trentaine d’outils ; avec un petit modèle local (8B), préférer un agent spécialisé pour réduire la liste.
+
+**Reste** : R4 (processus séparés gRPC), délégation entre agents et éditeur visuel de workflows (R8), vidéo (R7), signature du code et mises à jour (R9), tests E2E de l’interface.
+
 ## 2026-11-12, nuit — R8 et MCP
 
 **Fait** : `0f891a3` + `309223f` demandes planifiées chaque jour (modèle local, profil Observation forcé, toute demande d’accord refusée — règle `unattended`, résultats chiffrés) ; `fa69d19` client MCP stdio : page **Extensions** (5 serveurs déclarés, exécutable et arguments fixes), outils `mcp_list_tools` et `mcp_call` (toujours demandé, arguments affichés) via le broker.
