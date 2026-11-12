@@ -57,6 +57,7 @@ const profiles: { id: Autonomy; label: string; description: string }[] = [
 ];
 
 const actionNames: Record<string, string> = {
+  generateVideo: "Générer une vidéo",
   describeImage: "Décrire une image générée",
   stopProcess: "Arrêter un processus",
   listApplications: "Lister les applications disponibles",

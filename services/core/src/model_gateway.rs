@@ -278,6 +278,18 @@ Il agit avec ses seuls outils et te rend sa réponse.",
             }
         }));
         functions.push(json!({
+            "name": "generate_video",
+            "description": "Soumet une génération de vidéo courte au ComfyUI local de l’utilisateur, avec le \
+workflow qu’il a enregistré (page Vidéo). La génération continue après ta réponse ; le résultat apparaît dans \
+la page Vidéo. L’utilisateur doit l’approuver ; nombre de vidéos limité par jour.",
+            "parameters": {
+                "type": "object",
+                "properties": { "prompt": { "type": "string", "description": "Description de la vidéo, en anglais de préférence" } },
+                "required": ["prompt"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "mcp_list_tools",
             "description": "Liste les outils d’un serveur MCP déclaré par l’utilisateur (page Extensions).",
             "parameters": {
@@ -1432,6 +1444,7 @@ mod tests {
                 "run_powershell_diagnostic",
                 "delegate",
                 "generate_image",
+                "generate_video",
                 "mcp_list_tools",
                 "mcp_call",
                 "list_services",
@@ -1467,6 +1480,7 @@ mod tests {
                 "run_powershell_diagnostic",
                 "delegate",
                 "generate_image",
+                "generate_video",
                 "mcp_list_tools",
                 "mcp_call",
                 "list_services",

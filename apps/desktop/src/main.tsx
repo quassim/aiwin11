@@ -111,6 +111,7 @@ type ApprovalAction =
   | { kind: "mcpListTools"; server: string }
   | { kind: "generateImage"; prompt: string; format: string }
   | { kind: "describeImage"; name: string; model: string }
+  | { kind: "generateVideo"; prompt: string }
   | { kind: "mcpCall"; server: string; tool: string; arguments: string }
   | { kind: "organizeFiles"; moves: [string, string][] }
   | { kind: "runDiagnostic"; diagnostic: string }
@@ -235,6 +236,14 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: "L’agent propose de générer une image",
       detail: `Action : générer une image (${imageFormats[action.format] ?? action.format}) avec ton moteur local et l’enregistrer dans le dossier d’images d’AiWin11.`,
+      quote: action.prompt,
+    };
+  }
+  if (action.kind === "generateVideo") {
+    return {
+      title: "L’agent propose de générer une vidéo",
+      detail:
+        "Action : soumettre le workflow vidéo enregistré à ComfyUI sur ce PC. Le résultat apparaîtra dans la page Vidéo ; une génération compte dans la limite quotidienne.",
       quote: action.prompt,
     };
   }

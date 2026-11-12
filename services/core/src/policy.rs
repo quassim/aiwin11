@@ -114,10 +114,12 @@ pub enum AgentAction {
     PowerShellDiagnostic,
     /// Describes an image AiWin11 generated with the local vision model.
     DescribeImage,
+    /// Submits one video job with the saved ComfyUI workflow (always asks).
+    GenerateVideo,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -155,6 +157,7 @@ impl AgentAction {
         Self::StopProcess,
         Self::PowerShellDiagnostic,
         Self::DescribeImage,
+        Self::GenerateVideo,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -200,6 +203,7 @@ impl AgentAction {
             Self::StopProcess => "stop_process",
             Self::PowerShellDiagnostic => "run_powershell_diagnostic",
             Self::DescribeImage => "describe_image",
+            Self::GenerateVideo => "generate_video",
         }
     }
 
@@ -298,6 +302,7 @@ impl AgentProfile {
                     action,
                     A::GenerateImage
                         | A::DescribeImage
+                        | A::GenerateVideo
                         | A::InspectWindow
                         | A::ListWindows
                         | A::ListFiles
@@ -365,7 +370,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 37] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 38] = [
+    (A::GenerateVideo, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::DescribeImage, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::PowerShellDiagnostic, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::StopProcess, [E::Deny, E::Ask, E::Ask, E::Ask]),

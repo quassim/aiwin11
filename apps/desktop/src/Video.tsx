@@ -19,8 +19,11 @@ const errors: Record<string, string> = {
   VIDEO_TIMEOUT: "Le suivi a expiré. Consulte la file de ComfyUI pour connaître l’état de la génération.",
   VIDEO_BUSY: "Une génération est déjà suivie.",
   VIDEO_TRACKING_PENDING: "Une vidéo soumise à ComfyUI attend la reprise du suivi.",
-  VIDEO_QUOTA_EXCEEDED: "Quatre tentatives d’envoi ont déjà été réservées dans les dernières 24 heures.",
+  VIDEO_QUOTA_EXCEEDED: "La limite de vidéos des dernières 24 heures est atteinte (réglable ci-dessous).",
+  VIDEO_CANCELLED: "Génération annulée.",
 };
+
+type VideoSettings = { engine: { port: number; workflow: string } | null; quota: number; used: number };
 
 export function Video({ onFinished }: { onFinished: () => void }) {
   const [port, setPort] = useState("8188");
@@ -29,6 +32,32 @@ export function Video({ onFinished }: { onFinished: () => void }) {
   const [job, setJob] = useState<Job>({ status: "idle" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [settings, setSettings] = useState<VideoSettings>();
+  const [settingsStatus, setSettingsStatus] = useState("");
+
+  const loadSettings = () =>
+    void invoke<VideoSettings>("get_video_settings").then(
+      (next) => {
+        setSettings(next);
+        if (next.engine) {
+          setPort(String(next.engine.port));
+          setWorkflow((current) => current || next.engine?.workflow || "");
+        }
+      },
+      () => undefined,
+    );
+
+  useEffect(loadSettings, []);
+
+  async function saveEngine(remove: boolean) {
+    try {
+      await invoke("set_video_engine", { engine: remove ? null : { port: portNumber, workflow } });
+      setSettingsStatus(remove ? "L’agent ne peut plus générer de vidéo." : "Workflow enregistré pour l’agent.");
+      loadSettings();
+    } catch (failure) {
+      setSettingsStatus(errors[String(failure)] ?? "Ce workflow ne peut pas être enregistré.");
+    }
+  }
   const busy = submitting || job.status === "submitting" || job.status === "queued";
   const pending = job.status === "failed" && job.canResume;
   const portNumber = Number(port);
@@ -51,7 +80,10 @@ export function Video({ onFinished }: { onFinished: () => void }) {
         if (!active) return;
         setJob(current);
         const running = current.status === "submitting" || current.status === "queued";
-        if (wasRunning && !running) onFinished();
+        if (wasRunning && !running) {
+          onFinished();
+          loadSettings();
+        }
         wasRunning = running;
       } catch {
         // Keep the last known status until the native command answers again.
@@ -152,6 +184,61 @@ export function Video({ onFinished }: { onFinished: () => void }) {
         ) : job.status === "failed" ? (
           <p>{errors[job.code] ?? "La génération n’a pas pu être confirmée."}</p>
         ) : null}
+      </div>
+      {job.status === "queued" && (
+        <div className="section-header">
+          <button
+            disabled={submitting}
+            onClick={() =>
+              void invoke("cancel_video").catch((failure) =>
+                setError(errors[String(failure)] ?? "L’annulation a échoué."),
+              )
+            }
+          >
+            Annuler la génération
+          </button>
+        </div>
+      )}
+      <div className="task-form">
+        <h3>Agent et limite quotidienne</h3>
+        <p>
+          {settings?.engine
+            ? `L’agent peut soumettre ce workflow (port ${settings.engine.port}), avec ton accord à chaque fois.`
+            : "Aucun workflow n’est enregistré : l’agent ne peut pas générer de vidéo."}
+        </p>
+        <div className="section-header">
+          <button type="button" disabled={busy || !workflow.trim()} onClick={() => void saveEngine(false)}>
+            Enregistrer ce workflow pour l’agent
+          </button>
+          {settings?.engine && (
+            <button type="button" onClick={() => void saveEngine(true)}>
+              Retirer
+            </button>
+          )}
+        </div>
+        <label htmlFor="video-quota">Vidéos par 24 heures</label>
+        <select
+          id="video-quota"
+          value={settings?.quota ?? 4}
+          disabled={!settings}
+          onChange={(event) =>
+            void invoke("set_video_quota", { quota: Number(event.target.value) }).then(loadSettings, () =>
+              setSettingsStatus("La limite n’a pas pu être enregistrée."),
+            )
+          }
+        >
+          {[1, 2, 4, 8, 12, 20].map((quota) => (
+            <option key={quota} value={quota}>
+              {quota}
+            </option>
+          ))}
+        </select>
+        {settings && (
+          <p>
+            {settings.used} envoi(s) sur {settings.quota} dans les dernières 24 heures.
+          </p>
+        )}
+        <p role="status">{settingsStatus}</p>
       </div>
       {pending && (
         <div className="section-header">

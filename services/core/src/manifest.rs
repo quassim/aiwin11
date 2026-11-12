@@ -81,6 +81,7 @@ pub enum CapabilityName {
     ProcessStop,
     PowerShellDiagnostic,
     ImageRead,
+    VideoGenerate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -111,7 +112,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 37] = [
+pub const MANIFESTS: [ToolManifest; 38] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -645,6 +646,21 @@ pub const MANIFESTS: [ToolManifest; 37] = [
         reversibility: R::NoEffect,
         timeout_ms: 105_000,
         capabilities: &[C::ImageRead],
+    },
+    ToolManifest {
+        action: AgentAction::GenerateVideo,
+        tool: "generate_video",
+        version: 1,
+        // One job on the local GPU; the video lands in ComfyUI's AiWin11 output folder, deletable.
+        risk: Risk::Medium,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Reversible,
+        timeout_ms: 20_000,
+        capabilities: &[C::VideoGenerate],
     },
 ];
 

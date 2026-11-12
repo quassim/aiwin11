@@ -223,6 +223,10 @@ pub enum ApprovalAction {
         name: String,
         model: String,
     },
+    /// The full description is shown.
+    GenerateVideo {
+        prompt: String,
+    },
     /// The server, the tool and its full arguments are shown.
     McpCall {
         server: String,
@@ -356,6 +360,8 @@ enum PlannedAction {
     GenerateImage(String, crate::images::ImageFormat),
     /// A generated image, described by the local vision model.
     DescribeImage(String),
+    /// A video job for the user's local ComfyUI.
+    GenerateVideo(String),
     Delegate(AgentProfile, String),
     McpCall {
         server: String,
@@ -1252,6 +1258,10 @@ impl TaskSlot {
                 let observation = self.generate_image(run, &prompt, format)?;
                 ("generate_image", json!({ "prompt": prompt, "format": format.code() }), observation)
             }
+            PlannedAction::GenerateVideo(prompt) => {
+                let observation = self.generate_video(run, &prompt)?;
+                ("generate_video", json!({ "prompt": prompt }), observation)
+            }
             PlannedAction::DescribeImage(name) => {
                 let observation = self.describe_image(run, &name)?;
                 ("describe_image", json!({ "name": name }), observation)
@@ -1810,6 +1820,38 @@ impl TaskSlot {
                 run.report(action, &summary, ActionStatus::Failed, Some(code));
                 format!("L’agent « {} » n’a pas pu répondre : {code}.", agent.code())
             }
+        })
+    }
+
+    /// Submits one video job with the user's saved ComfyUI workflow. Returns once ComfyUI has
+    /// accepted it: the desktop follows the job (page Vidéo).
+    fn generate_video<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, prompt: &str) -> Result<String, &'static str> {
+        let action = AgentAction::GenerateVideo;
+        let summary = "Générer une vidéo avec ComfyUI sur ce PC";
+        if lock(run.core)?.video_engine().is_none() {
+            run.report(action, summary, ActionStatus::Failed, Some("VIDEO_ENGINE_NOT_CONFIGURED"));
+            return Ok("Aucun workflow vidéo n’est enregistré pour l’agent (page Vidéo). Rien n’a été soumis.".into());
+        }
+        let approval = ApprovalAction::GenerateVideo { prompt: prompt.to_owned() };
+        let grant = match self.gate(run, action, summary, Capability::VideoGenerate, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result =
+            self.dispatching(run.core, run.task, || lock(run.core)?.agent_submit_video(run.task, grant, prompt))?;
+        let (status, code) = status_of(&result);
+        run.report(action, summary, status, code);
+        record_code(
+            run.core,
+            run.task,
+            if result.is_ok() { "video.submitted" } else { "video.failed" },
+            code.unwrap_or("ok"),
+        )?;
+        Ok(match result {
+            Ok(()) => "Vidéo soumise à ComfyUI sur ce PC. AiWin11 suit la génération ; le résultat apparaîtra dans \
+                       la page Vidéo."
+                .into(),
+            Err(code) => format!("Génération vidéo impossible : {code}. Rien n’a été soumis."),
         })
     }
 
@@ -3531,6 +3573,12 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
                 _ => Err("AGENT_REJECTED"),
             }
         }
+        ("tool", Some("generate_video"), Some(arguments), None) if arguments.len() == 1 => arguments
+            .get("prompt")
+            .and_then(Value::as_str)
+            .filter(|prompt| crate::memory::valid_note(prompt))
+            .map(|prompt| PlannedAction::GenerateVideo(prompt.trim().to_owned()))
+            .ok_or("AGENT_REJECTED"),
         ("tool", Some("describe_image"), Some(arguments), None) if arguments.len() == 1 => arguments
             .get("name")
             .and_then(Value::as_str)

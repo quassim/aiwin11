@@ -121,6 +121,8 @@ class AgentProtocolTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, arguments)
         result = self.invoke({"version": 2, "proposal": {"calls": [call("describe_image", {"name": name})]}})
         self.assertEqual(result.returncode, 0)
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("generate_video", {"prompt": "waves"})]}})
+        self.assertEqual(result.returncode, 0)
         for tool, arguments in (
             ("generate_image", {"prompt": "a cat", "format": "panorama"}),
             ("describe_image", {"name": "../secret.png"}),

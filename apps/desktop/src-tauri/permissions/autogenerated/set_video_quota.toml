@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-video-quota"
+description = "Enables the set_video_quota command without any pre-configured scope."
+commands.allow = ["set_video_quota"]
+
+[[permission]]
+identifier = "deny-set-video-quota"
+description = "Denies the set_video_quota command without any pre-configured scope."
+commands.deny = ["set_video_quota"]

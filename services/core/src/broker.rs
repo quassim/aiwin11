@@ -87,6 +87,8 @@ pub enum Capability {
     PowerShellDiagnostic = 1 << 26,
     /// Read one image AiWin11 generated, for the local vision model.
     ImageRead = 1 << 27,
+    /// Submit one video job to the user's local ComfyUI with the saved workflow.
+    VideoGenerate = 1 << 28,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -137,7 +139,7 @@ impl Policy {
 
     /// Only the authenticated supervisor can submit these already approved grants.
     pub fn from_capability_bits(bits: u32) -> Option<Self> {
-        (bits < (Capability::ImageRead as u32) * 2).then_some(Self { grants: bits })
+        (bits < (Capability::VideoGenerate as u32) * 2).then_some(Self { grants: bits })
     }
 }
 
@@ -293,7 +295,9 @@ impl Policy {
             Some(Operation::TrashLocalText(_)) if desktop || agent(Capability::FileTrash) => Ok("trash_local_text"),
             Some(Operation::ListTrash(_)) if desktop => Ok("list_trash"),
             Some(Operation::RestoreLocalText(_)) if desktop => Ok("restore_local_text"),
-            Some(Operation::GenerateLocalVideo(_)) if desktop => Ok("generate_local_video"),
+            Some(Operation::GenerateLocalVideo(_)) if desktop || agent(Capability::VideoGenerate) => {
+                Ok("generate_local_video")
+            }
             Some(Operation::DeleteLocalText(input)) if peer == Peer::DesktopInspector => {
                 if input.confirmed {
                     Ok("delete_local_text")

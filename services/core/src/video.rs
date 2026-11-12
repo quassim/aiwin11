@@ -33,6 +33,9 @@ const LOCAL_NODES: &[&str] = &[
 const MAX_JSON: usize = 256 * 1024;
 const MAX_REPLY: usize = 512 * 1024;
 const WAIT_LIMIT: Duration = Duration::from_secs(20 * 60);
+/// Submissions allowed per rolling 24 hours, by default and at most.
+pub const DEFAULT_VIDEO_QUOTA: u32 = 4;
+pub const MAX_VIDEO_QUOTA: u32 = 20;
 
 pub struct VideoRequest {
     port: u16,
@@ -127,7 +130,31 @@ fn video_client() -> Result<Client, &'static str> {
 }
 
 impl VideoTicket {
-    pub fn follow(self) -> Result<String, &'static str> {
+    /// Cancels this job only: removed from ComfyUI's queue while waiting, interrupted while it
+    /// runs. Another program's job is never touched.
+    pub fn cancel(&self) -> Result<(), &'static str> {
+        let id = Uuid::parse_str(&self.id).map_err(|_| "VIDEO_UNAVAILABLE")?.to_string();
+        let client = video_client()?;
+        let endpoint = format!("http://127.0.0.1:{}", self.port);
+        let queue = response_json(client.get(format!("{endpoint}/queue")).send())?;
+        let listed = |key: &str| {
+            queue
+                .get(key)
+                .and_then(Value::as_array)
+                .is_some_and(|jobs| jobs.iter().any(|job| job.get(1).and_then(Value::as_str) == Some(id.as_str())))
+        };
+        if listed("queue_running") {
+            response_json(client.post(format!("{endpoint}/interrupt")).json(&json!({ "prompt_id": id })).send())
+                .or_else(|error| if error == "VIDEO_REPLY_INVALID" { Ok(Value::Null) } else { Err(error) })?;
+        } else if listed("queue_pending") {
+            response_json(client.post(format!("{endpoint}/queue")).json(&json!({ "delete": [id] })).send())
+                .or_else(|error| if error == "VIDEO_REPLY_INVALID" { Ok(Value::Null) } else { Err(error) })?;
+        }
+        Ok(())
+    }
+
+    /// Waits for the job's result; `cancelled` is checked between polls.
+    pub fn follow(self, cancelled: impl Fn() -> bool) -> Result<String, &'static str> {
         let id = Uuid::parse_str(&self.id).map_err(|_| "VIDEO_UNAVAILABLE")?.to_string();
         let client = video_client()?;
         let endpoint = format!("http://127.0.0.1:{}/history/{id}", self.port);
@@ -135,6 +162,9 @@ impl VideoTicket {
         let mut poll_failures = 0;
         while started.elapsed() < WAIT_LIMIT {
             std::thread::sleep(Duration::from_secs(2));
+            if cancelled() {
+                return Err("VIDEO_CANCELLED");
+            }
             let history = match response_json(client.get(&endpoint).send()) {
                 Ok(history) => history,
                 Err("VIDEO_ENGINE_UNAVAILABLE") if poll_failures < 2 => {
@@ -156,7 +186,93 @@ impl VideoTicket {
     }
 }
 
+/// The video engine the agent may use: ComfyUI's local port and the user's saved workflow.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoEngine {
+    pub port: u16,
+    pub workflow: String,
+}
+
 impl Core {
+    pub fn video_engine(&self) -> Option<VideoEngine> {
+        self.setting("video.engine").ok().flatten().and_then(|json| serde_json::from_str(&json).ok())
+    }
+
+    /// Saves the workflow for the agent (checked like any submission); an empty workflow
+    /// removes it.
+    pub fn set_video_engine(&mut self, engine: Option<VideoEngine>) -> Result<(), &'static str> {
+        match &engine {
+            Some(engine) => {
+                VideoRequest::new(engine.port, &engine.workflow, "test")?;
+                let json = serde_json::to_string(engine).map_err(|_| "VIDEO_UNAVAILABLE")?;
+                self.db.execute(
+                    "INSERT INTO settings (key, value) VALUES ('video.engine', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                    [json],
+                )
+            }
+            None => self.db.execute("DELETE FROM settings WHERE key = 'video.engine'", []),
+        }
+        .map_err(|_| "VIDEO_UNAVAILABLE")?;
+        self.journal("settings.video.engine.changed", Some(if engine.is_some() { "saved" } else { "removed" }))
+            .map_err(|_| "VIDEO_UNAVAILABLE")
+    }
+
+    /// Submissions allowed per 24 hours, and how many were reserved in the last 24 hours.
+    pub fn video_quota(&self) -> (u32, u32) {
+        let quota = self
+            .setting("video.daily_quota")
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse().ok())
+            .filter(|quota| (1..=MAX_VIDEO_QUOTA).contains(quota))
+            .unwrap_or(DEFAULT_VIDEO_QUOTA);
+        let used = self
+            .db
+            .query_row(
+                "SELECT count(*) FROM events WHERE kind = 'video.submission.reserved'
+                 AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        (quota, used)
+    }
+
+    pub fn set_video_quota(&mut self, quota: u32) -> Result<(), &'static str> {
+        if !(1..=MAX_VIDEO_QUOTA).contains(&quota) {
+            return Err("SETTINGS_INVALID");
+        }
+        self.db
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('video.daily_quota', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [quota.to_string()],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.journal("settings.video.quota.changed", None).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
+    /// Submission by the agent (after the user's approval): one tracked job at a time, the
+    /// quota, the broker, then the ticket is stored so the desktop follows it.
+    pub fn agent_submit_video(&mut self, task: &str, grant: Policy, prompt: &str) -> Result<(), &'static str> {
+        let engine = self.video_engine().ok_or("VIDEO_ENGINE_NOT_CONFIGURED")?;
+        let request = VideoRequest::new(engine.port, &engine.workflow, prompt)?;
+        if self.video_ticket()?.is_some() {
+            return Err("VIDEO_TRACKING_PENDING");
+        }
+        let command = self
+            .agent_command(task, Operation::GenerateLocalVideo(Default::default()))
+            .map_err(|_| "VIDEO_NOT_AUTHORIZED")?;
+        self.authorize_dispatch(grant, Peer::Agent, &command).map_err(|_| "VIDEO_NOT_AUTHORIZED")?;
+        self.reserve_video_submission()?;
+        let ticket = request.submit()?;
+        self.set_video_ticket(Some(&ticket))
+    }
+
     pub fn video_ticket(&self) -> Result<Option<VideoTicket>, &'static str> {
         self.setting("video.active_job")
             .map_err(|_| "VIDEO_UNAVAILABLE")?
@@ -192,7 +308,13 @@ impl Core {
                 |row| row.get(0),
             )
             .map_err(|_| "VIDEO_UNAVAILABLE")?;
-        if count >= 4 {
+        let quota = tx
+            .query_row("SELECT value FROM settings WHERE key = 'video.daily_quota'", [], |row| row.get::<_, String>(0))
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .filter(|quota| (1..=MAX_VIDEO_QUOTA).contains(quota))
+            .unwrap_or(DEFAULT_VIDEO_QUOTA);
+        if count >= quota {
             return Err("VIDEO_QUOTA_EXCEEDED");
         }
         tx.execute(
@@ -258,6 +380,30 @@ fn output_filename(entry: &Value, node: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_saved_engine_is_checked_and_the_quota_is_configurable() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        assert_eq!(core.video_quota(), (DEFAULT_VIDEO_QUOTA, 0));
+        assert_eq!(core.set_video_quota(0), Err("SETTINGS_INVALID"));
+        core.set_video_quota(1).unwrap();
+        core.reserve_video_submission().unwrap();
+        assert_eq!(core.reserve_video_submission(), Err("VIDEO_QUOTA_EXCEEDED"));
+        assert_eq!(core.video_quota(), (1, 1));
+        let bad = VideoEngine { port: 8188, workflow: "{}".into() };
+        assert_eq!(core.set_video_engine(Some(bad)), Err("VIDEO_WORKFLOW_INVALID"));
+        assert_eq!(core.video_engine(), None);
+        let workflow = json!({
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{AIWIN11_PROMPT}}"}},
+            "2": {"class_type": "SaveVideo", "inputs": {}}
+        })
+        .to_string();
+        let engine = VideoEngine { port: 8188, workflow };
+        core.set_video_engine(Some(engine.clone())).unwrap();
+        assert_eq!(core.video_engine(), Some(engine));
+        core.set_video_engine(None).unwrap();
+        assert_eq!(core.video_engine(), None);
+    }
 
     #[test]
     fn tracking_ticket_and_daily_quota_are_kept_in_the_store() {

@@ -90,6 +90,8 @@ struct AppState {
     desktop: desktop::DesktopState,
     vision: Mutex<()>,
     video: Mutex<VideoJob>,
+    /// Set by "Annuler la génération"; the follower stops at its next poll.
+    video_cancel: std::sync::atomic::AtomicBool,
     /// Process start, and the time the interface first reported itself rendered (T-001).
     launched: Instant,
     ui_ready_ms: OnceLock<u64>,
@@ -118,7 +120,68 @@ enum VideoJob {
 
 #[tauri::command]
 fn video_status(state: State<'_, Arc<AppState>>) -> Result<VideoJob, &'static str> {
-    state.video.lock().map(|job| job.clone()).map_err(|_| "VIDEO_UNAVAILABLE")
+    let state = Arc::clone(state.inner());
+    let mut job = state.video.lock().map_err(|_| "VIDEO_UNAVAILABLE")?;
+    // A job the agent submitted (after the user's approval) is followed as soon as it is seen.
+    if matches!(*job, VideoJob::Idle | VideoJob::Completed { .. } | VideoJob::Failed { can_resume: false, .. }) {
+        let pending = {
+            let mut core = lock_core(&state.core);
+            match core.video_ticket() {
+                Ok(Some(ticket)) => core.authorize_video().ok().map(|task| (ticket, task)),
+                _ => None,
+            }
+        };
+        if let Some((ticket, task)) = pending {
+            *job = VideoJob::Queued;
+            let follower = Arc::clone(&state);
+            tauri::async_runtime::spawn_blocking(move || follow_video(&follower, task.as_deref(), ticket, true));
+        }
+    }
+    Ok(job.clone())
+}
+
+/// Main window only: the workflow and port the agent may use, and the daily quota.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoSettings {
+    engine: Option<aiwin11_core::video::VideoEngine>,
+    quota: u32,
+    used: u32,
+}
+
+#[tauri::command]
+fn get_video_settings(state: State<'_, Arc<AppState>>) -> VideoSettings {
+    let core = lock_core(&state.core);
+    let (quota, used) = core.video_quota();
+    VideoSettings { engine: core.video_engine(), quota, used }
+}
+
+#[tauri::command]
+fn set_video_engine(
+    state: State<'_, Arc<AppState>>,
+    engine: Option<aiwin11_core::video::VideoEngine>,
+) -> Result<(), &'static str> {
+    lock_core(&state.core).set_video_engine(engine)
+}
+
+#[tauri::command]
+fn set_video_quota(state: State<'_, Arc<AppState>>, quota: u32) -> Result<(), &'static str> {
+    lock_core(&state.core).set_video_quota(quota)
+}
+
+/// Main window only: cancels the followed job in ComfyUI (only that job).
+#[tauri::command]
+async fn cancel_video(state: State<'_, Arc<AppState>>) -> Result<(), &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let ticket = lock_core(&state.core).video_ticket()?.ok_or("VIDEO_UNAVAILABLE")?;
+        let result = ticket.cancel();
+        state.video_cancel.store(true, std::sync::atomic::Ordering::Release);
+        let _ = lock_core(&state.core).journal("video.cancel.requested", None);
+        result
+    })
+    .await
+    .map_err(|_| "VIDEO_UNAVAILABLE")?
 }
 
 #[tauri::command]
@@ -190,8 +253,10 @@ fn follow_video(state: &AppState, task: Option<&str>, ticket: aiwin11_core::vide
     if let Ok(mut job) = state.video.lock() {
         *job = VideoJob::Queued;
     }
-    let outcome = ticket.follow();
-    let terminal = matches!(&outcome, Ok(_) | Err("VIDEO_GENERATION_FAILED" | "VIDEO_OUTPUT_MISSING"));
+    state.video_cancel.store(false, std::sync::atomic::Ordering::Release);
+    let outcome = ticket.follow(|| state.video_cancel.load(std::sync::atomic::Ordering::Acquire));
+    let terminal =
+        matches!(&outcome, Ok(_) | Err("VIDEO_GENERATION_FAILED" | "VIDEO_OUTPUT_MISSING" | "VIDEO_CANCELLED"));
     let mut can_resume = saved;
     if terminal && saved {
         can_resume = lock_core(&state.core).set_video_ticket(None).is_err();
@@ -1533,6 +1598,7 @@ fn main() {
             };
             app.manage(Arc::new(AppState {
                 video: Mutex::new(video),
+                video_cancel: std::sync::atomic::AtomicBool::new(false),
                 files,
                 core: Mutex::new(core),
                 task: TaskSlot::default(),
@@ -1634,6 +1700,10 @@ fn main() {
             video_status,
             start_video,
             resume_video,
+            get_video_settings,
+            set_video_engine,
+            set_video_quota,
+            cancel_video,
             forget_video_tracking,
             updates_configured,
             check_update,

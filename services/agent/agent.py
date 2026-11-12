@@ -176,6 +176,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "mcp_list_tools": {"server": is_mcp_server},
     "generate_image": {"prompt": is_note, "format": ("square", "landscape", "portrait")},
     "describe_image": {"name": is_image_name},
+    "generate_video": {"prompt": is_note},
     "delegate": {
         "agent": ("office", "windows_admin", "development", "research", "multimedia", "read_only"),
         "request": is_note,
