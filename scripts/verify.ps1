@@ -49,6 +49,7 @@ if (Test-Path $venvPython) {
 }
 Step 'ESLint + Prettier' { npm --prefix apps/desktop run lint }
 Step 'Interface (tsc + vite)' { npm --prefix apps/desktop run build }
+Step 'Tests de composants (Vitest)' { npm --prefix apps/desktop run test }
 Step 'cargo fmt --check' { cargo fmt --all --check }
 Step 'Pont .NET' { dotnet build services/windows/AiWin11.Windows.csproj --configuration Release -nologo -v q }
 Step 'Assistant administrateur .NET' { dotnet build services/admin/AiWin11.Admin.csproj --configuration Release -nologo -v q }

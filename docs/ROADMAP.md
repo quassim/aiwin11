@@ -255,7 +255,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - ✅ **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
 - ✅ **Durée de conservation et effacement** de l’historique ; export du journal d’audit (JSON).
 - ✅ Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; charge utile = code non sensible (fournisseur, numéro d’étape). 🟡 Pas de payload JSON structuré.
-- ✅ Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`. ❌ Tests de composants React, test E2E de l’application.
+- ✅ Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`, tests de composants React (Vitest + Testing Library, commandes Tauri simulées) dans `verify.ps1`. ❌ Test E2E de l’application complète.
 - 🟡 Mesures : RAM au repos ✅, évaluation de politique ✅, démarrage (fenêtre) 🟡 ; navigation et « interface prête » ❌ (`scripts/measure.ps1`, test `measure_permission_decision_latency`).
 - Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).
 - Audit d’accessibilité au lecteur d’écran (Narrateur, NVDA).

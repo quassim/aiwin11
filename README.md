@@ -161,6 +161,7 @@ Commandes individuelles :
 
 ```powershell
 npm --prefix apps/desktop run lint
+npm --prefix apps/desktop run test
 .venv\Scripts\python -m ruff check services/agent
 .venv\Scripts\python -m mypy --config-file services/agent/pyproject.toml services/agent
 cargo fmt --all --check
