@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
-import { agentState, agentStateLabels } from "./agentState";
+import { agentState, agentStateLabels, transferLabel } from "./agentState";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
@@ -354,6 +354,7 @@ const activityNames: Record<string, string> = {
   "model.budget.exceeded": "Budget cloud de la demande atteint",
   "settings.budget.changed": "Budget cloud modifié",
   "model.fallback.cloud": "Bascule vers le cloud (Ollama indisponible, autorisée)",
+  "model.cloud.request": "Envoi de la demande au cloud",
   "settings.retention.changed": "Durée de conservation modifiée",
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
@@ -549,6 +550,8 @@ function App() {
   const [pauseState, setPauseState] = useState<"" | "requested" | "paused">("");
   const [lastStage, setLastStage] = useState("");
   const [lastFailed, setLastFailed] = useState(false);
+  const [sentToCloud, setSentToCloud] = useState(false);
+  const [ranOnce, setRanOnce] = useState(false);
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
   const canSend =
     !running &&
@@ -692,6 +695,8 @@ function App() {
     setPauseState("");
     setLastStage("");
     setLastFailed(false);
+    setSentToCloud(false);
+    setRanOnce(true);
     setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "modelSelected") {
@@ -711,6 +716,7 @@ function App() {
         return;
       }
       setLastStage(update.stage);
+      if (update.stage === "model.cloud.request") setSentToCloud(true);
       if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
       if (update.stage === "task.paused") setPauseState("paused");
       if (update.stage === "task.resumed") setPauseState("");
@@ -810,10 +816,14 @@ function App() {
             approvalPending: pendingApproval !== undefined,
             lastStage,
           });
+          const transfer = transferLabel(running, sentToCloud, ranOnce);
           return (
-            <p className={`agent-state agent-state-${state}`} role="status" aria-live="polite">
-              <span aria-hidden="true" className="agent-state-dot" /> Agent : {agentStateLabels[state]}
-            </p>
+            <div className={`agent-state agent-state-${state}`} role="status" aria-live="polite">
+              <p>
+                <span aria-hidden="true" className="agent-state-dot" /> Agent : {agentStateLabels[state]}
+              </p>
+              {transfer && <p className={sentToCloud ? "transfer transfer-cloud" : "transfer"}>{transfer}</p>}
+            </div>
           );
         })()}
         <nav aria-label="Navigation principale">

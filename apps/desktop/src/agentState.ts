@@ -42,3 +42,10 @@ export function agentState(input: {
   if (planningStages.has(input.lastStage)) return "planning";
   return "analysing";
 }
+
+/** Where the current or last request's data went ([S0 §6]: local / cloud transfer visible). */
+export function transferLabel(running: boolean, sentToCloud: boolean, ranOnce: boolean): string | undefined {
+  if (sentToCloud) return running ? "Données envoyées au cloud" : "Dernière demande envoyée au cloud";
+  if (running) return "Traitement sur ce PC";
+  return ranOnce ? "Dernière demande restée sur ce PC" : undefined;
+}

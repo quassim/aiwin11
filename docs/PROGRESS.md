@@ -24,6 +24,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - État de l’agent toujours visible dans la barre latérale (inactif, analyse, planification, attente d’approbation, exécution, pause, nouvel essai, erreur), déduit des étapes envoyées par le cœur, `role="status"`. Vérifié par `verify.ps1` (Vitest), non regardé dans l’application.
 
+- Indicateur de transfert sous l’état de l’agent : traitement sur ce PC ou données envoyées au cloud (nouvelle étape `model.cloud.request` avant chaque appel cloud), puis rappel pour la dernière demande. Vérifié par `verify.ps1` (Vitest) ; pas de test Rust de l’étape (aucun faux fournisseur cloud), non testé avec une vraie clé.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

@@ -894,12 +894,17 @@ impl TaskSlot {
                     record_code(core, task, "model.cost.exceeded", &format!("milli:{}", cost.estimate(cloud_tokens)))?;
                     return Err("CLOUD_COST_EXCEEDED");
                 }
-                Some(model) => openai::propose(vendor, model, &openai_messages(prompt, &history), &mut sink).map(
-                    |(proposal, used)| {
-                        cloud_tokens += used;
-                        proposal
-                    },
-                ),
+                Some(model) => {
+                    // Shown while it happens ([S0 §6]): the request and its observations leave this PC.
+                    record_code(core, task, "model.cloud.request", vendor.code())?;
+                    progress(TaskUpdate::stage("model.cloud.request"));
+                    openai::propose(vendor, model, &openai_messages(prompt, &history), &mut sink).map(
+                        |(proposal, used)| {
+                            cloud_tokens += used;
+                            proposal
+                        },
+                    )
+                }
             };
             if cloud_model.is_some() && cloud_tokens > 0 {
                 record_code(core, task, "model.usage", &format!("tokens:{cloud_tokens}"))?;
