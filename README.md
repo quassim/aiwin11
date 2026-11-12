@@ -30,6 +30,11 @@ $env:OLLAMA_MODELS = Join-Path $PWD '.tools/ollama-models'
 
 La description de fenêtre et l’analyse d’image exigent qu’Ollama confirme que ses fonctions cloud sont désactivées ; le lancement ci-dessus le fait. [Documentation Ollama](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
 
+## Installer AiWin11 (sans environnement de développement)
+
+Double-clique sur `Installateur.cmd` (ou `scripts\package.ps1`) : il produit `targeteleaseundle
+sis\AiWin11_0.1.0_x64-setup.exe`. Cet installateur s’installe pour l’utilisateur courant, sans droits administrateur, dans `%LOCALAPPDATA%\AiWin11`, avec le pont Windows, l’assistant administrateur et l’agent. Il faut encore installer séparément Python 3.13 (dans le `PATH`), le runtime .NET 10 et Ollama. AiWin11 trouve Python tout seul (`AIWIN11_PYTHON` reste possible pour forcer un interpréteur). Installateur non signé : Windows SmartScreen peut demander une confirmation.
+
 ## Utiliser l’assistant
 
 1. Dans **Modèles**, détectez les modèles Ollama et choisissez le modèle de l’agent. Facultatif : détectez les modèles de vision et choisissez-en un. Ces choix (fournisseur, modèle, modèle de vision, identifiant du modèle OpenAI) sont mémorisés et revérifiés auprès d’Ollama au démarrage suivant.

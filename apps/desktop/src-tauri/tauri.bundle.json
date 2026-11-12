@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": {
+      "../../../target/companions/*": "./"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

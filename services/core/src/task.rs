@@ -1990,10 +1990,7 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
 }
 
 fn run_agent(proposal: &Proposal) -> Result<PlannedAction, &'static str> {
-    let python = std::env::var_os("AIWIN11_PYTHON")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute() && path.is_file())
-        .ok_or("AGENT_UNAVAILABLE")?;
+    let python = python_interpreter().ok_or("AGENT_UNAVAILABLE")?;
     let executable = std::env::current_exe().map_err(|_| "AGENT_UNAVAILABLE")?;
     let directory = executable.parent().ok_or("AGENT_UNAVAILABLE")?;
     let script = directory.join("aiwin11_agent.py");
@@ -2001,6 +1998,20 @@ fn run_agent(proposal: &Proposal) -> Result<PlannedAction, &'static str> {
         return Err("AGENT_UNAVAILABLE");
     }
     invoke_agent(python.as_path(), &script, directory, proposal)
+}
+
+/// The Python interpreter for the agent: `AIWIN11_PYTHON` if set, otherwise the first real
+/// `python.exe` on the PATH (the Microsoft Store alias in `WindowsApps` is skipped: it is a
+/// stub that may open the Store instead of running a script).
+fn python_interpreter() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("AIWIN11_PYTHON").map(PathBuf::from) {
+        return (path.is_absolute() && path.is_file()).then_some(path);
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .filter(|directory| directory.is_absolute())
+        .filter(|directory| !directory.to_string_lossy().to_ascii_lowercase().contains("windowsapps"))
+        .map(|directory| directory.join("python.exe"))
+        .find(|candidate| candidate.is_file())
 }
 
 fn invoke_agent(

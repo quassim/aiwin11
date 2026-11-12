@@ -21,7 +21,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies `manual` et `local_first` avec secours cloud explicite, modèles chargés et VRAM ; budget en jetons par demande cloud ✅ ; voix/image/vidéo, coût en euros, autres stratégies ❌ |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification ✅, raccourci global Ctrl+Alt+Espace ouvrant le champ de demande (palette simple) ✅ ; overlay flottant ❌ |
 | Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | ❌ |
-| Distribution (installateur, mises à jour) | ❌ Usage développeur seulement |
+| Distribution (installateur, mises à jour) | 🟡 Installateur NSIS par utilisateur (`scripts/package.ps1`) avec pont, assistant et agent embarqués, Python détecté automatiquement ; signature, mises à jour, Python/.NET embarqués ❌ |
 
 ---
 
