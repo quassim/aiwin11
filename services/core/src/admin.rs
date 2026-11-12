@@ -161,6 +161,8 @@ fn run_elevated(arguments: &str) -> Result<(), &'static str> {
     if !helper.is_file() {
         return Err("ADMIN_HELPER_MISSING");
     }
+    // Held until the helper exits: nobody can replace or modify the file in the meantime.
+    let _locked = verify_helper(&helper)?;
     let file = wide(helper.as_os_str());
     let verb = wide(OsStr::new("runas"));
     let parameters = wide(OsStr::new(arguments));
@@ -199,11 +201,58 @@ fn run_elevated(arguments: &str) -> Result<(), &'static str> {
     }
 }
 
+/// SHA-256 of the helper expected by this build (set by `scripts/package.ps1`; absent in
+/// development builds, where only the lock applies).
+const EXPECTED_SHA256: Option<&str> = option_env!("AIWIN11_ADMIN_SHA256");
+
+/// Opens the helper with read sharing only (no writer, no deletion, no rename while open),
+/// then checks its SHA-256 against the value pinned at build time.
+fn verify_helper(helper: &std::path::Path) -> Result<std::fs::File, &'static str> {
+    use std::{io::Read, os::windows::fs::OpenOptionsExt};
+    const FILE_SHARE_READ: u32 = 0x1;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(helper)
+        .map_err(|_| "ADMIN_HELPER_TAMPERED")?;
+    if let Some(expected) = EXPECTED_SHA256 {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|_| "ADMIN_HELPER_TAMPERED")?;
+        if !sha256_hex(&bytes).is_some_and(|digest| digest.eq_ignore_ascii_case(expected.trim())) {
+            return Err("ADMIN_HELPER_TAMPERED");
+        }
+    }
+    Ok(file)
+}
+
+fn sha256_hex(bytes: &[u8]) -> Option<String> {
+    use windows_sys::Win32::Security::Cryptography::{BCryptHash, BCRYPT_SHA256_ALG_HANDLE};
+    let mut digest = [0u8; 32];
+    // SAFETY: pseudo-handle algorithm, borrowed input, 32-byte output buffer.
+    let status = unsafe {
+        BCryptHash(
+            BCRYPT_SHA256_ALG_HANDLE,
+            ptr::null(),
+            0,
+            bytes.as_ptr(),
+            bytes.len() as u32,
+            digest.as_mut_ptr(),
+            32,
+        )
+    };
+    (status == 0).then(|| digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use aiwin11_contracts::v1::{AdminCleanTemp, AdminService};
     use rusqlite::Connection;
+
+    #[test]
+    fn sha256_matches_a_known_vector() {
+        assert_eq!(sha256_hex(b"abc").unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
 
     #[test]
     fn service_names_are_validated_and_protected_services_refused() {
