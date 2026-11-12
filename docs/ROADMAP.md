@@ -60,7 +60,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 |---|---|
 | Socle (lots A et B : AW-001 à AW-012) | ✅ Application Tauri, contrats Protobuf, broker, pont .NET, passerelle Ollama/OpenAI, agent, streaming, scénario « Ouvre le Bloc-notes » validé en réel |
 | Moteur de politiques, profils d’autonomie, approbations, simulation | ✅ |
-| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers `.txt` d’un dossier dédié, lecture et vision de la fenêtre précédente, opérations administrateur via l’assistant élevé ; manquent : dossiers au choix, UIA Invoke/SetValue, souris/clavier génériques, PowerShell approuvé |
+| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers texte/Markdown/CSV du dossier dédié ou choisi, lecture UIA de la fenêtre précédente avec clic et saisie sur un contrôle, recherche de contrôle 🧪, vision locale, opérations administrateur via l’assistant élevé ; manquent (périmètre fixé le 13/11) : redimensionner une fenêtre, détail d’un processus, capture d’écran pour l’agent, plusieurs dossiers, découverte des applications, arrêt d’un processus approuvé, souris/clavier en dernier recours, PowerShell depuis une liste fermée |
 | Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | 🔷 Décision ADR-011 : Protobuf sur stdio, un processus par commande (pont, agent, assistant, MCP) ; cœur et broker dans le processus Tauri ; retour à gRPC prévu si un service permanent devient nécessaire |
@@ -195,7 +195,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ✅ nom et contenu, pour l’agent et dans la page Fichiers) | 🟡 | R2 |
 | ProcessService (List ✅ lecture seule, Inspect ❌, Terminate ❌) | 🟡 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre | R2 |
-| UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement ❌) | 🟡 | R2 |
+| UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement 🧪 `find_control` par nom ou type dans la fenêtre lue) | 🧪 | R2 |
 | InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
 | ShellService (ExecuteApprovedCommand) | 🟡 Liste fermée de diagnostics en lecture seule (réseau, Wi-Fi, heure) ; pas de PowerShell libre (volontaire) | R2 |
 | SystemService (GetSystemMetrics ✅ mémoire, processeur, disques, durée de fonctionnement ; GetHardwareInfo ❌) | 🟡 | R2, R3 |

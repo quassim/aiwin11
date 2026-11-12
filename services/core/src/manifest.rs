@@ -107,7 +107,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 30] = [
+pub const MANIFESTS: [ToolManifest; 31] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -539,6 +539,21 @@ pub const MANIFESTS: [ToolManifest; 30] = [
         reversibility: R::NoEffect,
         timeout_ms: 10_000,
         capabilities: &[C::FileRead],
+    },
+    ToolManifest {
+        action: AgentAction::FindControl,
+        tool: "find_control",
+        version: 1,
+        // Searches the tree the user already approved reading; nothing new reaches the bridge.
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 1_000,
+        capabilities: &[C::WindowInspect],
     },
 ];
 

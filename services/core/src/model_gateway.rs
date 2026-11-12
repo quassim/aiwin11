@@ -317,6 +317,18 @@ nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’un
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
+            "name": "find_control",
+            "description": "Cherche, dans la fenêtre déjà lue avec inspect_window dans cette même demande, les \
+        contrôles dont le nom ou le type contient le texte donné (sans tenir compte des majuscules). Renvoie leurs \
+        numéros [n], utilisables avec click_control ou set_control_value. Ne relit pas l’écran.",
+            "parameters": {
+                "type": "object",
+                "properties": { "query": { "type": "string", "minLength": 2, "maxLength": 64 } },
+                "required": ["query"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "click_control",
             "description": "Clique sur un contrôle (bouton, case, onglet…) de la fenêtre lue avec inspect_window dans \
         cette même demande, désigné par son numéro [n]. L’utilisateur doit l’approuver à chaque fois.",
@@ -1302,6 +1314,7 @@ mod tests {
                 "get_system_status",
                 "list_processes",
                 "inspect_window",
+                "find_control",
                 "click_control",
                 "set_control_value",
                 "type_in_notepad",
@@ -1330,6 +1343,7 @@ mod tests {
                 "get_system_status",
                 "list_processes",
                 "inspect_window",
+                "find_control",
                 "click_control",
                 "set_control_value",
                 "type_in_notepad"

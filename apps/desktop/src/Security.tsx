@@ -57,6 +57,7 @@ const profiles: { id: Autonomy; label: string; description: string }[] = [
 ];
 
 const actionNames: Record<string, string> = {
+  findControl: "Chercher un contrôle dans la fenêtre lue",
   launchApplication: "Ouvrir le Bloc-notes",
   listFiles: "Lister les fichiers",
   readFile: "Lire un fichier",

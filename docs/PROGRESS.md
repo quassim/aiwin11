@@ -2,6 +2,12 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-13, point « Contrôle Windows par l’agent » (lot C)
+
+Périmètre fixé avec l’utilisateur : terminer la ligne, y compris arrêt de processus approuvé, souris/clavier en dernier recours et PowerShell depuis une liste fermée. Avancement, un élément par commit :
+
+- 🧪 `find_control` : recherche de contrôles par nom ou type dans la fenêtre déjà lue (FindElement), sans nouvelle lecture de l’écran.
+
 ## 2026-11-13, statut « test utilisateur à faire »
 
 Nouveau statut 🧪 dans `docs/ROADMAP.md` : terminé, tests automatiques au vert, mais jamais essayé dans l’application lancée. ✅ veut désormais dire terminé **et** validé (essai de l’utilisateur ou test réel sur la machine de référence). Toute nouvelle fonction entre en 🧪 ; la liste « Tests utilisateur à faire » en tête de la feuille de route sert de séance de test. Décompte : 53 ✅, 21 🧪, 90 🟡, 16 ❌ sur 180 lignes.

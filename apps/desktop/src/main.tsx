@@ -381,6 +381,7 @@ const activityNames: Record<string, string> = {
   "memory.saved": "Information retenue (chiffrée)",
   "memory.deleted": "Mémoire effacée",
   "settings.embedding.changed": "Recherche dans la mémoire modifiée",
+  "control.find.completed": "Contrôles trouvés dans la fenêtre lue",
   "control.invoke.completed": "Contrôle cliqué par l’agent",
   "control.invoke.failed": "Clic sur un contrôle impossible",
   "admin.operation.completed": "Opération administrateur effectuée",

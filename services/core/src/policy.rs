@@ -101,10 +101,12 @@ pub enum AgentAction {
     Delegate,
     /// Searches file names and contents of the agent folder (read-only).
     SearchFiles,
+    /// Finds controls by name or type in the window this task already inspected (no new read).
+    FindControl,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -135,6 +137,7 @@ impl AgentAction {
         Self::GenerateImage,
         Self::Delegate,
         Self::SearchFiles,
+        Self::FindControl,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -173,6 +176,7 @@ impl AgentAction {
             Self::GenerateImage => "generate_image",
             Self::Delegate => "delegate",
             Self::SearchFiles => "search_files",
+            Self::FindControl => "find_control",
         }
     }
 
@@ -278,6 +282,7 @@ impl AgentProfile {
                     | A::InspectWindow
                     | A::Recall
                     | A::SearchMemory
+                    | A::FindControl
             ),
         }
     }
@@ -302,7 +307,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 30] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 31] = [
+    (A::FindControl, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::Delegate, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::SearchFiles, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::GenerateImage, [E::Deny, E::Ask, E::Allow, E::Allow]),
