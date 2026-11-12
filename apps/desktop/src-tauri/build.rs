@@ -69,6 +69,7 @@ fn main() {
         "set_cloud_vendor",
         "get_cloud_budget",
         "get_cloud_cost",
+        "ui_ready",
         "get_local_fallback_model",
         "get_cloud_usage",
         "get_runtime_status",

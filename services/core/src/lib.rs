@@ -828,6 +828,16 @@ impl Core {
     }
 
     /// Journals a session-level event. Kind and code are static codes, never user content.
+    /// Journals the time from process start to the first rendered interface (T-001), once
+    /// per launch. A duration only.
+    pub fn record_ui_ready(&self, elapsed_ms: u64) -> rusqlite::Result<()> {
+        self.db.execute(
+            "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'ui.ready', 'desktop', ?3)",
+            params![Uuid::new_v4().to_string(), self.session_id, format!("ms:{elapsed_ms}")],
+        )?;
+        Ok(())
+    }
+
     pub fn journal(&self, kind: &'static str, code: Option<&'static str>) -> rusqlite::Result<()> {
         self.db.execute(
             "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, ?3, 'core', ?4)",
@@ -1251,6 +1261,14 @@ mod tests {
         assert!(core.cloud_fallback_enabled());
         core.db.execute("DROP TABLE settings", []).unwrap();
         assert!(!core.cloud_fallback_enabled(), "an unreadable setting never allows the cloud");
+    }
+
+    #[test]
+    fn ui_ready_records_a_duration_only() {
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        core.record_ui_ready(1_234).unwrap();
+        let event = &core.activity().unwrap()[0];
+        assert_eq!((event.kind.as_str(), event.code.as_deref()), ("ui.ready", Some("ms:1234")));
     }
 
     #[test]

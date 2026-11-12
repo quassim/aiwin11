@@ -28,6 +28,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Modèle local de secours (T-009) dans **Modèles** : utilisé une seule fois si le modèle choisi échoue avant la première étape, après un appel d’outil de test réussi ; jamais vers le cloud. Vérifié par `verify.ps1` (réglage), bascule non testée avec Ollama réel.
 
+- Temps jusqu’à l’interface prête (T-001) : premier rendu horodaté (`ui.ready`, ms depuis le lancement), affiché dans le Centre de contrôle. Vérifié par `verify.ps1` ; valeur réelle en release à relever avec l’application lancée.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

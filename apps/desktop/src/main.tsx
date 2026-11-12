@@ -611,6 +611,13 @@ function App() {
 
   useEffect(refresh, [refresh]);
   useEffect(() => {
+    // After the first paint: the core measures the time since the process started (T-001).
+    const frame = requestAnimationFrame(() => {
+      setTimeout(() => void invoke("ui_ready").catch(() => undefined), 0);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  useEffect(() => {
     void invoke<LocalStrategy>("get_local_strategy").then(setLocalStrategy, () => undefined);
   }, []);
   useEffect(() => {

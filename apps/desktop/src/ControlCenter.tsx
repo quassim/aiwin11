@@ -12,6 +12,7 @@ type RuntimeStatus = {
   agentScript: boolean;
   python: boolean;
   adminHelper: boolean;
+  uiReadyMs: number | null;
 };
 
 const profiles: Record<string, string> = {
@@ -163,7 +164,11 @@ export function ControlCenter({
       <h2>Installation</h2>
       {runtime ? (
         <>
-          <p>AiWin11 {runtime.version}</p>
+          <p>
+            AiWin11 {runtime.version}
+            {runtime.uiReadyMs !== null &&
+              ` · interface prête en ${(runtime.uiReadyMs / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} s`}
+          </p>
           <ul>
             {(
               [

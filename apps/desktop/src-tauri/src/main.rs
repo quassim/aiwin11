@@ -2,7 +2,8 @@
 
 use std::{
     fs,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
+    time::Instant,
 };
 
 use aiwin11_core::{
@@ -81,6 +82,9 @@ struct AppState {
     task: TaskSlot,
     vision: Mutex<()>,
     video: Mutex<VideoJob>,
+    /// Process start, and the time the interface first reported itself rendered (T-001).
+    launched: Instant,
+    ui_ready_ms: OnceLock<u64>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -595,8 +599,22 @@ async fn get_model_resources() -> Result<Vec<ModelResource>, &'static str> {
     .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?
 }
 
+/// Called by the interface after its first paint; only the first call of a launch counts.
 #[tauri::command]
-fn get_runtime_status(app: tauri::AppHandle) -> Result<RuntimeStatus, &'static str> {
+fn ui_ready(state: State<'_, Arc<AppState>>) -> u64 {
+    let mut first = false;
+    let elapsed = *state.ui_ready_ms.get_or_init(|| {
+        first = true;
+        u64::try_from(state.launched.elapsed().as_millis()).unwrap_or(u64::MAX)
+    });
+    if first {
+        let _ = lock_core(&state.core).record_ui_ready(elapsed);
+    }
+    elapsed
+}
+
+#[tauri::command]
+fn get_runtime_status(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) -> Result<RuntimeStatus, &'static str> {
     let executable = std::env::current_exe().map_err(|_| "RUNTIME_UNAVAILABLE")?;
     let folder = executable.parent().ok_or("RUNTIME_UNAVAILABLE")?;
     Ok(RuntimeStatus {
@@ -605,6 +623,7 @@ fn get_runtime_status(app: tauri::AppHandle) -> Result<RuntimeStatus, &'static s
         agent_script: folder.join("aiwin11_agent.py").is_file(),
         python: aiwin11_core::task::python_available(),
         admin_helper: folder.join("AiWin11.Admin.exe").is_file(),
+        ui_ready_ms: state.ui_ready_ms.get().copied(),
     })
 }
 
@@ -616,6 +635,7 @@ struct RuntimeStatus {
     agent_script: bool,
     python: bool,
     admin_helper: bool,
+    ui_ready_ms: Option<u64>,
 }
 
 #[tauri::command]
@@ -1002,9 +1022,10 @@ fn desktop_surfaces(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
 }
 
 fn main() {
+    let launched = Instant::now();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .setup(move |app| {
             let data_dir = app.path().app_local_data_dir()?;
             fs::create_dir_all(&data_dir)?;
             let core = Core::open(&data_dir.join("aiwin11.sqlite3"))?;
@@ -1019,6 +1040,8 @@ fn main() {
                 core: Mutex::new(core),
                 task: TaskSlot::default(),
                 vision: Mutex::new(()),
+                launched,
+                ui_ready_ms: OnceLock::new(),
             }));
             // Pay the bridge's first start (runtime load, antivirus scan) now, not within a
             // command's deadline. The spare process waits idle for an authorized command.
@@ -1066,6 +1089,7 @@ fn main() {
             get_local_fallback_model,
             get_cloud_usage,
             get_runtime_status,
+            ui_ready,
             video_status,
             start_video,
             updates_configured,

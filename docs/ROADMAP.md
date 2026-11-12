@@ -220,7 +220,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | — | Provider indisponible : bascule autorisée ou erreur compréhensible | 🟡 Erreur ✅, bascule ❌ — R3 |
 | — | Instruction malveillante dans une page | 🟡 Fichiers ✅ ; pages web ❌ — R6 |
 | — | Redémarrage après interruption | ✅ |
-| T-001 | Démarrage à froid, services démarrés et états visibles | 🟡 Fenêtre principale créée en 2,9 s à froid, 0,05 s à chaud (`scripts/measure.ps1`, 12/11/2026) ; « interface prête » pas encore instrumentée — R1 |
+| T-001 | Démarrage à froid, services démarrés et états visibles | 🟡 Fenêtre principale créée en 2,9 s à froid, 0,05 s à chaud (`scripts/measure.ps1`, 12/11/2026) ; « interface prête » instrumentée (événement `ui.ready`, durée depuis le lancement du processus jusqu’au premier rendu, affichée dans le Centre de contrôle), pas encore mesurée sur la version release — R1 |
 | T-002 | Provider local | ✅ |
 | T-003 | Provider cloud | ❌ Jamais testé avec une vraie clé — R1 |
 | T-004 | Changement de modèle sans redémarrage | ✅ |
@@ -242,7 +242,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Palette p95 < 200 ms | ❌ Pas de palette — R5 |
 | Évaluation d’une permission p95 < 50 ms | ✅ p95 7,1 ms, p50 6,6 ms (politique + autorisation du broker journalisée sur SQLite disque, 500 essais, release, machine de référence, 12/11/2026) |
 | Navigation p95 < 150 ms | ❌ Non mesuré — R1 |
-| Interface prête < 3 s | 🟡 Fenêtre créée en 2,9 s au premier démarrage à froid ; le rendu React n’est pas encore horodaté — R1 |
+| Interface prête < 3 s | 🟡 Fenêtre créée en 2,9 s au premier démarrage à froid ; premier rendu React horodaté (`ui.ready`, Centre de contrôle), valeur release encore à relever — R1 |
 | RAM au repos < 350 Mo hors modèles | ✅ 178–182 Mo de mémoire privée pour 9 processus (application, WebView2, pont de réserve) après 15 s ; ensemble de travail cumulé 358–366 Mo, qui compte plusieurs fois les pages partagées de WebView2 |
 | Crash d’un agent : cœur et UI fonctionnels | ✅ L’agent Python est un processus séparé, borné dans le temps |
 | 100 % des appels d’outils par le broker, 100 % des actions tracées | ✅ |
