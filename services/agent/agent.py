@@ -43,6 +43,18 @@ def is_typed_text(value: object) -> bool:
     return isinstance(value, str) and 0 < len(value) <= MAX_TYPED_CHARS and "\x00" not in value
 
 
+MAX_SEARCH_CHARS = 64
+
+
+def is_search_query(value: object) -> bool:
+    """Search text: 2 to 64 characters once trimmed, no control character."""
+    return (
+        isinstance(value, str)
+        and 2 <= len(value.strip()) <= MAX_SEARCH_CHARS
+        and not any(ord(char) < 32 or 127 <= ord(char) < 160 for char in value)
+    )
+
+
 MAX_LISTED_WINDOWS = 20
 
 
@@ -122,6 +134,7 @@ Rule = tuple[str, ...] | Callable[[object], bool]
 TOOLS: dict[str, dict[str, Rule]] = {
     "launch_application": {"application": ("notepad", "charmap", "paint")},
     "list_text_files": {},
+    "search_text_files": {"query": is_search_query},
     "read_text_file": {"name": is_text_file_name},
     "copy_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
     "move_text_file": {"source": is_text_file_name, "destination": is_text_file_name},

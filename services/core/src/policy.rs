@@ -99,10 +99,12 @@ pub enum AgentAction {
     McpCall,
     GenerateImage,
     Delegate,
+    /// Searches file names and contents of the agent folder (read-only).
+    SearchFiles,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -132,6 +134,7 @@ impl AgentAction {
         Self::McpCall,
         Self::GenerateImage,
         Self::Delegate,
+        Self::SearchFiles,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -169,6 +172,7 @@ impl AgentAction {
             Self::McpCall => "mcp_call",
             Self::GenerateImage => "generate_image",
             Self::Delegate => "delegate",
+            Self::SearchFiles => "search_files",
         }
     }
 
@@ -248,6 +252,7 @@ impl AgentProfile {
                 A::LaunchApplication
                     | A::ListFiles
                     | A::ReadFile
+                    | A::SearchFiles
                     | A::CopyFile
                     | A::MoveFile
                     | A::TrashFile
@@ -297,8 +302,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 29] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 30] = [
     (A::Delegate, [E::Allow, E::Allow, E::Allow, E::Allow]),
+    (A::SearchFiles, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::GenerateImage, [E::Deny, E::Ask, E::Allow, E::Allow]),
     (A::McpListTools, [E::Ask, E::Ask, E::Allow, E::Allow]),
     (A::McpCall, [E::Deny, E::Ask, E::Ask, E::Ask]),

@@ -48,6 +48,17 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
+            "name": "search_text_files",
+            "description": "Cherche un mot ou une expression dans le nom et le contenu des fichiers .txt, .md et .csv du \
+dossier d’AiWin11 (lecture seule). Renvoie au plus 20 fichiers avec trois lignes correspondantes chacun.",
+            "parameters": {
+                "type": "object",
+                "properties": { "query": { "type": "string", "description": "Texte recherché, 2 à 64 caractères" } },
+                "required": ["query"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "read_text_file",
             "description": "Lit un fichier UTF-8 .txt, .md ou .csv du dossier d’AiWin11 (lecture seule, 64 Kio au plus).",
             "parameters": {
@@ -990,6 +1001,7 @@ mod tests {
             [
                 "launch_application",
                 "list_text_files",
+                "search_text_files",
                 "read_text_file",
                 "copy_text_file",
                 "move_text_file",

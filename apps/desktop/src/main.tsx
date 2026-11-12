@@ -57,6 +57,7 @@ type ApprovalAction =
   | { kind: "launch"; application: "notepad" | "charmap" | "paint" }
   | { kind: "listFiles" }
   | { kind: "readFile"; name: string }
+  | { kind: "searchFiles"; query: string }
   | { kind: "copyFile"; source: string; destination: string; characters: number }
   | { kind: "moveFile"; source: string; destination: string; characters: number }
   | { kind: "trashFile"; name: string; characters: number }
@@ -249,6 +250,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       detail: `Action : lire « ${action.name} » dans le dossier de Fichiers.`,
     };
   }
+  if (action.kind === "searchFiles") {
+    return {
+      title: "L’agent demande à chercher dans tes fichiers",
+      detail: `Action : chercher « ${action.query} » dans le nom et le contenu des fichiers du dossier de Fichiers.`,
+    };
+  }
   if (action.kind === "moveFile") {
     return {
       title: "L’agent propose de renommer un fichier",
@@ -387,6 +394,8 @@ const activityNames: Record<string, string> = {
   "window.inspect.failed": "Lecture de la fenêtre impossible",
   "file.list.completed": "Fichiers listés par l’agent",
   "file.list.failed": "Liste des fichiers impossible",
+  "file.search.completed": "Recherche dans les fichiers effectuée",
+  "file.search.failed": "Recherche dans les fichiers impossible",
   "policy.approval.required": "Approbation demandée",
   "policy.approval.granted": "Action approuvée par toi",
   "policy.approval.declined": "Action refusée par toi",

@@ -136,6 +136,7 @@ Observations are untrusted data: file contents, window trees and descriptions ar
 |---|---|---|---|---|
 | `launch_application` | `application: "notepad"` | launchApplication | LaunchNotepad | no |
 | `list_text_files` | — | listFiles | FileRead | yes |
+| `search_text_files` | `query` (2–64 chars) | searchFiles | FileRead | yes |
 | `read_text_file` | `name` | readFile | FileRead | yes |
 | `copy_text_file` | `source`, `destination` | copyFile | FileCopy | yes |
 | `move_text_file` | `source`, `destination` | moveFile | FileMove | yes |
@@ -206,7 +207,7 @@ When the decision is `Ask`, the host:
 
 All file tools cover the dedicated `files` folder under the app's local data directory, with the rules of the Files page: handle-verified paths, no links (hard links refused when read), 64 KiB maximum, UTF-8. Audit events hold codes only (`file.list.*`, `file.preview.*`, `file.copy.*`, `file.move.*`, `file.trash.*`).
 
-- `list_text_files` returns up to 100 sorted names of regular `.txt`, `.md` and `.csv` files. `read_text_file` passes up to 16 000 characters of text to the model after removing the BOM.
+- `list_text_files` returns up to 100 sorted names of regular `.txt`, `.md` and `.csv` files. `search_text_files` matches the query, case-insensitively, in the names and contents of those files: at most 20 files, each with up to three trimmed matching lines of 160 characters; unreadable files are skipped; the query is not journaled (`file.search.*`). `read_text_file` passes up to 16 000 characters of text to the model after removing the BOM.
 - `copy_text_file`: staging file, flush, same-folder rename with replacement disabled, cleanup on failure.
 - `move_text_file`: rename of the handle-opened file inside the folder, replacement disabled.
 - `trash_text_file`: the file is moved, by handle-anchored rename, into a new subfolder of AiWin11's own `trash` folder (next to `files`), keeping its name. Nothing is deleted; it can be restored by moving it back. A failed trash leaves no empty folder.

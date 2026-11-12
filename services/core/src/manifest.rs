@@ -96,7 +96,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 29] = [
+pub const MANIFESTS: [ToolManifest; 30] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -513,6 +513,21 @@ pub const MANIFESTS: [ToolManifest; 29] = [
         reversibility: R::NoEffect,
         timeout_ms: 180_000,
         capabilities: &[C::Delegation],
+    },
+    ToolManifest {
+        action: AgentAction::SearchFiles,
+        tool: "search_text_files",
+        version: 1,
+        // Reads the same files as read_text_file, only returning matching excerpts.
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 10_000,
+        capabilities: &[C::FileRead],
     },
 ];
 

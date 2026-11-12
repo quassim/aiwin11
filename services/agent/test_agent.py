@@ -44,6 +44,22 @@ class AgentProtocolTest(unittest.TestCase):
             },
         )
 
+    def test_file_search_takes_one_bounded_query(self):
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("search_text_files", {"query": "lait"})]}})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["arguments"], {"query": "lait"})
+        for arguments in [
+            {"query": "a"},
+            {"query": "  b  "},
+            {"query": "x" * 65},
+            {"query": "ligne\nsuivante"},
+            {"query": 42},
+            {"query": "lait", "path": "C:\\"},
+            {},
+        ]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("search_text_files", arguments)]}})
+
     def test_file_read_tools_are_registered_with_validated_names(self):
         for proposal, arguments in [
             (call("list_text_files", {}), {}),

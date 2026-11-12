@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-13, reprise après Codex
+
+**Fait** : `67966a8` travail laissé non commité par Codex, vérifié puis commité tel quel (fichiers recherche/renommage/corbeille/restauration, écrans et capture d’écran, transcription, centre de contrôle, sonde et routage adaptatif local, import/export des modèles, suivi des jetons cloud, vidéo ComfyUI, workflows à étapes, mises à jour signées). Feuille de route remise d’accord avec le code (18 lignes périmées corrigées). Nouvel outil d’agent `search_text_files` : recherche dans le nom et le contenu des fichiers du dossier de travail (lecture seule, action de politique `searchFiles`, autorisée dans tous les profils, modèles locaux seulement).
+
+**Vérifié** : `verify.ps1` complet (12 tests Python, 102 tests Rust, linters, builds). Recherche non testée avec un modèle réel.
+
+**Prochaine étape** : stratégies de routage `quality_first` / `cost_optimized` (R3), états PAUSED/RECOVERING et étape Recover (R2), test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran).
+
 ## 2026-11-13 — dépôt GitHub
 
 Le dépôt est publié sur GitHub (`https://github.com/quassim/aiwin11`, branche `main`, à la demande de l’utilisateur). Avant l’envoi : aucun secret dans les fichiers suivis, `.tools`, `.venv`, `target` et `node_modules` exclus. Pousser depuis le terminal de l’utilisateur (connexion GitHub par le navigateur) : `git push`.

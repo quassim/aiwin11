@@ -41,7 +41,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|---|
 | L’IA peut faire ce que fait l’utilisateur, avec garde-fous | 🟡 Garde-fous complets ; peu d’actions disponibles | R2 |
 | Choisir un fournisseur local ou en ligne | ✅ Ollama, OpenAI | — |
-| Choisir un modèle **par type de tâche** (voix, texte, image, vidéo, vision, développement, planification) | ❌ Un modèle d’agent + un modèle de vision | R3 |
+| Choisir un modèle **par type de tâche** (voix, texte, image, vidéo, vision, développement, planification) | 🟡 Texte/actions et vision par modèle ; voix (moteurs Windows locaux), image (Stable Diffusion local) et vidéo (ComfyUI local) par moteur dédié ; développement et planification via les agents spécialisés | R3 |
 | Application facilement paramétrable, UI/UX soignée | 🟡 Pages Accueil, Modèles, Sécurité, Inspecteur, Fichiers, Activité | R5 |
 | Contrôle des fichiers | 🟡 Dossier dédié ou dossier choisi dans le profil (`.txt` seulement) ; plusieurs dossiers et autres formats ❌ | R2 |
 | Contrôle des logiciels (lancer, gérer) | 🟡 Bloc-notes seulement | R2 |
@@ -51,32 +51,32 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Navigateur | ❌ | R6 (via MCP) ou R2 |
 | Périphériques | ❌ | R7+ |
 | Presse-papiers | ✅ Lecture et écriture de texte, accord à chaque fois (lecture réelle testée ; écriture réelle en test opt-in `AIWIN11_TEST_CLIPBOARD=1`) | — |
-| Automatisations | ❌ | R8 |
+| Automatisations | 🟡 Workflows enregistrés (8 étapes, branche après échec), planifiés par jour ou au démarrage, en lecture seule | R8 |
 | APIs natives, puis vision + souris/clavier | 🟡 APIs natives et UIA ; pas de souris/clavier génériques | R2 |
 | Providers locaux : Ollama ✅, LM Studio ❌ ; cloud : OpenAI ✅, Anthropic ❌, Google ❌ | 🟡 | R3 |
 | Sélection manuelle **ou routage automatique** | 🟡 Manuelle seulement | R3 |
 | Multimodal : texte ✅, voix STT/TTS ❌, image ❌, vidéo ❌, compréhension d’écran 🟡 (fenêtre), analyse de documents ❌, temps réel ❌ | 🟡 | R7 |
-| Configuration indépendante par modalité | ❌ | R3 |
-| Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia) | ❌ | R8 |
+| Configuration indépendante par modalité | 🟡 Modèle d’agent, modèle de vision, voix, moteurs image et vidéo réglés séparément | R3 |
+| Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia) | ✅ Délégation d’un niveau, agents limités à leurs outils (règle `agent_scope`) | — |
 | Permissions par agent, application, dossier et action | 🟡 Par action, profil, agent spécialisé, dossier de travail et liste fermée d’applications | R2 |
 | Simulations | ✅ Mode simulation | — |
 | Confirmations des opérations sensibles | ✅ | — |
 | Journal d’audit | ✅ | — |
 | Arrêt d’urgence | ✅ Arrêt global « Stoppe toutes les tâches » (demandé / confirmé) | — |
 | Mécanismes de récupération | 🟡 Corbeille, reprise après plantage ; pas de sauvegardes ni points de restauration | R2 |
-| Tableau de bord | ❌ | R5 |
-| Assistant flottant | ❌ | R5 |
-| Raccourcis globaux | ❌ | R5 |
+| Tableau de bord | ✅ Centre de contrôle | — |
+| Assistant flottant | ✅ Mode flottant (petite fenêtre toujours au premier plan) | — |
+| Raccourcis globaux | ✅ Ctrl+Alt+Espace ouvre le champ de demande | — |
 | Gestion des modèles | 🟡 Détection et sélection | R3 |
 | Profils d’autonomie (Observation, Assisté, Autonome contrôlé, Avancé) | ✅ | — |
 | Visualisation des actions en temps réel | 🟡 Étapes, brouillon, rapport d’actions | R5 |
-| Éditeur visuel de workflows | ❌ | R8 |
-| Écran de routage : modèle de secours, **mode privé**, copier la configuration | ❌ | R3 |
+| Éditeur visuel de workflows | 🟡 Composition d’étapes réordonnables ; pas d’éditeur graphique en nœuds | R8 |
+| Écran de routage : modèle de secours, **mode privé**, copier la configuration | ✅ Secours cloud explicite, mode privé, import/export JSON des choix de modèles | — |
 | Détection des modèles installés ✅, capacités 🟡, conso GPU/RAM/VRAM ❌, coûts API ❌, tests de performance ❌, modèles de secours ❌, restrictions de confidentialité 🟡 | 🟡 | R3 |
 | Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques, services ; tests réels) ; actions correctives et rapport ❌ | R2 |
 | Toujours protégés, même en Avancé : suppression massive, élévation de privilèges, sécurité Windows, transactions financières, transfert de données confidentielles | 🟡 Refus par défaut (aucun outil de ce type) ; règles explicites à écrire quand ces outils existeront | R2 |
 | Mémoire : SQLite + recherche vectorielle | 🟡 SQLite ; pas de vectoriel | R6 |
-| Plugins / MCP | ❌ | R6 |
+| Plugins / MCP | ✅ Client MCP stdio, serveurs déclarés par l’utilisateur | — |
 | Moteur de permissions indépendant | ✅ | — |
 
 ### 2.2 Cadrage v0.1 [S0]
@@ -87,18 +87,18 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Fonctionnement entièrement local possible | ✅ Avec Ollama | — |
 | Couches : Dashboard, Chat ✅, Voice, Overlay, Settings 🟡, Workflow Editor | 🟡 | R5, R7, R8 |
 | Core : Sessions ✅, Events ✅, Tasks ✅, State 🟡, Configuration 🟡, IPC 🟡 (Tauri seulement) | 🟡 | R4 |
-| Context & Memory (RAG, index), Workflow Engine (triggers, jobs, scheduler) | ❌ | R6, R8 |
+| Context & Memory (RAG, index), Workflow Engine (triggers, jobs, scheduler) | 🟡 Mémoire chiffrée avec recherche sémantique locale ; planificateur de workflows (jours, démarrage) | R6, R8 |
 | Broker : Policy Engine ✅, Approvals ✅, Sandboxing 🟡, Audit ✅, Secrets ✅ | 🟡 | R4 |
 | Stack : Tailwind CSS + composants accessibles | 🔷 CSS sans framework aujourd’hui ; décider du design system en R5 | R5 |
 | Installateur signé, MSIX selon besoins | ✅ Décidé : installateur **classique** ; réalisation ❌ | R9 |
 | M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto ❌ | 🟡 | R3 |
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
-| M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ❌, vérification 🟡, interruption ✅, **reprise** ❌ | 🟡 | R2, R8 |
+| M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ✅, vérification 🟡, interruption ✅, **reprise** 🟡 (reprise manuelle des workflows) | 🟡 | R2, R8 |
 | M04 Sécurité : règles par ressource ❌, permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
 | M05 Mémoire de session, préférences durables, indexation sélective, historique ✅, recherche sémantique | 🟡 | R6 |
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
-| M07 Déclencheurs, planification, conditions, tâches répétitives, reprise sur erreur, éditeur visuel | ❌ | R8 |
-| M08 Installation, activation, mise à jour, permissions des plugins et serveurs MCP | ❌ | R6 |
+| M07 Déclencheurs ✅ (jours, démarrage), planification ✅, conditions 🟡 (branche après échec), tâches répétitives ✅, reprise sur erreur 🟡, éditeur visuel 🟡 | 🟡 | R8 |
+| M08 Installation, activation, mise à jour, permissions des plugins et serveurs MCP | 🟡 Serveurs MCP déclarés (exécutable et arguments fixes), appels toujours approuvés ; installation et mise à jour ❌ | R6 |
 | M09 App ✅, overlay, palette, barre système, notifications, thème, raccourcis, visualisation des agents 🟡 | 🟡 | R5 |
 | M10 Journaux 🟡, suivi des coûts, statistiques modèles, traces d’agents 🟡, ressources, diagnostics | 🟡 | R9 |
 | Ordre d’exécution : API native → API appli → UIA → vision + souris/clavier → script contrôlé ; **changer de méthode sans élargir les autorisations** | 🟡 API native et UIA seulement | R2 |
@@ -112,8 +112,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Secrets jamais donnés aux modèles | ✅ | — |
 | Arrêt d’urgence global, distinguer arrêt demandé / confirmé | ✅ `stop_all_tasks` : arrêté, demandé puis confirmé | — |
 | Récupération : points de restauration, sauvegardes ciblées, opérations réversibles 🟡 (corbeille), transactions compensatoires | 🟡 | R2 |
-| Surfaces : Control Center 🟡, Command Palette ❌, Voice Assistant (écoute explicite, indicateur) ❌, Workflow Studio ❌ | 🟡 | R5, R7, R8 |
-| UX : mode simple / mode expert | ❌ | R5 |
+| Surfaces : Control Center ✅, Command Palette 🟡 (champ ouvert par raccourci global), Voice Assistant 🟡 (dictée et lecture déclenchées par l’utilisateur), Workflow Studio 🟡 | 🟡 | R5, R7, R8 |
+| UX : mode simple / mode expert | ✅ Bouton mode expert (pages avancées masquées sinon) | — |
 | UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur) | 🟡 Pendant la demande seulement | R5 |
 | UX : local / cloud / transfert de données visibles | 🟡 Badge du fournisseur ; pas d’indicateur de transfert | R5 |
 | UX : changements sans redémarrage | ✅ | — |
@@ -154,7 +154,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Invariants : action inconnue refusée ✅, pas d’auto-attribution ✅, confirmation précise ✅, pas de transmission entre agents (N/A), LLM jamais autorité ✅, erreur → refus ✅, contournement = défaillance ✅, révocation effective ✅ (autorisations relues à chaque évaluation), vérification juste avant exécution ✅ | 🟡 | R2 |
 | Windows Bridge — WindowService (List ✅, Focus ✅, Minimize/Restore/Maximize ✅, Resize ❌, Close ❌ volontairement absent) | 🟡 | R2 |
 | ApplicationService (Launch ✅ liste fermée : Bloc-notes, Table des caractères, Paint ; Discover ❌, GetStatus ❌) | 🟡 | R2 |
-| FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ❌) | 🟡 | R2 |
+| FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ✅ nom et contenu, pour l’agent et dans la page Fichiers) | 🟡 | R2 |
 | ProcessService (List ✅ lecture seule, Inspect ❌, Terminate ❌) | 🟡 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre | R2 |
 | UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement ❌) | 🟡 | R2 |
@@ -163,8 +163,8 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | SystemService (GetSystemMetrics ✅ mémoire, processeur, disques, durée de fonctionnement ; GetHardwareInfo ❌) | 🟡 | R2, R3 |
 | DPI, multi-écran, défilement, focus, références UIA périmées, dialogues modaux | ❌ Non testé | R2 |
 | Capture jamais envoyée au cloud sans politique | ✅ Vision locale seulement | — |
-| Services : Memory, Workflow, Speech, Image, Video, Plugin, Telemetry (local) | ❌ | R6–R9 |
-| MCP avec passerelle de sécurité ; autorisation MCP ≠ permission AiWin11 | ❌ | R6 |
+| Services : Memory ✅, Workflow ✅, Speech ✅, Image 🟡 (non testé, aucun moteur installé), Video 🟡 (non testé), Plugin 🟡 (MCP), Telemetry locale ✅ (journal) | 🟡 | R6–R9 |
+| MCP avec passerelle de sécurité ; autorisation MCP ≠ permission AiWin11 | ✅ `mcp_call` passe par le broker et est toujours demandé | — |
 | Tables : sessions ✅, tasks ✅, tool_executions ✅, events ✅, settings ✅ ; providers, models, model_profiles, agents, policies, approvals, memory_entries, workflows, artifacts ❌ | 🟡 | R2, R3, R6, R8 |
 | Dates UTC ✅, migrations versionnées ✅, clés hors SQLite ✅, chiffrement : pas de chiffrement de la base, rien de sensible stocké (✅ décidé, §6), durée de conservation et effacement ✅ | ✅ | — |
 | Profil IA : stratégie, capacités requises, `allow_cloud_fallback`, `allow_screen_upload`, `allow_document_upload`, **budget par tâche** | ❌ | R3 |

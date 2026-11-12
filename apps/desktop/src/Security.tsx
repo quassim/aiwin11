@@ -60,6 +60,7 @@ const actionNames: Record<string, string> = {
   launchApplication: "Ouvrir le Bloc-notes",
   listFiles: "Lister les fichiers",
   readFile: "Lire un fichier",
+  searchFiles: "Chercher dans les fichiers",
   copyFile: "Copier un fichier",
   moveFile: "Renommer un fichier",
   organizeFiles: "Ranger le dossier (plan de renommages approuvé en une fois)",

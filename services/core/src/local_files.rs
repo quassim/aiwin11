@@ -42,6 +42,19 @@ const MAX_BYTES: usize = 64 * 1024;
 const MAX_NAME: usize = 128;
 /// Most names returned by one listing.
 pub const MAX_LISTED: usize = 100;
+/// Longest search query, in characters.
+pub const MAX_SEARCH_CHARS: usize = 64;
+/// Files returned by one search, and matching lines kept per file.
+const MAX_SEARCH_FILES: usize = 20;
+const MAX_SEARCH_LINES: usize = 3;
+const MAX_SEARCH_LINE_CHARS: usize = 160;
+
+/// One file matched by a search: its name, and up to three matching lines (trimmed, bounded).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchHit {
+    pub name: String,
+    pub lines: Vec<String>,
+}
 
 // Windows FILE_RENAME_INFORMATION with storage for the variable-length UTF-16 name.
 #[repr(C)]
@@ -223,6 +236,45 @@ impl LocalFiles {
         self.observe(core, &command, policy, "file.preview", || {
             let text = self.read(self.resolve(name)?, name)?;
             Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+        })
+    }
+
+    /// Agent tool: searches file names and contents of the folder, case-insensitively.
+    /// Read-only, under the same `FileRead` grant as `agent_read`; files that cannot be read
+    /// (too large, not UTF-8, links) are skipped. The query is never journaled.
+    pub fn agent_search(
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        query: &str,
+    ) -> Result<Vec<SearchHit>, &'static str> {
+        let needle = query.trim().to_lowercase();
+        let length = needle.chars().count();
+        if !(2..=MAX_SEARCH_CHARS).contains(&length) || needle.chars().any(char::is_control) {
+            return Err("INVALID_FILE_SEARCH");
+        }
+        let command =
+            core.agent_command(task, Operation::ListLocalText(ListLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
+        self.observe(core, &command, policy, "file.search", || {
+            let mut hits = Vec::new();
+            for name in self.list_names("")? {
+                let Ok(text) = self.resolve(&name).and_then(|path| self.read(path, &name)) else { continue };
+                let name_matches = name.to_lowercase().contains(&needle);
+                let lines: Vec<String> = text
+                    .lines()
+                    .filter(|line| line.to_lowercase().contains(&needle))
+                    .take(MAX_SEARCH_LINES)
+                    .map(|line| line.trim().chars().take(MAX_SEARCH_LINE_CHARS).collect())
+                    .collect();
+                if name_matches || !lines.is_empty() {
+                    hits.push(SearchHit { name, lines });
+                    if hits.len() == MAX_SEARCH_FILES {
+                        break;
+                    }
+                }
+            }
+            Ok(hits)
         })
     }
 
@@ -709,6 +761,37 @@ mod tests {
         for path in [source, destination] {
             fs::remove_file(path).unwrap();
         }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn agent_search_matches_names_and_contents_within_bounds() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-file-test-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let files = LocalFiles::open(&directory).unwrap();
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        fs::write(files.root().join("courses.txt"), "Pain\nLAIT entier\nŒufs\nlait de coco\nlait d’avoine\nlait 4")
+            .unwrap();
+        fs::write(files.root().join("lait-recette.md"), "Rien ici").unwrap();
+        fs::write(files.root().join("autre.csv"), "aucun,rapport").unwrap();
+        fs::write(files.root().join("image.png"), "lait").unwrap();
+        fs::write(directory.join("dehors.txt"), "lait").unwrap();
+        let reads = Policy::granting(&[Capability::FileRead]);
+
+        assert_eq!(files.agent_search(&mut core, &task, Policy::default(), "lait"), Err("FILE_ACCESS_DENIED"));
+        for invalid in ["", " a ", &"x".repeat(MAX_SEARCH_CHARS + 1), "ab\ncd"] {
+            assert_eq!(files.agent_search(&mut core, &task, reads, invalid), Err("INVALID_FILE_SEARCH"), "{invalid:?}");
+        }
+        let hits = files.agent_search(&mut core, &task, reads, "  Lait ").unwrap();
+        let names: Vec<_> = hits.iter().map(|hit| hit.name.as_str()).collect();
+        assert_eq!(names, ["courses.txt", "lait-recette.md"], "only supported files of the folder");
+        assert_eq!(hits[0].lines, ["LAIT entier", "lait de coco", "lait d’avoine"], "case-insensitive, three lines");
+        assert!(hits[1].lines.is_empty(), "a name match without matching lines");
+        assert_eq!(files.agent_search(&mut core, &task, reads, "œufs").unwrap()[0].lines, ["Œufs"]);
+        assert!(files.agent_search(&mut core, &task, reads, "introuvable").unwrap().is_empty());
+        let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert!(kinds.contains(&"file.search.completed".to_owned()), "{kinds:?}");
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -75,6 +75,7 @@ Ce que l’agent peut faire :
 | « Ouvre le Bloc-notes », « Ouvre Paint », « Ouvre la Table des caractères » | Ouvre une nouvelle fenêtre de l’application (liste fermée) et la vérifie |
 | « Ouvre le Bloc-notes et écris-y ma liste de courses : pain, lait » | Écrit dans le Bloc-notes qu’il vient d’ouvrir, seulement si le document est vide, puis relit le texte |
 | « Résume notes.md », « Quels fichiers ai-je ? » | Liste et lit les fichiers UTF-8 `.txt`, `.md` et `.csv` du dossier affiché dans **Fichiers** |
+| « Dans quel fichier ai-je noté le code du portail ? » | Cherche le texte dans le nom et le contenu de ces fichiers et renvoie les lignes correspondantes |
 | « Copie notes.txt vers sauvegarde.txt », « Renomme brouillon.txt en idees.txt » | Copie ou renomme dans ce dossier, sans jamais remplacer un fichier existant |
 | « Mets ancien.txt à la corbeille » | Déplace le fichier dans la corbeille d’AiWin11 (`%LOCALAPPDATA%\app.aiwin11.desktop\trash`) : rien n’est supprimé, il reste récupérable |
 | « Mon PC est lent, regarde ce qui se passe » | Lit en lecture seule la mémoire, la charge du processeur, l’espace des disques et, si besoin, les processus ; ne modifie rien |
