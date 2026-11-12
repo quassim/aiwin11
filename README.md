@@ -40,7 +40,7 @@ Double-clique sur `Installateur.cmd` (ou `scripts\package.ps1`) : il produit `ta
 2. Dans **Sécurité**, choisissez le profil d’autonomie (voir plus bas). **Assisté** est le profil par défaut.
 3. Dans **Accueil**, écrivez une demande en langage naturel (2 000 caractères au maximum).
 
-La réponse s’affiche au fil de sa génération. L’agent peut enchaîner plusieurs actions, jusqu’à 8 étapes. À la fin, AiWin11 affiche sa réponse et, en dessous, **les actions réellement effectuées** : ce rapport est écrit par AiWin11 à partir de ce qui s’est vraiment passé, pas par le modèle.
+La réponse s’affiche au fil de sa génération. L’agent peut enchaîner plusieurs actions, jusqu’à 16 étapes et 15 minutes par demande. À la fin, AiWin11 affiche sa réponse et, en dessous, **les actions réellement effectuées** : ce rapport est écrit par AiWin11 à partir de ce qui s’est vraiment passé, pas par le modèle.
 
 Ce que l’agent peut faire :
 

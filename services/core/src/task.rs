@@ -268,7 +268,9 @@ const AWAITING_APPROVAL: u8 = 4;
 pub const MAX_PROMPT_CHARS: usize = 2000;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Model proposals per task, observations included.
-const MAX_AGENT_STEPS: usize = 8;
+const MAX_AGENT_STEPS: usize = 16;
+/// Longest a task may plan and act (ROADMAP §2.5, `max_runtime_seconds`).
+const MAX_TASK_RUNTIME: Duration = Duration::from_secs(900);
 /// Deadline of an approved launch. The bridge verifies the window for 4 s at most after
 /// starting the application; the rest absorbs a slow first start of the .NET bridge
 /// (runtime load, antivirus scan of a newly installed binary).
@@ -572,7 +574,12 @@ impl TaskSlot {
         };
         let mut cloud_tokens: u64 = 0;
         let mut history: Vec<StepRecord> = Vec::new();
+        let started = Instant::now();
         for step in 1..=MAX_AGENT_STEPS {
+            if started.elapsed() > MAX_TASK_RUNTIME {
+                record_code(core, task, "task.limit.reached", "runtime")?;
+                return Err("AGENT_TIME_LIMIT");
+            }
             if self.phase.load(Ordering::Acquire) == CANCELLED {
                 return Err("TASK_CANCELLED");
             }

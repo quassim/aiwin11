@@ -261,7 +261,7 @@ At startup, tasks still in a non-final state were interrupted by a crash or a fo
 
 ### Lifecycle events and global stop
 
-Each task journals `task.created`, then `task.started` (code: provider, `ollama` or `openai`), `task.planning`, one `task.progress` per agent step (code `step:N/8`, never content), and ends with `task.completed`, `task.failed` (error code) or `task.cancelled`. When the provider cannot be reached the task journals `model.provider.unavailable` (code: provider) and fails with `MODEL_UNAVAILABLE_OR_INVALID` (Ollama) or `CLOUD_REQUEST_FAILED` (OpenAI). There is never an automatic fallback to another provider.
+Each task journals `task.created`, then `task.started` (code: provider, `ollama` or `openai`), `task.planning`, one `task.progress` per agent step (code `step:N/16`, never content; a task stops after 16 steps, `AGENT_STEP_LIMIT`, or 15 minutes, `AGENT_TIME_LIMIT` with `task.limit.reached`), and ends with `task.completed`, `task.failed` (error code) or `task.cancelled`. When the provider cannot be reached the task journals `model.provider.unavailable` (code: provider) and fails with `MODEL_UNAVAILABLE_OR_INVALID` (Ollama) or `CLOUD_REQUEST_FAILED` (OpenAI). There is never an automatic fallback to another provider.
 
 `stop_all_tasks` ("Stoppe toutes les tâches", a button always visible in the side bar) returns `idle` (nothing running), `stopped` (the task was planning or awaiting approval and is cancelled now) or `requested` (an action is executing: it is not interrupted midway, and the task stops right after it without any further step). It is journaled as `tasks.stop.requested` with that code; a requested stop is confirmed by `task.cancelled` when the task ends, which the window shows as "Arrêt confirmé".
 
