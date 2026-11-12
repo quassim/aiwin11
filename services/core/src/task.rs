@@ -1332,9 +1332,14 @@ impl TaskSlot {
         application: Application,
     ) -> Result<String, &'static str> {
         let action = AgentAction::LaunchApplication;
-        let summary = "Ouvrir le Bloc-notes";
-        let approval = ApprovalAction::Launch { application: "notepad" };
-        let grant = match self.gate(run, action, summary, Capability::LaunchNotepad, approval)? {
+        let (code, name, capability) = match application {
+            Application::CharacterMap => ("charmap", "la Table des caractères", Capability::LaunchAllowedApp),
+            Application::Paint => ("paint", "Paint", Capability::LaunchAllowedApp),
+            _ => ("notepad", "le Bloc-notes", Capability::LaunchNotepad),
+        };
+        let summary = &format!("Ouvrir {name}");
+        let approval = ApprovalAction::Launch { application: code };
+        let grant = match self.gate(run, action, summary, capability, approval)? {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
@@ -1354,13 +1359,15 @@ impl TaskSlot {
             })??;
         Ok(match result {
             Ok(process_id) => {
-                run.launched_notepad = Some(process_id);
+                if application == Application::Notepad {
+                    run.launched_notepad = Some(process_id);
+                }
                 run.report(action, summary, ActionStatus::Done, None);
-                "Le Bloc-notes est ouvert : une nouvelle fenêtre a été vérifiée.".into()
+                format!("{summary} : une nouvelle fenêtre a été vérifiée.")
             }
             Err(ExecutionError::WindowUnverified) => {
                 run.report(action, summary, ActionStatus::Partial, Some("WINDOW_UNVERIFIED"));
-                "Windows a reçu la demande, mais aucune nouvelle fenêtre du Bloc-notes n’a été confirmée.".into()
+                format!("Windows a reçu la demande, mais aucune nouvelle fenêtre de {name} n’a été confirmée.")
             }
             Err(ExecutionError::Denied(rule)) => {
                 run.report(action, summary, ActionStatus::Denied, Some(rule));
@@ -1718,10 +1725,13 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         return Err("AGENT_REJECTED");
     }
     match (reply.action.as_str(), reply.tool.as_deref(), reply.arguments, reply.text) {
-        ("tool", Some("launch_application"), Some(arguments), None)
-            if arguments.len() == 1 && arguments.get("application").and_then(Value::as_str) == Some("notepad") =>
-        {
-            Ok(PlannedAction::Launch(Application::Notepad))
+        ("tool", Some("launch_application"), Some(arguments), None) if arguments.len() == 1 => {
+            match arguments.get("application").and_then(Value::as_str) {
+                Some("notepad") => Ok(PlannedAction::Launch(Application::Notepad)),
+                Some("charmap") => Ok(PlannedAction::Launch(Application::CharacterMap)),
+                Some("paint") => Ok(PlannedAction::Launch(Application::Paint)),
+                _ => Err("AGENT_REJECTED"),
+            }
         }
         ("tool", Some("list_text_files"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::ListFiles)

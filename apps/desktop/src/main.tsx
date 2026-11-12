@@ -36,7 +36,7 @@ const statusNames: Record<ActionStatus, string> = {
   failed: "Échec",
 };
 type ApprovalAction =
-  | { kind: "launch"; application: "notepad" }
+  | { kind: "launch"; application: "notepad" | "charmap" | "paint" }
   | { kind: "listFiles" }
   | { kind: "readFile"; name: string }
   | { kind: "copyFile"; source: string; destination: string; characters: number }
@@ -64,7 +64,11 @@ const arrangementNames: Record<Arrangement, string> = {
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
-const applicationNames: Record<"notepad", string> = { notepad: "le Bloc-notes" };
+const applicationNames: Record<"notepad" | "charmap" | "paint", string> = {
+  notepad: "le Bloc-notes",
+  charmap: "la Table des caractères",
+  paint: "Paint",
+};
 
 function describeApproval(action: ApprovalAction): { title: string; detail: string; quote?: string } {
   if (action.kind === "typeText") {

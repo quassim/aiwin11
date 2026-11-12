@@ -33,8 +33,8 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
             "properties": {
                 "application": {
                     "type": "string",
-                    "enum": ["notepad"],
-                    "description": "notepad = Bloc-notes"
+                    "enum": ["notepad", "charmap", "paint"],
+                    "description": "notepad = Bloc-notes, charmap = Table des caractères, paint = Paint"
                 }
             },
             "required": ["application"],
@@ -794,7 +794,10 @@ mod tests {
             ]
         );
         let catalog = tool_catalog(true, false, false, false);
-        assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));
+        assert_eq!(
+            catalog[0]["function"]["parameters"]["properties"]["application"]["enum"],
+            json!(["notepad", "charmap", "paint"])
+        );
         assert_eq!(catalog[0]["function"]["strict"], true);
         assert!(tool_catalog(false, true, true, true)
             .as_array()

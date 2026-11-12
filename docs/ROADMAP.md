@@ -143,7 +143,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Chemins canoniques, jonctions, liens | ✅ Fichiers | — |
 | Invariants : action inconnue refusée ✅, pas d’auto-attribution ✅, confirmation précise ✅, pas de transmission entre agents (N/A), LLM jamais autorité ✅, erreur → refus ✅, contournement = défaillance ✅, révocation effective ✅ (autorisations relues à chaque évaluation), vérification juste avant exécution ✅ | 🟡 | R2 |
 | Windows Bridge — WindowService (List ✅, Focus ✅, Minimize/Restore/Maximize ✅, Resize ❌, Close ❌ volontairement absent) | 🟡 | R2 |
-| ApplicationService (Discover, Launch, GetStatus) | 🟡 Launch Bloc-notes | R2 |
+| ApplicationService (Launch ✅ liste fermée : Bloc-notes, Table des caractères, Paint ; Discover ❌, GetStatus ❌) | 🟡 | R2 |
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ❌) | 🟡 | R2 |
 | ProcessService (List ✅ lecture seule, Inspect ❌, Terminate ❌) | 🟡 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre | R2 |

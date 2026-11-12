@@ -38,7 +38,9 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
-        && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
+        && (command.LaunchApplication is null
+            || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
+                && AppLauncher.Target(command.LaunchApplication.Application) is null))))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
 }
@@ -235,6 +237,23 @@ else if (command.InspectForeground is not null)
         or ArgumentException or InvalidOperationException)
     {
         Reject(Protocol.Result.Types.Status.Failed, "inspection_failed", "Windows could not inspect the foreground window.");
+    }
+}
+else if (command.LaunchApplication is { } other && AppLauncher.Target(other.Application) is { } app)
+{
+    try
+    {
+        if (AppLauncher.Launch(app.Path, app.ProcessName, command.DeadlineMs) is { } pid)
+        {
+            result.Status = Protocol.Result.Types.Status.Success;
+            result.ProcessId = pid;
+        }
+        else
+            Reject(Protocol.Result.Types.Status.Partial, "window_unverified", "Launch requested. No new window was verified.");
+    }
+    catch (Exception error) when (error is Win32Exception or InvalidOperationException or IOException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "bridge_failure", "Windows could not start the application.");
     }
 }
 // Explicit: a command without a dedicated branch above must never fall into the launch.

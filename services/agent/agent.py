@@ -64,7 +64,7 @@ def is_service_name(value: object) -> bool:
 # Every declared argument is required and no other argument is accepted.
 Rule = tuple[str, ...] | Callable[[object], bool]
 TOOLS: dict[str, dict[str, Rule]] = {
-    "launch_application": {"application": ("notepad",)},
+    "launch_application": {"application": ("notepad", "charmap", "paint")},
     "list_text_files": {},
     "read_text_file": {"name": is_text_file_name},
     "copy_text_file": {"source": is_text_file_name, "destination": is_text_file_name},

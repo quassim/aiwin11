@@ -40,7 +40,7 @@ Ce que l’agent peut faire :
 
 | Exemple de demande | Action |
 |---|---|
-| « Ouvre le Bloc-notes » | Ouvre une nouvelle fenêtre du Bloc-notes et la vérifie |
+| « Ouvre le Bloc-notes », « Ouvre Paint », « Ouvre la Table des caractères » | Ouvre une nouvelle fenêtre de l’application (liste fermée) et la vérifie |
 | « Ouvre le Bloc-notes et écris-y ma liste de courses : pain, lait » | Écrit dans le Bloc-notes qu’il vient d’ouvrir, seulement si le document est vide, puis relit le texte |
 | « Résume notes.txt », « Quels fichiers ai-je ? » | Liste et lit les fichiers `.txt` du dossier affiché dans **Fichiers** |
 | « Copie notes.txt vers sauvegarde.txt », « Renomme brouillon.txt en idees.txt » | Copie ou renomme dans ce dossier, sans jamais remplacer un fichier existant |

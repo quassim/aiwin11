@@ -14,11 +14,14 @@ internal static class Notepad
     /// UseShellExecute=false passes every inheritable handle to the child, so a launched
     /// application would keep the bridge's and host's pipes open for its whole lifetime.
     /// </summary>
-    internal static void Start()
+    internal static void Start() => StartExecutable(SystemNotepad);
+
+    /// <summary>Starts a fixed executable, without arguments nor handle inheritance.</summary>
+    internal static void StartExecutable(string executable)
     {
         var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>() };
-        var commandLine = new StringBuilder($"\"{SystemNotepad}\"");
-        if (!CreateProcessW(SystemNotepad, commandLine, 0, 0, false, 0, 0,
+        var commandLine = new StringBuilder($"\"{executable}\"");
+        if (!CreateProcessW(executable, commandLine, 0, 0, false, 0, 0,
                 Environment.SystemDirectory, ref startup, out var created))
             throw new Win32Exception(Marshal.GetLastWin32Error());
         CloseHandle(created.hThread);

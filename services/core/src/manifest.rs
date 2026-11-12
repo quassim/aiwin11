@@ -58,6 +58,7 @@ pub enum CapabilityName {
     WindowArrange,
     ServiceList,
     AdminOperation,
+    LaunchAllowedApp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -101,7 +102,7 @@ pub const MANIFESTS: [ToolManifest; 18] = [
         dry_run: true,
         reversibility: R::Reversible,
         timeout_ms: 20_000,
-        capabilities: &[C::LaunchNotepad],
+        capabilities: &[C::LaunchNotepad, C::LaunchAllowedApp],
     },
     ToolManifest {
         action: AgentAction::ListFiles,

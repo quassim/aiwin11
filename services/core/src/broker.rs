@@ -56,6 +56,8 @@ pub enum Capability {
     ServiceList = 1 << 15,
     /// Run one approved operation of the elevated helper's closed list.
     AdminOperation = 1 << 16,
+    /// Start Character Map or Paint (fixed executables, no arguments).
+    LaunchAllowedApp = 1 << 17,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -122,6 +124,12 @@ impl Policy {
                 if launch.application == Application::Notepad as i32 && agent(Capability::LaunchNotepad) =>
             {
                 Ok("launch_notepad")
+            }
+            Some(Operation::LaunchApplication(launch))
+                if [Application::CharacterMap as i32, Application::Paint as i32].contains(&launch.application)
+                    && agent(Capability::LaunchAllowedApp) =>
+            {
+                Ok("launch_application")
             }
             Some(Operation::InspectForeground(_)) if peer == Peer::DesktopInspector => Ok("inspect_foreground"),
             Some(Operation::LocateWindow(_)) if agent(Capability::WindowLookup) => Ok("locate_window"),

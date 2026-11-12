@@ -224,6 +224,8 @@ message LaunchApplication {
   enum Application {
     APPLICATION_UNSPECIFIED = 0;
     APPLICATION_NOTEPAD = 1;
+    APPLICATION_CHARACTER_MAP = 2;
+    APPLICATION_PAINT = 3;
   }
   Application application = 1;
 }
