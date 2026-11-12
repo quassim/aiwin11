@@ -7,6 +7,7 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 **Fait** : `1273304` lancement en un double-clic (`Ollama.cmd`, `AiWin11.cmd`), testé par l’utilisateur ; `cc9251c` `click_control` (UI Automation Invoke/Toggle/Select sur un contrôle numéroté de la fenêtre lue, toujours demandé) ; `4d2b4d7` Ctrl+Alt+Espace ouvre directement le champ de demande.
 
 **Vérifié** : `verify.ps1` complet. Non testé en réel : clic UIA, palette.
+- `cd572bc` `set_control_value` : remplir un champ numéroté de la fenêtre lue (SetValue, relu ; jamais un champ mot de passe ; toujours demandé). Non testé en réel.
 
 **Prochaine étape** : PowerShell approuvé (liste fermée), SetValue UIA, dossiers autorisés ; R3 modèle par type de tâche + routage + budget ; puis R4–R9.
 
