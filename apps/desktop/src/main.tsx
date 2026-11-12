@@ -52,6 +52,7 @@ type ApprovalAction =
   | { kind: "listWindows" }
   | { kind: "listServices" }
   | { kind: "clickControl"; application: string; title: string; control: string }
+  | { kind: "setControlValue"; application: string; title: string; control: string; text: string }
   | { kind: "adminService"; service: string; operation: string }
   | { kind: "adminCleanTemp" }
   | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
@@ -96,6 +97,13 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
           ? `Action : ${action.operation} sur le service « ${action.service} ».`
           : "Action : supprimer les fichiers temporaires de Windows de plus d’un jour (C:\\Windows\\Temp).") +
         " Si tu autorises, Windows te demandera aussi une confirmation (UAC). Une seule opération, puis l’assistant s’arrête.",
+    };
+  }
+  if (action.kind === "setControlValue") {
+    return {
+      title: "L’agent propose de remplir un champ",
+      detail: `Action : remplacer le contenu de ${action.control} dans « ${action.title} » (application ${action.application}) par ce texte.`,
+      quote: action.text,
     };
   }
   if (action.kind === "clickControl") {

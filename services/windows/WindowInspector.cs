@@ -142,7 +142,8 @@ internal static class WindowInspector
     /// Invokes control number `index` of the same walk as Inspect, if its type and name still
     /// match. Null: window or control gone or changed; false: the control cannot be invoked.
     /// </summary>
-    internal static bool? Invoke(ulong handle, uint processId, uint index, uint controlType, string name, long deadline)
+    internal static bool? Invoke(ulong handle, uint processId, uint index, uint controlType, string name, long deadline,
+        string? value = null)
     {
         var elements = new List<AutomationElement>();
         var tree = Inspect(handle, processId, deadline, elements);
@@ -152,8 +153,16 @@ internal static class WindowInspector
         if (node.ControlType != controlType || node.Name != name)
             return null;
         var element = elements[(int)index - 1];
-        if (!element.Current.IsEnabled)
+        if (!element.Current.IsEnabled || element.Current.IsPassword)
             return false;
+        if (value is not null)
+        {
+            if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)
+                || ((ValuePattern)pattern).Current.IsReadOnly)
+                return false;
+            ((ValuePattern)pattern).SetValue(value);
+            return ((ValuePattern)pattern).Current.Value == value;
+        }
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
             ((InvokePattern)invoke).Invoke();

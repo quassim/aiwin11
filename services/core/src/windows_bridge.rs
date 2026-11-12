@@ -223,6 +223,7 @@ impl Core {
         target: &WindowTarget,
         index: u32,
         node: &NamedNode,
+        value: Option<&str>,
     ) -> Result<(), &'static str> {
         let operation = Operation::InvokeControl(InvokeControl {
             window: target.window,
@@ -230,6 +231,7 @@ impl Core {
             index,
             control_type: node.control_type,
             name: node.name.clone(),
+            value: value.map(str::to_owned),
         });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
         let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {

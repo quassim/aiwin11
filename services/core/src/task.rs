@@ -156,6 +156,13 @@ pub enum ApprovalAction {
         title: String,
         control: String,
     },
+    /// Always asks; the full text is shown.
+    SetControlValue {
+        application: String,
+        title: String,
+        control: String,
+        text: String,
+    },
     /// Always asks: window titles are screen data.
     ListWindows,
     ArrangeWindow {
@@ -216,6 +223,7 @@ enum PlannedAction {
     ListServices,
     /// Control number [n] in this task's last `inspect_window` result.
     ClickControl(usize),
+    SetControlValue(usize, String),
     AdminService {
         service: String,
         action: ServiceAction,
@@ -625,7 +633,11 @@ impl TaskSlot {
             PlannedAction::ListServices => ("list_services", json!({}), self.list_services(run)?),
             PlannedAction::AdminCleanTemp => ("admin_clean_temp", json!({}), self.admin(run, None)?),
             PlannedAction::ClickControl(number) => {
-                ("click_control", json!({ "control": number }), self.click_control(run, number)?)
+                ("click_control", json!({ "control": number }), self.click_control(run, number, None)?)
+            }
+            PlannedAction::SetControlValue(number, text) => {
+                let observation = self.click_control(run, number, Some(&text))?;
+                ("set_control_value", json!({ "control": number, "text": text }), observation)
             }
             PlannedAction::AdminService { service, action } => {
                 let observation = self.admin(run, Some((&service, action)))?;
@@ -898,8 +910,14 @@ impl TaskSlot {
         Ok(describe_processes(result))
     }
 
-    fn click_control<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, number: usize) -> Result<String, &'static str> {
-        let action = AgentAction::ClickControl;
+    /// Clicks a control of the inspected window, or replaces its text when `value` is set.
+    fn click_control<F: Fn(TaskUpdate)>(
+        &self,
+        run: &mut Run<'_, F>,
+        number: usize,
+        value: Option<&str>,
+    ) -> Result<String, &'static str> {
+        let action = if value.is_some() { AgentAction::SetControlValue } else { AgentAction::ClickControl };
         let Some((target, node)) = run
             .inspected
             .as_ref()
@@ -918,18 +936,20 @@ impl TaskSlot {
         };
         let label =
             if node.name.is_empty() { control_type_name(node.control_type).to_owned() } else { node.name.clone() };
-        let summary = format!("Cliquer sur « {label} » dans « {} » ({})", target.title, target.process_name);
-        let approval = ApprovalAction::ClickControl {
-            application: target.process_name.clone(),
-            title: target.title.clone(),
-            control: format!("{} « {label} »", control_type_name(node.control_type)),
+        let verb = if value.is_some() { "Remplir" } else { "Cliquer sur" };
+        let summary = format!("{verb} « {label} » dans « {} » ({})", target.title, target.process_name);
+        let control = format!("{} « {label} »", control_type_name(node.control_type));
+        let (application, title) = (target.process_name.clone(), target.title.clone());
+        let approval = match value {
+            Some(text) => ApprovalAction::SetControlValue { application, title, control, text: text.to_owned() },
+            None => ApprovalAction::ClickControl { application, title, control },
         };
         let grant = match self.gate(run, action, &summary, Capability::ControlInvoke, approval)? {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
         let result = self.dispatching(run.core, run.task, || {
-            lock(run.core)?.agent_invoke_control(run.task, grant, &target, number as u32, &node)
+            lock(run.core)?.agent_invoke_control(run.task, grant, &target, number as u32, &node, value)
         })?;
         let (status, code) = status_of(&result);
         run.report(action, &summary, status, code);
@@ -1824,6 +1844,17 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         ("tool", Some("list_windows"), Some(arguments), None) if arguments.is_empty() => Ok(PlannedAction::ListWindows),
         ("tool", Some("list_services"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::ListServices)
+        }
+        ("tool", Some("set_control_value"), Some(arguments), None) if arguments.len() == 2 => {
+            let control = arguments.get("control").and_then(Value::as_u64).filter(|number| (1..=80).contains(number));
+            let text = arguments
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty() && text.chars().count() <= MAX_TYPED_CHARS && !text.contains('\0'));
+            match (control, text) {
+                (Some(control), Some(text)) => Ok(PlannedAction::SetControlValue(control as usize, text.to_owned())),
+                _ => Err("AGENT_REJECTED"),
+            }
         }
         ("tool", Some("click_control"), Some(arguments), None) if arguments.len() == 1 => arguments
             .get("control")

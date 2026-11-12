@@ -149,7 +149,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ❌) | 🟡 | R2 |
 | ProcessService (List ✅ lecture seule, Inspect ❌, Terminate ❌) | 🟡 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre | R2 |
-| UIAutomationService (InspectTree ✅, Invoke ✅ sur un contrôle numéroté de la fenêtre lue, FindElement ❌, SetValue ❌) | 🟡 | R2 |
+| UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement ❌) | 🟡 | R2 |
 | InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
 | ShellService (ExecuteApprovedCommand) | ❌ | R2 |
 | SystemService (GetSystemMetrics ✅ mémoire, processeur, disques, durée de fonctionnement ; GetHardwareInfo ❌) | 🟡 | R2, R3 |

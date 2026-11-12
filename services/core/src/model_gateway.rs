@@ -202,6 +202,21 @@ nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’un
             }
         }));
         functions.push(json!({
+            "name": "set_control_value",
+            "description": "Remplace le texte d’un champ de la fenêtre lue avec inspect_window dans cette même demande, \
+désigné par son numéro [n] (2000 caractères au plus, jamais un champ de mot de passe). L’utilisateur doit \
+l’approuver à chaque fois.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "control": { "type": "integer", "minimum": 1, "maximum": 80 },
+                    "text": { "type": "string" }
+                },
+                "required": ["control", "text"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "type_in_notepad",
             "description": "Écrit un texte dans le Bloc-notes que tu as ouvert avec launch_application dans cette même \
         demande. Le document doit être vide ; aucun texte existant n’est jamais remplacé. 2000 caractères au plus.",
@@ -784,6 +799,7 @@ mod tests {
                 "list_processes",
                 "inspect_window",
                 "click_control",
+                "set_control_value",
                 "type_in_notepad",
                 "describe_window"
             ]
@@ -803,6 +819,7 @@ mod tests {
                 "list_processes",
                 "inspect_window",
                 "click_control",
+                "set_control_value",
                 "type_in_notepad"
             ]
         );

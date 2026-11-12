@@ -101,7 +101,7 @@ else if (command.InvokeControl is { } control)
     try
     {
         switch (WindowInspector.Invoke(control.Window, control.ProcessId, control.Index, control.ControlType,
-                    control.Name, command.DeadlineMs))
+                    control.Name, command.DeadlineMs, control.HasValue ? control.Value : null))
         {
             case true:
                 result.Status = Protocol.Result.Types.Status.Success;

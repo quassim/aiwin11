@@ -73,6 +73,7 @@ const actionNames: Record<string, string> = {
   listWindows: "Lister les fenêtres ouvertes",
   listServices: "Lister les services Windows (lecture seule)",
   clickControl: "Cliquer sur un bouton d’une fenêtre lue (UI Automation)",
+  setControlValue: "Remplir un champ d’une fenêtre lue (UI Automation)",
   adminService: "Démarrer, arrêter ou configurer un service (administrateur)",
   adminCleanTemp: "Vider les fichiers temporaires de Windows (administrateur)",
   arrangeWindow: "Réduire, restaurer, agrandir ou mettre au premier plan une fenêtre",

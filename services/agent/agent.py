@@ -90,6 +90,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     },
     "admin_clean_temp": {},
     "click_control": {"control": is_control_number},
+    "set_control_value": {"control": is_control_number, "text": is_typed_text},
     "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }
 

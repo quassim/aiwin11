@@ -144,7 +144,11 @@ impl Policy {
                 if agent(Capability::ControlInvoke)
                     && control.window != 0
                     && control.process_id != 0
-                    && (1..=80).contains(&control.index) =>
+                    && (1..=80).contains(&control.index)
+                    && control
+                        .value
+                        .as_ref()
+                        .is_none_or(|value| value.chars().count() <= 2000 && !value.contains('\0')) =>
             {
                 Ok("invoke_control")
             }

@@ -90,7 +90,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 19] = [
+pub const MANIFESTS: [ToolManifest; 20] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -350,6 +350,21 @@ pub const MANIFESTS: [ToolManifest; 19] = [
         tool: "click_control",
         version: 1,
         // A button can do anything in its application (send, delete, pay): always asks.
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Irreversible,
+        timeout_ms: 15_000,
+        capabilities: &[C::ControlInvoke],
+    },
+    ToolManifest {
+        action: AgentAction::SetControlValue,
+        tool: "set_control_value",
+        version: 1,
+        // Replaces what a field holds in another application: always asks.
         risk: Risk::Critical,
         side_effect: true,
         reads_screen: false,

@@ -145,6 +145,8 @@ message InvokeControl {
   uint32 index = 3;
   uint32 control_type = 4;
   string name = 5;
+  // When set, replaces the control's value (UI Automation SetValue) instead of clicking it.
+  optional string value = 6;
 }
 
 // Deletes files older than one day in %SystemRoot%\Temp.
