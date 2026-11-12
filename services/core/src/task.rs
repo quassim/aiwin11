@@ -1866,8 +1866,9 @@ impl TaskSlot {
     }
 }
 
+/// Locks the core, recovering it after a panic elsewhere (see the desktop's `lock_core`).
 fn lock(core: &Mutex<Core>) -> Result<std::sync::MutexGuard<'_, Core>, &'static str> {
-    core.lock().map_err(|_| "CORE_UNAVAILABLE")
+    Ok(core.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
 
 /// Report status and code of a host-side tool result.

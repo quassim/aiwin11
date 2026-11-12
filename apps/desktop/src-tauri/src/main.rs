@@ -51,7 +51,7 @@ struct TaskEntry {
 async fn get_tasks(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskEntry>, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let core = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+        let core = lock_core(&state.core);
         let tasks = core.recent_tasks(30).map_err(|_| "ACTIVITY_UNAVAILABLE")?;
         Ok(tasks
             .into_iter()
@@ -66,6 +66,12 @@ async fn get_tasks(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskEntry>, &'
     })
     .await
     .map_err(|_| "CORE_UNAVAILABLE")?
+}
+
+/// Locks the core even after a panic in another command (a poisoned mutex): a failed command
+/// must not take the whole application down. SQLite rolls back any unfinished transaction.
+fn lock_core(core: &Mutex<Core>) -> std::sync::MutexGuard<'_, Core> {
+    core.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 struct AppState {
@@ -116,7 +122,7 @@ async fn get_snapshot(state: State<'_, Arc<AppState>>) -> Result<Snapshot, &'sta
 }
 
 fn snapshot(state: &AppState) -> Result<Snapshot, &'static str> {
-    let core = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
+    let core = lock_core(&state.core);
     let events = core.activity().map_err(|_| "ACTIVITY_UNAVAILABLE")?;
     Ok(Snapshot {
         session_id: core.session_id().into(),
@@ -240,12 +246,12 @@ struct HistorySettings {
 
 #[tauri::command]
 fn get_history_settings(state: State<'_, Arc<AppState>>) -> Result<HistorySettings, &'static str> {
-    Ok(HistorySettings { retention_days: state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.retention_days() })
+    Ok(HistorySettings { retention_days: lock_core(&state.core).retention_days() })
 }
 
 #[tauri::command]
 fn set_retention_days(state: State<'_, Arc<AppState>>, days: u32) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_retention_days(days)
+    lock_core(&state.core).set_retention_days(days)
 }
 
 /// Erases past sessions. Refused while a task runs, so that its audit trail stays whole.
@@ -254,7 +260,7 @@ fn clear_history(state: State<'_, Arc<AppState>>) -> Result<usize, &'static str>
     if state.task.is_running() {
         return Err("TASK_BUSY");
     }
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.clear_history()
+    lock_core(&state.core).clear_history()
 }
 
 /// Exports the audit journal to `%LOCALAPPDATA%\app.aiwin11.desktop\exports` and returns the path.
@@ -263,7 +269,7 @@ async fn export_audit(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) ->
     let directory = app.path().app_local_data_dir().map_err(|_| "EXPORT_FAILED")?.join("exports");
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let path = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.export_audit_to(&directory)?;
+        let path = lock_core(&state.core).export_audit_to(&directory)?;
         let path = path.to_string_lossy();
         Ok(path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned())
     })
@@ -281,7 +287,7 @@ struct GrantOverview {
 
 #[tauri::command]
 fn get_grants(state: State<'_, Arc<AppState>>) -> Result<GrantOverview, &'static str> {
-    let active = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.active_grants()?;
+    let active = lock_core(&state.core).active_grants()?;
     let grantable = AgentAction::ALL.into_iter().filter(|action| policy::grantable(*action)).collect();
     Ok(GrantOverview { active, grantable })
 }
@@ -289,17 +295,17 @@ fn get_grants(state: State<'_, Arc<AppState>>) -> Result<GrantOverview, &'static
 /// Main window only: the user lets one action run without asking for a limited time.
 #[tauri::command]
 fn create_grant(state: State<'_, Arc<AppState>>, action: AgentAction, minutes: u32) -> Result<String, &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.grant_temporarily(action, minutes)
+    lock_core(&state.core).grant_temporarily(action, minutes)
 }
 
 #[tauri::command]
 fn get_cloud_fallback(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.cloud_fallback_enabled())
+    Ok(lock_core(&state.core).cloud_fallback_enabled())
 }
 
 #[tauri::command]
 fn set_cloud_fallback(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_fallback(enabled)
+    lock_core(&state.core).set_cloud_fallback(enabled)
 }
 
 /// Models loaded by Ollama and their RAM/VRAM use.
@@ -314,16 +320,16 @@ async fn get_model_resources() -> Result<Vec<aiwin11_core::model_gateway::Loaded
 
 #[tauri::command]
 fn get_cloud_budget(state: State<'_, Arc<AppState>>) -> Result<u64, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.cloud_token_budget())
+    Ok(lock_core(&state.core).cloud_token_budget())
 }
 
 #[tauri::command]
 fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_token_budget(tokens)
+    lock_core(&state.core).set_cloud_token_budget(tokens)
 }
 
 fn cloud_vendor(state: &State<'_, Arc<AppState>>) -> Result<openai::Vendor, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.cloud_vendor())
+    Ok(lock_core(&state.core).cloud_vendor())
 }
 
 #[tauri::command]
@@ -334,28 +340,28 @@ fn get_cloud_vendor(state: State<'_, Arc<AppState>>) -> Result<openai::Vendor, &
 /// Main window only: chooses the cloud provider (each keeps its own key).
 #[tauri::command]
 fn set_cloud_vendor(state: State<'_, Arc<AppState>>, vendor: openai::Vendor) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_vendor(vendor)
+    lock_core(&state.core).set_cloud_vendor(vendor)
 }
 
 #[tauri::command]
 fn get_memories(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.memories()
+    lock_core(&state.core).memories()
 }
 
 /// Main window only: deletes one note, or all of them without an ID.
 #[tauri::command]
 fn delete_memory(state: State<'_, Arc<AppState>>, id: Option<String>) -> Result<usize, &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.forget(id.as_deref())
+    lock_core(&state.core).forget(id.as_deref())
 }
 
 #[tauri::command]
 fn get_embedding_model(state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.embedding_model().unwrap_or_default())
+    Ok(lock_core(&state.core).embedding_model().unwrap_or_default())
 }
 
 #[tauri::command]
 fn set_embedding_model(state: State<'_, Arc<AppState>>, model: String) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_embedding_model(&model)
+    lock_core(&state.core).set_embedding_model(&model)
 }
 
 /// Main window only: chooses the agent's folder (empty: AiWin11's dedicated folder). Applies at
@@ -369,7 +375,7 @@ fn set_workspace(state: State<'_, Arc<AppState>>, path: String) -> Result<String
         let text = canonical.to_string_lossy().into_owned();
         text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
     };
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_workspace(&stored)?;
+    lock_core(&state.core).set_workspace(&stored)?;
     Ok(stored)
 }
 
@@ -384,7 +390,7 @@ async fn dictate(state: State<'_, Arc<AppState>>) -> Result<String, &'static str
 
 #[tauri::command]
 fn get_reports(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.reports()
+    lock_core(&state.core).reports()
 }
 
 /// Main window only: daily local time "HH:MM" of a saved request, or none.
@@ -394,7 +400,7 @@ fn set_routine_schedule(
     id: String,
     schedule: Option<String>,
 ) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_routine_schedule(&id, schedule.as_deref())
+    lock_core(&state.core).set_routine_schedule(&id, schedule.as_deref())
 }
 
 /// Runs saved requests at their daily time: local model, Observation profile, result kept
@@ -405,9 +411,9 @@ fn run_scheduler(state: Arc<AppState>) {
         if state.task.is_running() {
             continue;
         }
-        let (due, model) = match state.core.lock() {
-            Ok(mut core) => (core.take_due_routines().unwrap_or_default(), core.model_preferences().local_model),
-            Err(_) => continue,
+        let (due, model) = {
+            let mut core = lock_core(&state.core);
+            (core.take_due_routines().unwrap_or_default(), core.model_preferences().local_model)
         };
         for routine in due {
             let request = TaskRequest {
@@ -425,16 +431,14 @@ fn run_scheduler(state: Arc<AppState>) {
                 Ok(outcome) => format!("« {} » : {}", routine.text, outcome.reply),
                 Err(code) => format!("« {} » : échec ({code}).", routine.text),
             };
-            if let Ok(mut core) = state.core.lock() {
-                let _ = core.save_report(&report);
-            }
+            let _ = lock_core(&state.core).save_report(&report);
         }
     }
 }
 
 #[tauri::command]
 fn get_mcp_servers(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::mcp::McpServer>, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.mcp_servers())
+    Ok(lock_core(&state.core).mcp_servers())
 }
 
 /// Main window only: declares the MCP servers the agent may use (each call still asks).
@@ -443,7 +447,7 @@ fn set_mcp_servers(
     state: State<'_, Arc<AppState>>,
     servers: Vec<aiwin11_core::mcp::McpServer>,
 ) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_mcp_servers(servers)
+    lock_core(&state.core).set_mcp_servers(servers)
 }
 
 /// Floating mode: a small always-on-top window in the bottom-right corner of its screen, or
@@ -477,7 +481,7 @@ struct ImageEngine {
 
 #[tauri::command]
 async fn get_image_engine(state: State<'_, Arc<AppState>>) -> Result<ImageEngine, &'static str> {
-    let endpoint = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.image_endpoint().unwrap_or_default();
+    let endpoint = lock_core(&state.core).image_endpoint().unwrap_or_default();
     let probe = endpoint.clone();
     let available = tauri::async_runtime::spawn_blocking(move || aiwin11_core::images::engine_available(&probe))
         .await
@@ -488,7 +492,7 @@ async fn get_image_engine(state: State<'_, Arc<AppState>>) -> Result<ImageEngine
 /// Main window only: the local image engine (loopback HTTP only), or none.
 #[tauri::command]
 fn set_image_engine(state: State<'_, Arc<AppState>>, endpoint: String) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_image_endpoint(&endpoint)
+    lock_core(&state.core).set_image_endpoint(&endpoint)
 }
 
 /// Opens AiWin11's images folder in Explorer (fixed executable, fixed folder).
@@ -506,40 +510,40 @@ fn open_images_folder(app: tauri::AppHandle) -> Result<(), &'static str> {
 
 #[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
+    lock_core(&state.core).routines()
 }
 
 /// Main window only: saves the current request; it only runs when the user sends it.
 #[tauri::command]
 fn save_routine(state: State<'_, Arc<AppState>>, text: String) -> Result<String, &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.save_routine(&text)
+    lock_core(&state.core).save_routine(&text)
 }
 
 #[tauri::command]
 fn get_privacy(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.private_mode())
+    Ok(lock_core(&state.core).private_mode())
 }
 
 /// Main window only: private mode blocks every cloud request.
 #[tauri::command]
 fn set_privacy(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_private_mode(enabled)
+    lock_core(&state.core).set_private_mode(enabled)
 }
 
 #[tauri::command]
 fn get_admin_helper(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.admin_helper_enabled())
+    Ok(lock_core(&state.core).admin_helper_enabled())
 }
 
 /// Main window only: turns the elevated helper (closed list of administrator operations) on or off.
 #[tauri::command]
 fn set_admin_helper(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_admin_helper_enabled(enabled)
+    lock_core(&state.core).set_admin_helper_enabled(enabled)
 }
 
 #[tauri::command]
 fn revoke_grant(state: State<'_, Arc<AppState>>, id: String) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.revoke_grant(&id)
+    lock_core(&state.core).revoke_grant(&id)
 }
 
 /// "Stoppe toutes les tâches": always available, journaled with its immediate result. The stop
@@ -547,9 +551,7 @@ fn revoke_grant(state: State<'_, Arc<AppState>>, id: String) -> Result<(), &'sta
 #[tauri::command]
 fn stop_all_tasks(state: State<'_, Arc<AppState>>) -> Result<StopStatus, &'static str> {
     let status = state.task.stop_all();
-    if let Ok(core) = state.core.lock() {
-        let _ = core.journal("tasks.stop.requested", Some(status.code()));
-    }
+    let _ = lock_core(&state.core).journal("tasks.stop.requested", Some(status.code()));
     Ok(status)
 }
 
@@ -572,7 +574,7 @@ struct PolicyOverview {
 
 #[tauri::command]
 fn get_policy_overview(state: State<'_, Arc<AppState>>) -> Result<PolicyOverview, &'static str> {
-    let settings = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
+    let settings = lock_core(&state.core).policy_settings();
     let table =
         policy::table(settings.simulate).into_iter().map(|(action, effects)| PolicyRow { action, effects }).collect();
     Ok(PolicyOverview { settings, table, manifests: &MANIFESTS })
@@ -581,17 +583,17 @@ fn get_policy_overview(state: State<'_, Arc<AppState>>) -> Result<PolicyOverview
 /// Applies to the next task; a running task keeps the settings it started with.
 #[tauri::command]
 fn set_policy_settings(state: State<'_, Arc<AppState>>, settings: PolicySettings) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_policy_settings(settings).map_err(|_| "SETTINGS_UNAVAILABLE")
+    lock_core(&state.core).set_policy_settings(settings).map_err(|_| "SETTINGS_UNAVAILABLE")
 }
 
 #[tauri::command]
 fn get_model_preferences(state: State<'_, Arc<AppState>>) -> Result<ModelPreferences, &'static str> {
-    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.model_preferences())
+    Ok(lock_core(&state.core).model_preferences())
 }
 
 #[tauri::command]
 fn set_model_preferences(state: State<'_, Arc<AppState>>, preferences: ModelPreferences) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_model_preferences(preferences)
+    lock_core(&state.core).set_model_preferences(preferences)
 }
 
 /// The user's answer to the action the agent proposed for the running task.
@@ -631,9 +633,7 @@ fn desktop_surfaces(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         "stop" => {
             let state = Arc::clone(app.state::<Arc<AppState>>().inner());
             let status = state.task.stop_all();
-            if let Ok(core) = state.core.lock() {
-                let _ = core.journal("tasks.stop.requested", Some(status.code()));
-            };
+            let _ = lock_core(&state.core).journal("tasks.stop.requested", Some(status.code()));
         }
         "quit" => app.exit(0),
         _ => {}
