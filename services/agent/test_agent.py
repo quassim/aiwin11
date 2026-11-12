@@ -114,6 +114,20 @@ class AgentProtocolTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_applications", {"all": True})]}})
 
+    def test_images_take_a_known_format_and_a_generated_name(self):
+        name = "image-" + "a" * 32 + ".png"
+        for arguments in ({"prompt": "a cat"}, {"prompt": "a cat", "format": "portrait"}):
+            result = self.invoke({"version": 2, "proposal": {"calls": [call("generate_image", arguments)]}})
+            self.assertEqual(result.returncode, 0, arguments)
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("describe_image", {"name": name})]}})
+        self.assertEqual(result.returncode, 0)
+        for tool, arguments in (
+            ("generate_image", {"prompt": "a cat", "format": "panorama"}),
+            ("describe_image", {"name": "../secret.png"}),
+            ("describe_image", {"name": "photo.png"}),
+        ):
+            self.assert_rejected({"version": 2, "proposal": {"calls": [call(tool, arguments)]}})
+
     def test_describe_screen_takes_no_argument(self):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("describe_screen", {})]}})
         self.assertEqual(result.returncode, 0)

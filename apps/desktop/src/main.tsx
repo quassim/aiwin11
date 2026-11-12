@@ -109,7 +109,8 @@ type ApprovalAction =
   | { kind: "listWindows" }
   | { kind: "listServices" }
   | { kind: "mcpListTools"; server: string }
-  | { kind: "generateImage"; prompt: string }
+  | { kind: "generateImage"; prompt: string; format: string }
+  | { kind: "describeImage"; name: string; model: string }
   | { kind: "mcpCall"; server: string; tool: string; arguments: string }
   | { kind: "organizeFiles"; moves: [string, string][] }
   | { kind: "runDiagnostic"; diagnostic: string }
@@ -233,8 +234,14 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
   if (action.kind === "generateImage") {
     return {
       title: "L’agent propose de générer une image",
-      detail: "Action : générer une image avec ton moteur local et l’enregistrer dans le dossier d’images d’AiWin11.",
+      detail: `Action : générer une image (${imageFormats[action.format] ?? action.format}) avec ton moteur local et l’enregistrer dans le dossier d’images d’AiWin11.`,
       quote: action.prompt,
+    };
+  }
+  if (action.kind === "describeImage") {
+    return {
+      title: "L’agent demande à décrire une image générée",
+      detail: `Image ${action.name}, analysée localement par ${action.model}.`,
     };
   }
   if (action.kind === "mcpListTools") {
@@ -382,6 +389,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
   };
 }
 const MAX_PROMPT_CHARS = 2000;
+const imageFormats: Record<string, string> = {
+  square: "carrée, 512×512",
+  landscape: "paysage, 768×512",
+  portrait: "portrait, 512×768",
+};
+
 const dictationErrors: Record<string, string> = {
   DICTATION_SILENCE: "Rien n’a été entendu.",
   DICTATION_NO_RECOGNIZER: "Aucun moteur de reconnaissance vocale Windows n’est installé pour cette langue.",

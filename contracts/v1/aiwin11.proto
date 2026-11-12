@@ -52,6 +52,7 @@ message Command {
     ListApplications list_applications = 47;
     StopProcess stop_process = 48;
     ListSpeechRecognizers list_speech_recognizers = 49;
+    DescribeImage describe_image = 50;
   }
 }
 
@@ -266,6 +267,9 @@ message CommandOutput {
 
 // One image from the user's local engine, run by the core after authorization.
 message GenerateImage {}
+
+// Reads one image AiWin11 generated, for the local vision model (core only, no bridge).
+message DescribeImage {}
 
 // One request to a user-declared MCP server, run by the core after authorization. The tool
 // name and arguments never travel in the command (they are shown in the approval).

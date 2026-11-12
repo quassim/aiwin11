@@ -112,10 +112,12 @@ pub enum AgentAction {
     /// Stops one listed process of the user's session (critical: always asks).
     StopProcess,
     PowerShellDiagnostic,
+    /// Describes an image AiWin11 generated with the local vision model.
+    DescribeImage,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -152,6 +154,7 @@ impl AgentAction {
         Self::ListApplications,
         Self::StopProcess,
         Self::PowerShellDiagnostic,
+        Self::DescribeImage,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -196,6 +199,7 @@ impl AgentAction {
             Self::ListApplications => "list_applications",
             Self::StopProcess => "stop_process",
             Self::PowerShellDiagnostic => "run_powershell_diagnostic",
+            Self::DescribeImage => "describe_image",
         }
     }
 
@@ -290,7 +294,15 @@ impl AgentProfile {
                     | A::McpCall
             ),
             Self::Multimedia => {
-                matches!(action, A::GenerateImage | A::InspectWindow | A::ListWindows | A::ListFiles | A::ReadFile)
+                matches!(
+                    action,
+                    A::GenerateImage
+                        | A::DescribeImage
+                        | A::InspectWindow
+                        | A::ListWindows
+                        | A::ListFiles
+                        | A::ReadFile
+                )
             }
             Self::Office => matches!(
                 action,
@@ -353,7 +365,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 36] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 37] = [
+    (A::DescribeImage, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::PowerShellDiagnostic, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::StopProcess, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListApplications, [E::Allow, E::Allow, E::Allow, E::Allow]),

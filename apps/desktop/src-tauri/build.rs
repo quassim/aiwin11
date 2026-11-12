@@ -80,6 +80,8 @@ fn main() {
         "set_speech_recognizer",
         "set_workspace",
         "get_extra_folders",
+        "list_generated_images",
+        "read_generated_image",
         "mcp_server_states",
         "accept_mcp_update",
         "test_mcp_server",

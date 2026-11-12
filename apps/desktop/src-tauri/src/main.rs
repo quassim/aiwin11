@@ -1344,6 +1344,20 @@ fn set_image_checkpoint(state: State<'_, Arc<AppState>>, checkpoint: String) -> 
     lock_core(&state.core).set_image_checkpoint(&checkpoint)
 }
 
+/// Main window only: the last images AiWin11 generated, newest first.
+#[tauri::command]
+fn list_generated_images(app: tauri::AppHandle) -> Result<Vec<String>, &'static str> {
+    let folder = app.path().app_local_data_dir().map_err(|_| "IMAGE_NOT_FOUND")?.join("images");
+    Ok(aiwin11_core::images::list_images(&folder))
+}
+
+/// Main window only: one generated image, as PNG bytes (never another file).
+#[tauri::command]
+fn read_generated_image(app: tauri::AppHandle, name: String) -> Result<tauri::ipc::Response, &'static str> {
+    let folder = app.path().app_local_data_dir().map_err(|_| "IMAGE_NOT_FOUND")?.join("images");
+    aiwin11_core::images::read_image(&folder, &name).map(tauri::ipc::Response::new)
+}
+
 /// Opens AiWin11's images folder in Explorer (fixed executable, fixed folder).
 #[tauri::command]
 fn open_images_folder(app: tauri::AppHandle) -> Result<(), &'static str> {
@@ -1571,6 +1585,8 @@ fn main() {
             set_image_engine,
             set_image_checkpoint,
             open_images_folder,
+            list_generated_images,
+            read_generated_image,
             set_floating,
             get_mcp_servers,
             set_mcp_servers,

@@ -264,11 +264,15 @@ Il agit avec ses seuls outils et te rend sa réponse.",
         }));
         functions.push(json!({
             "name": "generate_image",
-            "description": "Génère une image 512×512 avec le moteur d’images local de l’utilisateur (Stable \
-Diffusion sur ce PC) à partir d’une description, et l’enregistre dans le dossier d’images d’AiWin11.",
+            "description": "Génère une image avec le moteur d’images local de l’utilisateur (Stable \
+        Diffusion sur ce PC) à partir d’une description, et l’enregistre dans le dossier d’images d’AiWin11. Format : \
+        square (512×512, par défaut), landscape (768×512) ou portrait (512×768).",
             "parameters": {
                 "type": "object",
-                "properties": { "prompt": { "type": "string", "description": "Description de l’image, en anglais de préférence" } },
+                "properties": {
+                    "prompt": { "type": "string", "description": "Description de l’image, en anglais de préférence" },
+                    "format": { "type": "string", "enum": ["square", "landscape", "portrait"] }
+                },
                 "required": ["prompt"],
                 "additionalProperties": false
             }
@@ -419,6 +423,17 @@ L’utilisateur doit l’approuver.",
         analysée localement). Tu reçois seulement la description. Refusé si une fenêtre protégée est visible. \
         L’utilisateur doit l’approuver.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
+            "name": "describe_image",
+            "description": "Fait décrire par le modèle de vision local une image générée par AiWin11 (nom \
+        image-….png donné par generate_image). Tu reçois seulement la description.",
+            "parameters": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"],
+                "additionalProperties": false
+            }
         }));
     }
     Value::Array(
@@ -750,6 +765,11 @@ impl Ollama {
             "Décris brièvement en français ce qui est visible dans cette fenêtre. Reste factuel.",
             256,
         )
+    }
+
+    /// Describes a generated image (PNG) with the local vision model.
+    pub(crate) fn describe_image(&self, model: &str, png: &[u8]) -> Result<String, GatewayError> {
+        self.read_capture(model, png, "Décris brièvement en français le contenu de cette image. Reste factuel.", 256)
     }
 
     pub(crate) fn transcribe_capture(&self, model: &str, jpeg: &[u8]) -> Result<String, GatewayError> {
@@ -1426,7 +1446,8 @@ mod tests {
                 "set_control_value",
                 "type_in_notepad",
                 "describe_window",
-                "describe_screen"
+                "describe_screen",
+                "describe_image"
             ]
         );
         assert_eq!(

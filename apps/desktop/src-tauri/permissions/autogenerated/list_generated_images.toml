@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-generated-images"
+description = "Enables the list_generated_images command without any pre-configured scope."
+commands.allow = ["list_generated_images"]
+
+[[permission]]
+identifier = "deny-list-generated-images"
+description = "Denies the list_generated_images command without any pre-configured scope."
+commands.deny = ["list_generated_images"]

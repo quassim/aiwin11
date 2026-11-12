@@ -80,6 +80,7 @@ pub enum CapabilityName {
     ScreenCapture,
     ProcessStop,
     PowerShellDiagnostic,
+    ImageRead,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -110,7 +111,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 36] = [
+pub const MANIFESTS: [ToolManifest; 37] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -629,6 +630,21 @@ pub const MANIFESTS: [ToolManifest; 36] = [
         reversibility: R::NoEffect,
         timeout_ms: 15_000,
         capabilities: &[C::PowerShellDiagnostic],
+    },
+    ToolManifest {
+        action: AgentAction::DescribeImage,
+        tool: "describe_image",
+        version: 1,
+        // Only images AiWin11 generated, in its own images folder; local vision model only.
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 105_000,
+        capabilities: &[C::ImageRead],
     },
 ];
 

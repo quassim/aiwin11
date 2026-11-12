@@ -85,6 +85,8 @@ pub enum Capability {
     /// Stop one listed process of the user's session, after the user's approval.
     ProcessStop = 1 << 25,
     PowerShellDiagnostic = 1 << 26,
+    /// Read one image AiWin11 generated, for the local vision model.
+    ImageRead = 1 << 27,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -135,7 +137,7 @@ impl Policy {
 
     /// Only the authenticated supervisor can submit these already approved grants.
     pub fn from_capability_bits(bits: u32) -> Option<Self> {
-        (bits < (Capability::PowerShellDiagnostic as u32) * 2).then_some(Self { grants: bits })
+        (bits < (Capability::ImageRead as u32) * 2).then_some(Self { grants: bits })
     }
 }
 
@@ -186,6 +188,7 @@ impl Policy {
             Some(Operation::RememberNote(_)) if agent(Capability::MemoryWrite) => Ok("remember_note"),
             Some(Operation::McpRequest(_)) if agent(Capability::McpServer) => Ok("mcp_request"),
             Some(Operation::GenerateImage(_)) if agent(Capability::ImageGenerate) => Ok("generate_image"),
+            Some(Operation::DescribeImage(_)) if agent(Capability::ImageRead) => Ok("describe_image"),
             Some(Operation::RunDiagnostic(run))
                 if agent(Capability::Diagnostic)
                     && matches!(

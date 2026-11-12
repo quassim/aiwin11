@@ -81,6 +81,14 @@ def is_window_number(value: object) -> bool:
 MAX_NOTE_CHARS = 1000
 
 
+def is_image_name(value: object) -> bool:
+    """Name of an image AiWin11 generated: image-<32 hex>.png."""
+    if not isinstance(value, str) or not value.startswith("image-") or not value.endswith(".png"):
+        return False
+    digest = value[len("image-") : -len(".png")]
+    return len(digest) == 32 and all(char in "0123456789abcdefABCDEF" for char in digest)
+
+
 def is_note(value: object) -> bool:
     """Memory note: 1 to 1000 characters, not blank, no NUL."""
     return isinstance(value, str) and value.strip() != "" and len(value) <= MAX_NOTE_CHARS and "\x00" not in value
@@ -166,7 +174,8 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "list_services": {},
     "organize_files": {"moves": is_move_plan},
     "mcp_list_tools": {"server": is_mcp_server},
-    "generate_image": {"prompt": is_note},
+    "generate_image": {"prompt": is_note, "format": ("square", "landscape", "portrait")},
+    "describe_image": {"name": is_image_name},
     "delegate": {
         "agent": ("office", "windows_admin", "development", "research", "multimedia", "read_only"),
         "request": is_note,
@@ -194,6 +203,9 @@ TOOLS: dict[str, dict[str, Rule]] = {
     },
 }
 
+# Arguments a tool may leave out (the host applies its default).
+OPTIONAL: dict[str, set[str]] = {"generate_image": {"format"}}
+
 # Tools whose two file names must differ (ignoring case).
 TRANSFERS = {"copy_text_file", "move_text_file"}
 
@@ -210,9 +222,12 @@ def _tool_request(calls: object) -> dict[str, Any]:
     if schema is None:
         raise ValueError("unknown tool")
     arguments: object = function.get("arguments")
-    if not isinstance(arguments, dict) or set(arguments) != set(schema):
+    optional = OPTIONAL.get(str(name), set())
+    if not isinstance(arguments, dict) or not set(schema) - optional <= set(arguments) <= set(schema):
         raise ValueError("invalid arguments")
     for key, rule in schema.items():
+        if key not in arguments:
+            continue
         value = arguments[key]
         valid = rule(value) if callable(rule) else isinstance(value, str) and value in rule
         if not valid:

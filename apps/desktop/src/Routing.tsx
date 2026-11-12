@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { CloudCostSettings } from "./CloudCost";
+import { Gallery } from "./Gallery";
 import { LocalFallback } from "./LocalFallback";
 import { LocalVoiceSetting } from "./Speech";
 import { placementAdvice, placementLabel, type LoadedModel } from "./placement";
@@ -467,6 +468,7 @@ export function Routing({
           </button>
         </div>
         <p role="status">{imageStatus}</p>
+        <Gallery />
       </div>
       <div className="section-header">
         <h3>Ressources des modèles locaux</h3>

@@ -18,6 +18,86 @@ use crate::Core;
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const GENERATION_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// Image shapes the agent may ask for (the engines' native 512-pixel scale).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ImageFormat {
+    #[default]
+    Square,
+    Landscape,
+    Portrait,
+}
+
+impl ImageFormat {
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "square" => Some(Self::Square),
+            "landscape" => Some(Self::Landscape),
+            "portrait" => Some(Self::Portrait),
+            _ => None,
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Square => "square",
+            Self::Landscape => "landscape",
+            Self::Portrait => "portrait",
+        }
+    }
+
+    /// Width and height in pixels.
+    pub fn size(self) -> (u32, u32) {
+        match self {
+            Self::Square => (512, 512),
+            Self::Landscape => (768, 512),
+            Self::Portrait => (512, 768),
+        }
+    }
+}
+
+/// Generated images listed in the gallery, newest first.
+pub const MAX_LISTED_IMAGES: usize = 24;
+
+/// A name AiWin11 gave an image it generated: `image-<32 hex>.png`.
+pub fn valid_image_name(name: &str) -> bool {
+    name.strip_prefix("image-")
+        .and_then(|rest| rest.strip_suffix(".png"))
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+/// The generated images in `folder`, newest first.
+pub fn list_images(folder: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    let mut images: Vec<(std::time::SystemTime, String)> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok().filter(|name| valid_image_name(name))?;
+            Some((entry.metadata().ok()?.modified().ok()?, name))
+        })
+        .collect();
+    images.sort_by(|a, b| b.0.cmp(&a.0));
+    images.into_iter().take(MAX_LISTED_IMAGES).map(|(_, name)| name).collect()
+}
+
+/// Bytes of one generated image (a PNG AiWin11 wrote, never another file).
+pub fn read_image(folder: &Path, name: &str) -> Result<Vec<u8>, &'static str> {
+    if !valid_image_name(name) {
+        return Err("IMAGE_NOT_FOUND");
+    }
+    let path = folder.join(name);
+    let metadata = std::fs::symlink_metadata(&path).map_err(|_| "IMAGE_NOT_FOUND")?;
+    if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES as u64 {
+        return Err("IMAGE_NOT_FOUND");
+    }
+    let bytes = std::fs::read(&path).map_err(|_| "IMAGE_NOT_FOUND")?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("IMAGE_INVALID");
+    }
+    Ok(bytes)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImageBackend {
@@ -189,21 +269,23 @@ pub fn list_checkpoints(endpoint: &str, backend: ImageBackend) -> Result<Vec<Ima
         .collect())
 }
 
-/// Generates one 512×512 image and writes it as a new PNG in `folder`. Returns its file name.
+/// Generates one image of `format` and writes it as a new PNG in `folder`. Returns its file name.
 pub(crate) fn generate(
     endpoint: &str,
     prompt: &str,
     folder: &Path,
     checkpoint: Option<&str>,
     backend: ImageBackend,
+    format: ImageFormat,
 ) -> Result<String, &'static str> {
     if !valid_endpoint(endpoint) {
         return Err("IMAGE_ENDPOINT_INVALID");
     }
+    let (width, height) = format.size();
     if backend == ImageBackend::ComfyUi {
-        return write_png(folder, &generate_comfy(endpoint.trim_end_matches('/'), prompt, checkpoint)?);
+        return write_png(folder, &generate_comfy(endpoint.trim_end_matches('/'), prompt, checkpoint, format)?);
     }
-    let mut request = json!({ "prompt": prompt, "steps": 20, "width": 512, "height": 512, "batch_size": 1 });
+    let mut request = json!({ "prompt": prompt, "steps": 20, "width": width, "height": height, "batch_size": 1 });
     if let Some(checkpoint) = checkpoint {
         let title = checkpoints(endpoint)?
             .into_iter()
@@ -279,7 +361,13 @@ fn comfy_catalog(endpoint: &str, http: &Client) -> Result<Vec<String>, &'static 
         .collect())
 }
 
-fn generate_comfy(endpoint: &str, prompt: &str, checkpoint: Option<&str>) -> Result<Vec<u8>, &'static str> {
+fn generate_comfy(
+    endpoint: &str,
+    prompt: &str,
+    checkpoint: Option<&str>,
+    format: ImageFormat,
+) -> Result<Vec<u8>, &'static str> {
+    let (width, height) = format.size();
     let http = client(Duration::from_secs(8))?;
     let checkpoint = checkpoint.ok_or("IMAGE_MODEL_UNAVAILABLE")?;
     if !comfy_catalog(endpoint, &http)?.iter().any(|name| name == checkpoint) {
@@ -290,7 +378,7 @@ fn generate_comfy(endpoint: &str, prompt: &str, checkpoint: Option<&str>) -> Res
         "1": {"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":checkpoint}},
         "2": {"class_type":"CLIPTextEncode","inputs":{"text":prompt,"clip":["1",1]}},
         "3": {"class_type":"CLIPTextEncode","inputs":{"text":"","clip":["1",1]}},
-        "4": {"class_type":"EmptyLatentImage","inputs":{"width":512,"height":512,"batch_size":1}},
+        "4": {"class_type":"EmptyLatentImage","inputs":{"width":width,"height":height,"batch_size":1}},
         "5": {"class_type":"KSampler","inputs":{
             "model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0],
             "seed":0,"steps":20,"cfg":7,"sampler_name":"euler","scheduler":"normal","denoise":1}},
@@ -348,6 +436,25 @@ fn generate_comfy(endpoint: &str, prompt: &str, checkpoint: Option<&str>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gallery_only_lists_and_reads_images_aiwin11_wrote() {
+        let folder = std::env::temp_dir().join(format!("aiwin11-gallery-{}", uuid::Uuid::new_v4()));
+        let png = b"\x89PNG\r\n\x1a\nrest";
+        let first = write_png(&folder, png).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        let second = write_png(&folder, png).unwrap();
+        std::fs::write(folder.join("notes.txt"), "x").unwrap();
+        std::fs::write(folder.join("image-zz.png"), png).unwrap();
+        assert_eq!(list_images(&folder), [second.clone(), first]);
+        assert_eq!(read_image(&folder, &second).unwrap(), png);
+        for bad in ["notes.txt", "image-zz.png", "../image-00000000000000000000000000000000.png"] {
+            assert_eq!(read_image(&folder, bad), Err("IMAGE_NOT_FOUND"), "{bad}");
+        }
+        assert_eq!(ImageFormat::from_code("landscape").map(ImageFormat::size), Some((768, 512)));
+        assert_eq!(ImageFormat::from_code("panorama"), None);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
 
     #[test]
     fn only_loopback_endpoints_are_accepted() {

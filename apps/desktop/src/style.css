@@ -408,3 +408,23 @@ button:disabled {
   font-weight: 600;
   color: var(--danger, #c42b1c);
 }
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+  list-style: none;
+  padding: 0;
+}
+
+.gallery img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.gallery span {
+  display: block;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
