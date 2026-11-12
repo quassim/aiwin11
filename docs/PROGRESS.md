@@ -2,6 +2,10 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-13, statut « test utilisateur à faire »
+
+Nouveau statut 🧪 dans `docs/ROADMAP.md` : terminé, tests automatiques au vert, mais jamais essayé dans l’application lancée. ✅ veut désormais dire terminé **et** validé (essai de l’utilisateur ou test réel sur la machine de référence). Toute nouvelle fonction entre en 🧪 ; la liste « Tests utilisateur à faire » en tête de la feuille de route sert de séance de test. Décompte : 53 ✅, 21 🧪, 90 🟡, 16 ❌ sur 180 lignes.
+
 ## 2026-11-13, reprise après Codex
 
 **Fait** : `67966a8` travail laissé non commité par Codex, vérifié puis commité tel quel (fichiers recherche/renommage/corbeille/restauration, écrans et capture d’écran, transcription, centre de contrôle, sonde et routage adaptatif local, import/export des modèles, suivi des jetons cloud, vidéo ComfyUI, workflows à étapes, mises à jour signées). Feuille de route remise d’accord avec le code (18 lignes périmées corrigées). Nouvel outil d’agent `search_text_files` : recherche dans le nom et le contenu des fichiers du dossier de travail (lecture seule, action de politique `searchFiles`, autorisée dans tous les profils, modèles locaux seulement).

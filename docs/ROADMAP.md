@@ -1,8 +1,8 @@
 # AiWin11 — Feuille de route
 
-État au 12 novembre 2026, dernier commit `2a26a1c` (conversation de conception relue intégralement le 12/11, points manquants ajoutés en §2.5). Ce document recoupe **tous les points de la conversation de conception** (vision initiale, cadrage v0.1, spécification v1.0, transmission à Codex) avec ce qui est réellement implémenté, puis organise le reste en phases.
+État au 13 novembre 2026, dernier commit `9a6c583` (conversation de conception relue intégralement le 12/11, points manquants ajoutés en §2.5). Ce document recoupe **tous les points de la conversation de conception** (vision initiale, cadrage v0.1, spécification v1.0, transmission à Codex) avec ce qui est réellement implémenté, puis organise le reste en phases.
 
-Légende : ✅ fait et vérifié · 🟡 partiel · ❌ à faire · 🔷 décision à prendre.
+Légende : ✅ terminé et validé (essayé par l’utilisateur ou par un test réel sur la machine de référence, ou sans objet à tester : décision, documentation) · 🧪 terminé, test utilisateur à faire (code complet, tests automatiques au vert, jamais essayé dans l’application lancée) · 🟡 partiel · ❌ à faire · 🔷 décision à prendre. Les sous-points d’une ligne suivent la même légende.
 
 Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]** spécification v1.0 · **[H]** transmission à Codex · **[B]** `docs/BACKLOG.md` (AW-xxx).
 
@@ -13,6 +13,44 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 - **R7**. L’Inspecteur transcrit les captures avec Ollama. La page Vidéo soumet et suit un workflow ComfyUI sur la boucle locale, avec un seul travail suivi à la fois. La génération sur un modèle vidéo réel reste à vérifier.
 - **R8**. Les workflows enregistrés prennent en charge des étapes distinctes, les branches après échec, la reprise manuelle, les jours choisis et le démarrage d’AiWin11. Les exécutions planifiées restent locales et en lecture seule.
 - **R9**. Le script de distribution peut embarquer Python et produire une mise à jour NSIS signée avec son manifeste. La publication du canal de production et l’essai d’installation restent ouverts.
+
+### Décompte (lignes des tableaux §1 à §4)
+
+| État | Lignes | Part |
+|---|---|---|
+| ✅ Terminé et validé | 53 | 29 % |
+| 🧪 Terminé, test utilisateur à faire | 21 | 12 % |
+| 🟡 Partiel | 90 | 50 % |
+| ❌ À faire | 16 | 9 % |
+
+Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance de test ci-dessous.
+
+### Tests utilisateur à faire (lignes 🧪)
+
+À essayer dans l’application lancée, avec Ollama démarré ; une ligne passe à ✅ une fois essayée sans problème.
+
+- [ ] Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia)
+- [ ] Arrêt d’urgence
+- [ ] Tableau de bord
+- [ ] Assistant flottant
+- [ ] Raccourcis globaux
+- [ ] Écran de routage : modèle de secours, **mode privé**, copier la configuration
+- [ ] Plugins / MCP
+- [ ] Arrêt d’urgence global, distinguer arrêt demandé / confirmé
+- [ ] UX : mode simple / mode expert
+- [ ] UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur)
+- [ ] UX : local / cloud / transfert de données visibles
+- [ ] Service privilégié facultatif
+- [ ] Admin futur via composant dédié limité en durée et périmètre
+- [ ] Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`)
+- [ ] Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first 🧪, cost_optimized 🧪, adaptive 🧪 ; élimination (capacité d’appel d’outil, sonde) puis classement
+- [ ] Aucun repli local → cloud en mode privé strict
+- [ ] Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud
+- [ ] Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud
+- [ ] « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées
+- [ ] « Stoppe toutes les tâches »
+- [ ] T-008
+- [ ] Sous-points 🧪 des lignes partielles : placement GPU, manifestes (débit, VRAM), modèle local de secours, fichiers protégés, sauvegardes et restauration, temps « interface prête », paramètres Windows dans l’état du PC
 
 ---
 
@@ -26,7 +64,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | 🔷 Décision ADR-011 : Protobuf sur stdio, un processus par commande (pont, agent, assistant, MCP) ; cœur et broker dans le processus Tauri ; retour à gRPC prévu si un service permanent devient nécessaire |
-| Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies `manual` et `local_first` avec secours cloud explicite, modèles chargés et VRAM ; budget en jetons par demande cloud ✅ ; voix/image/vidéo, coût en euros, autres stratégies ❌ |
+| Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🟡 Modèle par tâche (texte/actions, vision), stratégies locales `manual`, `adaptive`, `quality_first`, `cost_optimized` 🧪 et `local_first` avec secours cloud explicite, modèle local de secours 🧪, manifestes de modèles 🧪, placement GPU 🧪 ; budget en jetons ✅ et plafond de coût en euros 🧪 par demande cloud ; voix/image/vidéo par tâche 🟡, classement mixte local/cloud ❌ |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification ✅, raccourci global Ctrl+Alt+Espace ouvrant le champ de demande (palette simple) ✅ ; mode flottant (petite fenêtre toujours au premier plan) ✅ ; overlay contextuel dédié ❌ |
 | Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 Mémoire durable chiffrée (DPAPI) ✅, client MCP stdio (extensions déclarées, appel approuvé) ✅, recherche sémantique locale dans la mémoire ✅, synthèse vocale locale ✅, dictée locale (SAPI) ✅, génération d’images via un moteur local (API AUTOMATIC1111, non testée faute de moteur installé) ✅, demandes enregistrées et planifiées (quotidien, lecture seule) ✅ ; indexation de fichiers, MCP, voix, image, vidéo, workflows, multi-agents ❌ |
 | Distribution (installateur, mises à jour) | 🟡 Installateur NSIS par utilisateur (`scripts/package.ps1`) avec pont, assistant et agent embarqués, Python détecté automatiquement ; signature, mises à jour, Python/.NET embarqués ❌ |
@@ -57,26 +95,26 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Sélection manuelle **ou routage automatique** | 🟡 Manuelle seulement | R3 |
 | Multimodal : texte ✅, voix STT/TTS ❌, image ❌, vidéo ❌, compréhension d’écran 🟡 (fenêtre), analyse de documents ❌, temps réel ❌ | 🟡 | R7 |
 | Configuration indépendante par modalité | 🟡 Modèle d’agent, modèle de vision, voix, moteurs image et vidéo réglés séparément | R3 |
-| Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia) | ✅ Délégation d’un niveau, agents limités à leurs outils (règle `agent_scope`) | — |
+| Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia) | 🧪 Délégation d’un niveau, agents limités à leurs outils (règle `agent_scope`) | — |
 | Permissions par agent, application, dossier et action | 🟡 Par action, profil, agent spécialisé, dossier de travail, fichiers protégés et liste fermée d’applications | R2 |
 | Simulations | ✅ Mode simulation | — |
 | Confirmations des opérations sensibles | ✅ | — |
 | Journal d’audit | ✅ | — |
-| Arrêt d’urgence | ✅ Arrêt global « Stoppe toutes les tâches » (demandé / confirmé) | — |
+| Arrêt d’urgence | 🧪 Arrêt global « Stoppe toutes les tâches » (demandé / confirmé) | — |
 | Mécanismes de récupération | 🟡 Corbeille, reprise après plantage, sauvegardes des données d’AiWin11 (manuelles et automatiques avant migration, 5 gardées) avec restauration au démarrage suivant ; pas de points de restauration Windows | R2 |
-| Tableau de bord | ✅ Centre de contrôle | — |
-| Assistant flottant | ✅ Mode flottant (petite fenêtre toujours au premier plan) | — |
-| Raccourcis globaux | ✅ Ctrl+Alt+Espace ouvre le champ de demande | — |
+| Tableau de bord | 🧪 Centre de contrôle | — |
+| Assistant flottant | 🧪 Mode flottant (petite fenêtre toujours au premier plan) | — |
+| Raccourcis globaux | 🧪 Ctrl+Alt+Espace ouvre le champ de demande | — |
 | Gestion des modèles | 🟡 Détection et sélection | R3 |
 | Profils d’autonomie (Observation, Assisté, Autonome contrôlé, Avancé) | ✅ | — |
 | Visualisation des actions en temps réel | 🟡 Étapes, brouillon, rapport d’actions | R5 |
 | Éditeur visuel de workflows | 🟡 Composition d’étapes réordonnables ; pas d’éditeur graphique en nœuds | R8 |
-| Écran de routage : modèle de secours, **mode privé**, copier la configuration | ✅ Secours cloud explicite, mode privé, import/export JSON des choix de modèles | — |
-| Détection des modèles installés ✅, capacités 🟡, conso GPU/RAM/VRAM ❌, coûts API ❌, tests de performance ❌, modèles de secours ❌, restrictions de confidentialité 🟡 | 🟡 | R3 |
+| Écran de routage : modèle de secours, **mode privé**, copier la configuration | 🧪 Secours cloud explicite, mode privé, import/export JSON des choix de modèles | — |
+| Détection des modèles installés ✅, capacités 🟡, conso GPU/RAM/VRAM 🧪 (VRAM et placement par modèle), coûts API 🧪 (tarif saisi par l’utilisateur), tests de performance 🧪 (débit mesuré pendant la sonde), modèles de secours 🧪 (local), restrictions de confidentialité 🟡 | 🟡 | R3 |
 | Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques, services ; tests réels) ; actions correctives et rapport ❌ | R2 |
 | Toujours protégés, même en Avancé : suppression massive, élévation de privilèges, sécurité Windows, transactions financières, transfert de données confidentielles | 🟡 Refus par défaut (aucun outil de ce type) ; règles explicites à écrire quand ces outils existeront | R2 |
 | Mémoire : SQLite + recherche vectorielle | 🟡 SQLite ; pas de vectoriel | R6 |
-| Plugins / MCP | ✅ Client MCP stdio, serveurs déclarés par l’utilisateur | — |
+| Plugins / MCP | 🧪 Client MCP stdio, serveurs déclarés par l’utilisateur | — |
 | Moteur de permissions indépendant | ✅ | — |
 
 ### 2.2 Cadrage v0.1 [S0]
@@ -91,7 +129,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Broker : Policy Engine ✅, Approvals ✅, Sandboxing 🟡, Audit ✅, Secrets ✅ | 🟡 | R4 |
 | Stack : Tailwind CSS + composants accessibles | 🔷 CSS sans framework aujourd’hui ; décider du design system en R5 | R5 |
 | Installateur signé, MSIX selon besoins | ✅ Décidé : installateur **classique** ; réalisation ❌ | R9 |
-| M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto ❌ | 🟡 | R3 |
+| M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto 🧪 (stratégies locales) | 🟡 | R3 |
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
 | M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ✅, vérification 🟡, interruption ✅ (pause, reprise, annulation), **reprise** 🟡 (pause/reprise, reprise manuelle des workflows) | 🟡 | R2, R8 |
 | M04 Sécurité : règles par ressource 🟡 (fichiers protégés par modèle de nom), permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
@@ -110,12 +148,12 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Approbation forte : fichiers, commande, conséquences, étendue | ✅ Pour les actions existantes | — |
 | Anti-injection : contenu = données | ✅ Fichiers et fenêtres ; pages web ❌ | R6 |
 | Secrets jamais donnés aux modèles | ✅ | — |
-| Arrêt d’urgence global, distinguer arrêt demandé / confirmé | ✅ `stop_all_tasks` : arrêté, demandé puis confirmé | — |
+| Arrêt d’urgence global, distinguer arrêt demandé / confirmé | 🧪 `stop_all_tasks` : arrêté, demandé puis confirmé | — |
 | Récupération : points de restauration, sauvegardes ciblées 🟡 (données d’AiWin11), opérations réversibles 🟡 (corbeille), transactions compensatoires | 🟡 | R2 |
 | Surfaces : Control Center ✅, Command Palette 🟡 (champ ouvert par raccourci global), Voice Assistant 🟡 (dictée et lecture déclenchées par l’utilisateur), Workflow Studio 🟡 | 🟡 | R5, R7, R8 |
-| UX : mode simple / mode expert | ✅ Bouton mode expert (pages avancées masquées sinon) | — |
-| UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur) | ✅ Indicateur permanent dans la barre latérale (inactif, analyse, planification, attente d’approbation, exécution, pause, nouvel essai, erreur), annoncé aux lecteurs d’écran ; demandes de la fenêtre principale seulement (pas les routines planifiées) | R5 |
-| UX : local / cloud / transfert de données visibles | ✅ Badge du fournisseur ; sous l’état de l’agent, « Traitement sur ce PC » ou « Données envoyées au cloud » pendant la demande (étape `model.cloud.request` avant chaque appel cloud, journalisée avec le fournisseur), puis ce qu’il en a été pour la dernière demande | R5 |
+| UX : mode simple / mode expert | 🧪 Bouton mode expert (pages avancées masquées sinon) | — |
+| UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur) | 🧪 Indicateur permanent dans la barre latérale (inactif, analyse, planification, attente d’approbation, exécution, pause, nouvel essai, erreur), annoncé aux lecteurs d’écran ; demandes de la fenêtre principale seulement (pas les routines planifiées) | R5 |
+| UX : local / cloud / transfert de données visibles | 🧪 Badge du fournisseur ; sous l’état de l’agent, « Traitement sur ce PC » ou « Données envoyées au cloud » pendant la demande (étape `model.cloud.request` avant chaque appel cloud, journalisée avec le fournisseur), puis ce qu’il en a été pour la dernière demande | R5 |
 | UX : changements sans redémarrage | ✅ | — |
 | UX : clavier, lecteurs d’écran, résolutions | 🟡 Pas d’audit lecteur d’écran | R1 |
 | Structure monorepo : `apps/overlay`, `packages/ui`, `provider-sdk`, `tool-sdk`, `plugin-sdk`, `plugins/`, `tests/{unit,integration,security,e2e}`, `scripts/` | 🟡 `packages/` et `tests/` vides ; services regroupés dans `services/core` | R4, R6 |
@@ -124,14 +162,14 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
 | Licence : open source, privée ou hybride | ✅ Sans objet (usage personnel) | — |
-| Service privilégié facultatif | ✅ Assistant élevé à la demande (option B) : `AiWin11.Admin.exe`, liste fermée (services, fichiers temporaires), désactivé par défaut, accord + UAC, empreinte SHA-256 vérifiée et fichier verrouillé pendant l’opération (build release) ; 🟡 UAC réel non testé, signature de code optionnelle (`AIWIN11_SIGN_THUMBPRINT`, certificat à fournir) 🟡 | — |
+| Service privilégié facultatif | 🧪 Assistant élevé à la demande (option B) : `AiWin11.Admin.exe`, liste fermée (services, fichiers temporaires), désactivé par défaut, accord + UAC, empreinte SHA-256 vérifiée et fichier verrouillé pendant l’opération (build release) ; 🟡 UAC réel non testé, signature de code optionnelle (`AIWIN11_SIGN_THUMBPRINT`, certificat à fournir) 🟡 | — |
 
 ### 2.3 Spécification v1.0 [S1]
 
 | Point | État | Phase |
 |---|---|---|
 | 6 processus (desktop, core, broker, windows, agent, model) | 🟡 desktop+core+broker+model dans Tauri ; windows et agent séparés | R4 |
-| Admin futur via composant dédié limité en durée et périmètre | ✅ Assistant élevé à la demande (option B), une opération par lancement | — |
+| Admin futur via composant dédié limité en durée et périmètre | 🧪 Assistant élevé à la demande (option B), une opération par lancement | — |
 | Frontend sans terminal ni système de fichiers direct, commandes Tauri restreintes | ✅ Capacités Tauri par commande | — |
 | Transport : Tauri IPC ✅, **gRPC sur named pipes avec ACL et identité** ❌, Protobuf ✅, flux d’événements ✅, HTTP local pour runtimes ✅ ; rien exposé au LAN ✅ | 🟡 | R4 |
 | Enveloppe avec `payload`, identité attribuée par une couche de confiance | 🟡 Opérations typées ; identité fixée par l’hôte | R4 |
@@ -140,9 +178,9 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Types `task.started`, `task.progress`, `model.provider.unavailable` | ✅ | — |
 | Ordre par tâche ✅ ; tolérance aux doublons après reconnexion | 🟡 | R4 |
 | Model Gateway : ProviderRegistry, ModelCatalog 🟡, ModelRouter (Resolve, Rank, Select, **ExplainSelection**), InferenceService (Generate, Stream ✅, Cancel 🟡), ResourceMonitor, UsageService | 🟡 | R3 |
-| Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | ✅ table `models` (migration 007) : appels d’outils `unverified`/`not_advertised`/`verified`/`failed`, vision, durée et date du dernier test ; fenêtre de contexte, nombre de paramètres, quantification et taille sur disque (migration 008), débit mesuré pendant le test et VRAM utilisée une fois chargé (migration 009) ; modèles en échec exclus du routage | R3 |
-| Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first ✅, cost_optimized ✅, adaptive ✅ ; élimination (capacité d’appel d’outil, sonde) puis classement | ✅ Pour les modèles locaux ; pas encore de classement mixte local/cloud | R3 |
-| Aucun repli local → cloud en mode privé strict | ✅ Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
+| Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | 🧪 table `models` (migration 007) : appels d’outils `unverified`/`not_advertised`/`verified`/`failed`, vision, durée et date du dernier test ; fenêtre de contexte, nombre de paramètres, quantification et taille sur disque (migration 008), débit mesuré pendant le test et VRAM utilisée une fois chargé (migration 009) ; modèles en échec exclus du routage | R3 |
+| Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first 🧪, cost_optimized 🧪, adaptive 🧪 ; élimination (capacité d’appel d’outil, sonde) puis classement | 🧪 Pour les modèles locaux ; pas encore de classement mixte local/cloud | R3 |
+| Aucun repli local → cloud en mode privé strict | 🧪 Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
 | HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | 🟡 Cartes, pilote et mémoire (WMI) ✅, modèles chargés et VRAM ✅, placement par modèle (GPU, partiel, processeur seul) avec conseil ✅ ; backend d’inférence (CUDA/ROCm) non lu | R3 |
 | Agent défini en YAML (rôle, profil de modèle, capacités, limites, vérification, `retry_limit`, profil de politique) | ❌ Limites fixes dans le code | R8 |
 | États : CREATED ✅, PLANNING ✅, RUNNING ✅ (`dispatching`), AWAITING_APPROVAL ✅, COMPLETED ✅, FAILED ✅, CANCELLED ✅, **PAUSED** ✅, **RECOVERING** ✅ (nouvel essai unique des lectures système), CANCELLING 🟡 (arrêt « demandé » pendant une action, confirmé à sa fin) ; `interrupted` après un plantage | ✅ | — |
@@ -174,7 +212,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Risques : UIA (fallback visuel) ❌, GPU ❌, actions incorrectes ✅, injection ✅, suppression ✅ (corbeille), fuite cloud ✅, fragmentation providers 🟡, conso GPU ❌, dépendance frameworks 🟡 | 🟡 | R2, R3 |
 | Signaler les fenêtres élevées ou protégées au lieu de contourner | 🟡 Affinité d’affichage refusée ; élévation non détectée explicitement | R2 |
 | À valider par prototype : perf Rust/.NET/Python, IPC définitif, stabilité UIA, capture, packaging, empreinte mémoire | ❌ | R1, R4, R9 |
-| À adapter au matériel : taille des modèles, accélération, modèles simultanés, quantification, latence, VRAM | ❌ (RTX 3090 utilisée pour les tests) | R3 |
+| À adapter au matériel : taille des modèles, accélération, modèles simultanés, quantification, latence, VRAM | 🟡 Manifestes (taille, quantification, contexte, débit, VRAM) et placement GPU par modèle 🧪 ; choix automatique selon le matériel ❌ (RTX 3090 utilisée pour les tests) | R3 |
 
 ### 2.4 Transmission [H] et règles du dépôt (AGENTS.md)
 
@@ -196,15 +234,15 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|---|---|
 | Limites d’un agent : `max_steps` 30, `max_tool_calls` 50, `max_runtime_seconds` 900, `max_parallel_tools` 2, `retry_limit` 2, `verification_required` | [S1 §5.1] | 🟡 16 étapes et 15 minutes max, une action à la fois, vérification par outil ; pas de reprise automatique | R8 |
 | Résilience : la panne d’un provider ou d’un agent ne fait pas tomber le noyau ; « crash d’un agent : core et interface restent fonctionnels » | [S0 §8][S1 §11] | 🟡 Agent Python, pont, assistant et serveurs MCP en processus séparés avec délais ; le verrou du cœur se rétablit après une panique (une commande en échec ne bloque plus l’application) ; non testé par injection de pannes | R4, R9 |
-| Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud | [S1 §9] | ✅ Tarif par million de jetons et plafond par demande saisis par l’utilisateur (aucun prix intégré), coût estimé vérifié avant chaque appel cloud (`CLOUD_COST_EXCEEDED`), en plus du plafond de jetons | R3 |
-| Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud | [V][S0 §8][S1 §4.3], T-011 | ✅ Interrupteur **Mode privé** (Sécurité), aucun fallback automatique | — |
+| Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud | [S1 §9] | 🧪 Tarif par million de jetons et plafond par demande saisis par l’utilisateur (aucun prix intégré), coût estimé vérifié avant chaque appel cloud (`CLOUD_COST_EXCEEDED`), en plus du plafond de jetons | R3 |
+| Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud | [V][S0 §8][S1 §4.3], T-011 | 🧪 Interrupteur **Mode privé** (Sécurité), aucun fallback automatique | — |
 | Intégration profonde : agent permanent, interfaces contextuelles, événements Windows, automatisation proactive | [V §7] | ❌ | R5, R8 |
 | Zero-trust entre agents et outils ; un agent ne transmet pas d’autorisation à un autre | [S0 §10][S1 §6.3] | ✅ pour l’agent unique (broker, identité attribuée par le cœur) ; à revalider avec le multi-agents | R8 |
 | Périphériques, terminal, navigateur parmi les capacités | [V §2] | ❌ Navigateur via MCP prévu ; périphériques non planifiés en détail | R2, R6 |
 | Agents spécialisés (développement, recherche, administration Windows, bureautique, multimédia) | [V §2] | 🟡 Général, Fichiers et bureautique, Administration Windows, Lecture seule, chacun limité à ses outils (règle `agent_scope`) ; délégation d’un niveau par l’agent Général ✅ | R8 |
 | Isolation des tâches risquées (processus limités, environnement contrôlé, VM si pertinent) | [S0 §5] | 🟡 Processus séparés, utilisateur standard, assistant élevé une opération ; pas de bac à sable ni de VM | R4 |
 | Licence (open source, privée, hybride) | [S0 §10] | 🔷 À décider (usage personnel pour l’instant) | — |
-| Coûts API, consommation GPU/RAM/VRAM et tests de performance par modèle dans le gestionnaire de modèles | [V §4] | ❌ | R3, R9 |
+| Coûts API, consommation GPU/RAM/VRAM et tests de performance par modèle dans le gestionnaire de modèles | [V §4] | 🟡 Débit, VRAM, taille et placement par modèle 🧪 ; coût estimé à partir du tarif saisi 🧪 ; banc de performance complet ❌ | R3, R9 |
 
 ---
 
@@ -214,9 +252,9 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|---|
 | — | « Ouvre le Bloc-notes » | ✅ Réel |
 | — | « Résume cette fenêtre » | ✅ Réel (structure et description locale) |
-| — | « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées | ✅ `organize_files` : plan de renommages vérifié, montré en entier, approuvé en une fois (non testé en réel) |
+| — | « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées | 🧪 `organize_files` : plan de renommages vérifié, montré en entier, approuvé en une fois (non testé en réel) |
 | — | « Utilise mon modèle local » : aucun appel cloud | ✅ |
-| — | « Stoppe toutes les tâches » | ✅ Arrêt global (tests unitaires ; réel non testé) |
+| — | « Stoppe toutes les tâches » | 🧪 Arrêt global (tests unitaires ; réel non testé) |
 | — | Provider indisponible : bascule autorisée ou erreur compréhensible | 🟡 Erreur ✅, bascule ❌ — R3 |
 | — | Instruction malveillante dans une page | 🟡 Fichiers ✅ ; pages web ❌ — R6 |
 | — | Redémarrage après interruption | ✅ |
@@ -227,7 +265,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | T-005 | Action Windows simple vérifiée | ✅ |
 | T-006 | Action non autorisée refusée et journalisée | ✅ |
 | T-007 | Aucune exécution avant approbation | ✅ |
-| T-008 | Annulation | ✅ Unitaires ; réel ❌ — R1 |
+| T-008 | Annulation | 🧪 Unitaires ; réel ❌ — R1 |
 | T-009 | Panne du modèle | 🟡 Erreur contrôlée ; modèle local de secours configurable, utilisé une fois si le modèle choisi échoue avant la première étape (après un appel d’outil de test réussi) ; non testé avec Ollama réel — R3 |
 | T-010 | Injection de prompt | 🟡 Fichiers ✅ ; suite complète AW-024 — R1 |
 | T-011 | Mode privé : aucun transfert réseau cloud | 🟡 Garanti par conception ; pas de test réseau ni de mode privé explicite — R3 |
