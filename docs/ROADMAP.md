@@ -19,9 +19,9 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | État | Lignes | Part |
 |---|---|---|
 | ✅ Terminé et validé | 53 | 29 % |
-| 🧪 Terminé, test utilisateur à faire | 25 | 14 % |
-| 🟡 Partiel | 87 | 48 % |
-| ❌ À faire | 15 | 8 % |
+| 🧪 Terminé, test utilisateur à faire | 27 | 15 % |
+| 🟡 Partiel | 86 | 48 % |
+| ❌ À faire | 14 | 8 % |
 
 Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance de test ci-dessous.
 
@@ -54,6 +54,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 - [ ] « Stoppe toutes les tâches »
 - [ ] Lot C (AW-013 à AW-017). Inspecter et décrire une fenêtre avec le modèle local. Rechercher un contrôle, approuver un clic puis une saisie et vérifier le journal. Copier, renommer et mettre un fichier de test à la corbeille dans un dossier autorisé. Relancer AiWin11 après une tâche interrompue et vérifier son état dans l’historique.
 - [ ] Mémoire (lot D). Avec un modèle d’embeddings local choisi, retenir deux informations, indexer un fichier texte, puis demander à l’agent de chercher dans sa mémoire : il cite la note et l’extrait du fichier. Poser une question de suivi (« et ensuite ? ») : l’agent tient compte de l’échange précédent ; **Nouvelle conversation** l’oublie. Choisir une durée de conservation.
+- [ ] MCP (lot D). Déclarer un serveur MCP stdio de confiance, cliquer sur **Tester** (version, nom, outils), demander à l’agent de lister puis d’appeler un outil. Mettre à jour le serveur : l’agent est refusé jusqu’à **Accepter la nouvelle version**.
 - [ ] PowerShell approuvé. Demander l’édition et le numéro de build de Windows via PowerShell, puis essayer **Autoriser** et **Refuser**.
 - [ ] Sous-points 🧪 des lignes partielles : applications interdites et fenêtres protégées (Sécurité), placement GPU, manifestes (débit, VRAM), modèle local de secours, fichiers protégés, sauvegardes et restauration, temps « interface prête », paramètres Windows dans l’état du PC
 
@@ -71,7 +72,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Architecture multi-processus gRPC [S1 §2–3] | 🧪 Cœur, broker, passerelle de modèles, pont Windows et agent dans des processus distincts de Tauri. Session, tâches, autorisations, modèles et journal sur gRPC local. Reprise par curseur et validation Windows automatisées. |
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | 🧪 Routage local, cloud et mixte, registre de fournisseurs avec activation et sonde, modèles par agent dont Développement, dictée SAPI sélectionnable, voix et images. ComfyUI utilise le modèle du workflow. Nouveaux moteurs à essayer avec leurs configurations réelles. |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🧪 Terminé, test utilisateur à faire. Palette contextuelle dédiée, brouillon à relire, mode flottant, raccourcis globaux, menu de la zone de notification et notifications Windows. |
-| Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 **Mémoire 🧪** : notes chiffrées (DPAPI), mémoire de session (4 derniers échanges, jamais enregistrés, échanges locaux jamais envoyés au cloud, bouton « Nouvelle conversation »), index de fichiers choisis, index vectoriel chiffré (embeddings locaux mis en cache), recherche par l’agent dans les notes et les fichiers indexés, durée de conservation des notes et rapports. Client MCP stdio approuvé ✅, synthèse vocale et dictée locales ✅, images (AUTOMATIC1111, ComfyUI) et vidéo (ComfyUI) non testées faute de moteur, workflows enregistrés et planifiés ✅, délégation à des agents spécialisés ✅. Reste à terminer, dans l’ordre : MCP, voix, image, vidéo, workflows, multi-agents |
+| Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | 🟡 **Mémoire 🧪** : notes chiffrées (DPAPI), mémoire de session (4 derniers échanges, jamais enregistrés, échanges locaux jamais envoyés au cloud, bouton « Nouvelle conversation »), index de fichiers choisis, index vectoriel chiffré (embeddings locaux mis en cache), recherche par l’agent dans les notes et les fichiers indexés, durée de conservation des notes et rapports. **MCP 🧪** : client bivalent 2026-07-28 / versions à poignée de main, test d’un serveur, mise à jour bloquée jusqu’à acceptation, appels toujours approuvés ; synthèse vocale et dictée locales ✅, images (AUTOMATIC1111, ComfyUI) et vidéo (ComfyUI) non testées faute de moteur, workflows enregistrés et planifiés ✅, délégation à des agents spécialisés ✅. Reste à terminer, dans l’ordre : voix, image, vidéo, workflows, multi-agents |
 | Distribution (installateur, mises à jour) | 🟡 Installateur NSIS par utilisateur (`scripts/package.ps1`) avec pont, assistant et agent embarqués, Python détecté automatiquement ; signature, mises à jour, Python/.NET embarqués ❌ |
 
 ---
@@ -119,7 +120,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques, services ; tests réels) ; actions correctives et rapport ❌ | R2 |
 | Toujours protégés, même en Avancé : suppression massive, élévation de privilèges, sécurité Windows, transactions financières, transfert de données confidentielles | 🟡 Refus par défaut (aucun outil de ce type) ; règles explicites à écrire quand ces outils existeront | R2 |
 | Mémoire : SQLite + recherche vectorielle | 🧪 Index vectoriel dans SQLite (migration 010), vecteurs chiffrés par entrée et modèle local, supprimés avec l’entrée ou à la réindexation | R6 |
-| Plugins / MCP | 🧪 Client MCP stdio, serveurs déclarés par l’utilisateur | — |
+| Plugins / MCP | 🧪 Client MCP stdio bivalent (2026-07-28 et versions à poignée de main), serveurs déclarés par l’utilisateur, test depuis la page Extensions, mise à jour bloquée jusqu’à acceptation | — |
 | Moteur de permissions indépendant | ✅ | — |
 
 ### 2.2 Cadrage v0.1 [S0]
@@ -141,13 +142,13 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | M05 Mémoire de session 🧪, préférences durables ✅, indexation sélective 🧪, historique ✅, recherche sémantique 🧪, conservation 🧪 | 🧪 | R6 |
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
 | M07 Déclencheurs ✅ (jours, démarrage), planification ✅, conditions 🟡 (branche après échec), tâches répétitives ✅, reprise sur erreur 🟡, éditeur visuel 🟡 | 🟡 | R8 |
-| M08 Installation, activation, mise à jour, permissions des plugins et serveurs MCP | 🟡 Serveurs MCP déclarés (exécutable et arguments fixes), appels toujours approuvés ; installation et mise à jour ❌ | R6 |
+| M08 Installation, activation, mise à jour, permissions des plugins et serveurs MCP | 🧪 Déclaration (exécutable et arguments fixes, aucun téléchargement), activation, outils autorisés, test (version, identité, outils), empreinte de l’exécutable et des fichiers passés en argument : un serveur modifié est refusé jusqu’à ce que l’utilisateur accepte la nouvelle version ; appels toujours approuvés | R6 |
 | M09 App ✅, overlay, palette, barre système, notifications et raccourcis 🧪, thème et visualisation des agents 🟡 | 🟡 | R5 |
 | M10 Journaux 🟡, suivi des coûts, statistiques modèles, traces d’agents 🟡, ressources, diagnostics | 🟡 | R9 |
 | Ordre d’exécution : API native → API appli → UIA → vision + souris/clavier → script contrôlé ; **changer de méthode sans élargir les autorisations** | 🟡 Recours Win32 ciblé après UIA 🧪. Chaînage avec la vision à développer. | R2 |
 | Passerelle : modalités (dont **embeddings**), contraintes (VRAM, latence, coût, confidentialité, **quotas**), politiques de routage, détection réelle des capacités | 🟡 | R3 |
 | Configuration YAML validée par schéma, générée par l’UI (execution_mode, privacy_mode, providers, routage par tâche, require_approval_for) | ❌ | R3 |
-| Décision = identité + action + ressource + contexte + risque → ALLOW/DENY/ASK/SIMULATE | 🟡 Action, profil, contexte et risque du manifeste (journalisé avec chaque décision) ; ressource : fichiers protégés, fenêtres protégées et applications interdites refusés à l’exécution 🧪, serveurs MCP à venir | R2 |
+| Décision = identité + action + ressource + contexte + risque → ALLOW/DENY/ASK/SIMULATE | 🟡 Action, profil, contexte et risque du manifeste (journalisé avec chaque décision) ; ressource : fichiers protégés, fenêtres protégées et applications interdites refusés à l’exécution 🧪, serveur MCP modifié refusé 🧪 | R2 |
 | Simulateur de politique (lire dossier, modifier document, installer logiciel, suppression massive, envoi Internet, sécurité Windows) | 🟡 Table des décisions dans **Sécurité** ; actions limitées aux outils existants | R2 |
 | Isolation : processus limités ✅ (agent), environnements contrôlés / VM ❌, pas d’exécution admin ✅ | 🟡 | R4, R9 |
 | Approbation forte : fichiers, commande, conséquences, étendue | ✅ Pour les actions existantes | — |
@@ -163,7 +164,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | UX : clavier, lecteurs d’écran, résolutions | 🟡 Pas d’audit lecteur d’écran | R1 |
 | Structure monorepo : `apps/overlay`, `packages/ui`, `provider-sdk`, `tool-sdk`, `plugin-sdk`, `plugins/`, `tests/{unit,integration,security,e2e}`, `scripts/` | 🟡 `packages/` et `tests/` vides ; services regroupés dans `services/core` | R4, R6 |
 | Contrat d’outil : id, version, capacités, schéma, **risque, dry-run, réversible, timeout** | ✅ `manifest.rs` : un manifeste par outil, vérifié contre le catalogue et l’agent ; les invariants de politique en dérivent ; affiché dans **Sécurité** | — |
-| Base MCP spec 2026-07-28 | ❌ | R6 |
+| Base MCP spec 2026-07-28 | 🧪 Sonde `server/discover`, version et capacités dans le `_meta` de chaque requête, `resultType`, erreur -32022 ; repli sur `initialize` (2025-11-25 à 2024-11-05) pour un serveur ancien | R6 |
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
 | Licence : open source, privée ou hybride | ✅ Sans objet (usage personnel) | — |

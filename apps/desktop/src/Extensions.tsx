@@ -2,6 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
 type McpServer = { name: string; command: string; args: string[]; enabled: boolean; allowedTools: string[] | null };
+type ServerState = "ready" | "disabled" | "changed";
+type ServerProbe = { protocolVersion: string; serverName: string; serverVersion: string; tools: string[] };
+
+const probeErrors: Record<string, string> = {
+  MCP_SERVER_UNKNOWN: "Enregistre d’abord cette extension.",
+  MCP_SERVER_INVALID: "L’exécutable est introuvable ou invalide.",
+  MCP_SERVER_UNAVAILABLE: "Le serveur n’a pas pu être démarré.",
+  MCP_TIMEOUT: "Le serveur n’a pas répondu à temps.",
+  MCP_VERSION_UNSUPPORTED: "Le serveur ne parle aucune version de MCP prise en charge (2024-11-05 à 2026-07-28).",
+  MCP_PROTOCOL_ERROR: "Le programme ne répond pas comme un serveur MCP avec des outils.",
+};
 type Draft = Omit<McpServer, "args" | "allowedTools"> & { args: string; tools: string; restrict: boolean };
 
 const toDraft = (server: McpServer): Draft => ({
@@ -20,13 +31,41 @@ const lines = (text: string) =>
 export function Extensions() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [status, setStatus] = useState("");
+  const [states, setStates] = useState<Record<string, ServerState>>({});
+  const [probes, setProbes] = useState<Record<string, string>>({});
+
+  const loadStates = () =>
+    void invoke<Record<string, ServerState>>("mcp_server_states").then(setStates, () => setStates({}));
 
   useEffect(() => {
     void invoke<McpServer[]>("get_mcp_servers").then(
       (servers) => setDrafts(servers.map(toDraft)),
       () => setStatus("Les extensions sont indisponibles."),
     );
+    loadStates();
   }, []);
+
+  async function test(name: string) {
+    setProbes((current) => ({ ...current, [name]: "Test en cours…" }));
+    try {
+      const probe = await invoke<ServerProbe>("test_mcp_server", { name });
+      const identity = [probe.serverName, probe.serverVersion].filter(Boolean).join(" ") || "Serveur sans nom";
+      const tools = probe.tools.length ? probe.tools.join(", ") : "aucun outil autorisé";
+      setProbes((current) => ({ ...current, [name]: `${identity}, MCP ${probe.protocolVersion}. Outils : ${tools}.` }));
+    } catch (code) {
+      setProbes((current) => ({ ...current, [name]: probeErrors[String(code)] ?? "Le test a échoué." }));
+    }
+  }
+
+  async function accept(name: string) {
+    try {
+      await invoke("accept_mcp_update", { name });
+      setStatus(`Nouvelle version de « ${name} » acceptée.`);
+    } catch {
+      setStatus("La nouvelle version n’a pas pu être acceptée.");
+    }
+    loadStates();
+  }
 
   const update = (index: number, change: Partial<Draft>) =>
     setDrafts(drafts.map((draft, i) => (i === index ? { ...draft, ...change } : draft)));
@@ -42,6 +81,7 @@ export function Extensions() {
     try {
       await invoke("set_mcp_servers", { servers });
       setStatus("Extensions enregistrées.");
+      loadStates();
     } catch {
       setStatus(
         "Vérifie chaque extension : nom court (lettres, chiffres, - ou _), chemin complet d’un exécutable existant, 16 arguments au plus, noms uniques.",
@@ -55,7 +95,8 @@ export function Extensions() {
       <p>
         Déclare des serveurs MCP locaux (stdio). L’agent peut lister leurs outils et, avec ton accord à chaque fois, en
         appeler un. Un serveur MCP est un programme que tu choisis d’exécuter : n’ajoute que des extensions de
-        confiance. Seuls les modèles locaux y ont accès.
+        confiance. Seuls les modèles locaux y ont accès. Si l’exécutable (ou un fichier passé en argument) change, par
+        exemple après une mise à jour, l’extension est bloquée jusqu’à ce que tu acceptes la nouvelle version.
       </p>
       {drafts.map((draft, index) => (
         <fieldset key={index} className="task-form">
@@ -107,9 +148,23 @@ export function Extensions() {
               />
             </>
           )}
-          <button type="button" onClick={() => setDrafts(drafts.filter((_, i) => i !== index))}>
-            Retirer
-          </button>
+          {states[draft.name] === "changed" && (
+            <p role="alert">
+              Cette extension a changé sur le disque depuis que tu l’as déclarée : l’agent ne peut plus l’utiliser.{" "}
+              <button type="button" onClick={() => void accept(draft.name)}>
+                Accepter la nouvelle version
+              </button>
+            </p>
+          )}
+          <div className="section-header">
+            <button type="button" disabled={!states[draft.name]} onClick={() => void test(draft.name)}>
+              Tester
+            </button>
+            <button type="button" onClick={() => setDrafts(drafts.filter((_, i) => i !== index))}>
+              Retirer
+            </button>
+          </div>
+          {probes[draft.name] && <p role="status">{probes[draft.name]}</p>}
         </fieldset>
       ))}
       <div className="section-header">

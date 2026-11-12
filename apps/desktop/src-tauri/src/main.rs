@@ -1237,6 +1237,40 @@ fn set_mcp_servers(
     lock_core(&state.core).set_mcp_servers(servers)
 }
 
+/// Main window only: ready, disabled, or changed on disk since the user approved it.
+#[tauri::command]
+fn mcp_server_states(
+    state: State<'_, Arc<AppState>>,
+) -> std::collections::BTreeMap<String, aiwin11_core::mcp::ServerState> {
+    lock_core(&state.core).mcp_server_states()
+}
+
+/// Main window only: the user accepts the version now on disk of an updated server.
+#[tauri::command]
+fn accept_mcp_update(state: State<'_, Arc<AppState>>, name: String) -> Result<(), &'static str> {
+    lock_core(&state.core).accept_mcp_update(&name)
+}
+
+/// Main window only: started by the user, runs the saved server once to show its protocol
+/// version, identity and tools. Journaled; nothing is sent to a model.
+#[tauri::command]
+async fn test_mcp_server(
+    state: State<'_, Arc<AppState>>,
+    name: String,
+) -> Result<aiwin11_core::mcp::ServerProbe, &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let server = {
+            let core = lock_core(&state.core);
+            let _ = core.journal("mcp.server.tested", None);
+            core.mcp_servers().into_iter().find(|server| server.name == name).ok_or("MCP_SERVER_UNKNOWN")?
+        };
+        aiwin11_core::mcp::probe(&server)
+    })
+    .await
+    .map_err(|_| "MCP_SERVER_UNAVAILABLE")?
+}
+
 /// Floating mode: a small always-on-top window in the bottom-right corner of its screen, or
 /// back to the normal window.
 #[tauri::command]
@@ -1537,6 +1571,9 @@ fn main() {
             set_floating,
             get_mcp_servers,
             set_mcp_servers,
+            mcp_server_states,
+            accept_mcp_update,
+            test_mcp_server,
             get_reports,
             set_routine_schedule,
             dictate,

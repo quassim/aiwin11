@@ -1877,9 +1877,19 @@ impl TaskSlot {
                 },
             ),
         };
-        let Some(server) = lock(run.core)?.mcp_server(server_name) else {
-            run.report(action, &summary, ActionStatus::Failed, Some("MCP_SERVER_UNKNOWN"));
-            return Ok(format!("Le serveur MCP « {server_name} » n’est pas actif (page Extensions)."));
+        let server = match lock(run.core)?.mcp_server(server_name) {
+            Ok(server) => server,
+            Err(code) => {
+                run.report(action, &summary, ActionStatus::Failed, Some(code));
+                return Ok(if code == "MCP_SERVER_CHANGED" {
+                    format!(
+                        "Le serveur MCP « {server_name} » a changé depuis que l’utilisateur l’a déclaré : il doit \
+                         accepter la nouvelle version dans la page Extensions."
+                    )
+                } else {
+                    format!("Le serveur MCP « {server_name} » n’est pas actif (page Extensions).")
+                });
+            }
         };
         if call.is_some_and(|(tool, _)| !server.permits(tool)) {
             record_code(run.core, run.task, "mcp.request.denied", "MCP_TOOL_DISABLED")?;
@@ -1892,7 +1902,7 @@ impl TaskSlot {
         };
         let authorize = || -> Result<(), &'static str> {
             let mut core = lock(run.core)?;
-            if core.mcp_server(server_name).as_ref() != Some(&server) {
+            if core.mcp_server(server_name).as_ref() != Ok(&server) {
                 return Err("MCP_CONFIGURATION_CHANGED");
             }
             let command = core
