@@ -196,6 +196,10 @@ Each task journals `task.created`, then `task.started` (code: provider, `ollama`
 
 `stop_all_tasks` ("Stoppe toutes les tâches", a button always visible in the side bar) returns `idle` (nothing running), `stopped` (the task was planning or awaiting approval and is cancelled now) or `requested` (an action is executing: it is not interrupted midway, and the task stops right after it without any further step). It is journaled as `tasks.stop.requested` with that code; a requested stop is confirmed by `task.cancelled` when the task ends, which the window shows as "Arrêt confirmé".
 
+### History retention, erasure and export
+
+Past sessions older than the retention period (`history.retention_days` in `settings`, 1 to 3650 days, default 90) are deleted at startup, in the startup transaction, with their events, tasks and dispatch reservations; the current session is never purged. A purge is journaled as `history.purged` (code `sessions:N`). `get_history_settings` returns `{ retentionDays }`; `set_retention_days` (out of range: `SETTINGS_INVALID`) stores and applies it at once, journaled as `settings.retention.changed` (`days:N`). `clear_history` deletes all past sessions (refused with `TASK_BUSY` while a task runs) and journals `history.cleared` (`sessions:N`). `export_audit` writes every kept event, oldest first, as `{ "format": "aiwin11.audit.v1", "events": [{ sequence, id, sessionId, taskId, kind, source, code, timestamp }] }` to `%LOCALAPPDATA%pp.aiwin11.desktop\exportsiwin11-audit-<UTC>.json`, returns the path and journals `history.exported` (`entries:N`). Events only ever hold codes, so the export holds no user content.
+
 ## Streaming and progress (AW-011)
 
 Both providers are called with `stream: true`. The gateway folds Ollama's NDJSON chunks or OpenAI's SSE `data:` events into one proposal, with the same bounds (2 MiB body, 4000 reply characters, one tool call). Every Ollama chunk is checked for remote metadata. Tool-call fragments are assembled silently and never forwarded; OpenAI call IDs are kept for the next turn.

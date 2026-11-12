@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
+import { History } from "./History";
 import { Security } from "./Security";
 import "./style.css";
 
@@ -121,6 +122,10 @@ const activityNames: Record<string, string> = {
   "tasks.stop.requested": "Arrêt global demandé",
   "model.provider.unavailable": "Fournisseur de modèles indisponible",
   "settings.models.changed": "Choix des modèles modifié",
+  "settings.retention.changed": "Durée de conservation modifiée",
+  "history.purged": "Ancien historique supprimé (conservation)",
+  "history.cleared": "Historique effacé",
+  "history.exported": "Journal d’audit exporté",
   "model.cloud.authorized": "Requête OpenAI autorisée",
   "model.cloud.denied": "Requête OpenAI refusée",
   "agent.tool.requested": "Action demandée par l’agent",
@@ -593,6 +598,7 @@ function App() {
               ))}</ul>
             ) : <p>Aucune demande enregistrée.</p>}
           </section>
+          <History running={running} onChange={refresh} />
           <section className="card" aria-labelledby="journal-heading">
             <h2 id="journal-heading">Journal de la session</h2>
             {snapshot?.events.length ? (

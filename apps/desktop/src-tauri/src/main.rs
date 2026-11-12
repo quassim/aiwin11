@@ -206,6 +206,43 @@ fn cancel_task(state: State<'_, Arc<AppState>>) -> bool {
     state.task.cancel()
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistorySettings {
+    retention_days: u32,
+}
+
+#[tauri::command]
+fn get_history_settings(state: State<'_, Arc<AppState>>) -> Result<HistorySettings, &'static str> {
+    Ok(HistorySettings { retention_days: state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.retention_days() })
+}
+
+#[tauri::command]
+fn set_retention_days(state: State<'_, Arc<AppState>>, days: u32) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_retention_days(days)
+}
+
+/// Erases past sessions. Refused while a task runs, so that its audit trail stays whole.
+#[tauri::command]
+fn clear_history(state: State<'_, Arc<AppState>>) -> Result<usize, &'static str> {
+    if state.task.is_running() {
+        return Err("TASK_BUSY");
+    }
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.clear_history()
+}
+
+/// Exports the audit journal to `%LOCALAPPDATA%\app.aiwin11.desktop\exports` and returns the path.
+#[tauri::command]
+async fn export_audit(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
+    let directory = app.path().app_local_data_dir().map_err(|_| "EXPORT_FAILED")?.join("exports");
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.export_audit_to(&directory)?;
+        let path = path.to_string_lossy();
+        Ok(path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned())
+    }).await.map_err(|_| "EXPORT_FAILED")?
+}
+
 /// "Stoppe toutes les tâches": always available, journaled with its immediate result. The stop
 /// is confirmed when the running task ends as cancelled (`task.cancelled`).
 #[tauri::command]
@@ -284,7 +321,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_snapshot, discover_models, run_task, cancel_task, stop_all_tasks, resolve_approval,
+            get_snapshot, discover_models, run_task, cancel_task, stop_all_tasks,
+            get_history_settings, set_retention_days, clear_history, export_audit, resolve_approval,
             get_policy_overview, set_policy_settings, get_tasks, get_model_preferences, set_model_preferences,
             openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
             capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,

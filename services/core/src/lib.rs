@@ -31,6 +31,25 @@ pub struct ModelPreferences {
     pub vision_model: String,
 }
 
+/// Default retention of the history (tasks, events) of past sessions, in days.
+pub const DEFAULT_RETENTION_DAYS: u32 = 90;
+/// Accepted retention range, in days.
+pub const RETENTION_RANGE: std::ops::RangeInclusive<u32> = 1..=3650;
+
+/// One exported audit event: codes and identifiers only, never user content.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    pub sequence: u64,
+    pub id: String,
+    pub session_id: String,
+    pub task_id: Option<String>,
+    pub kind: String,
+    pub source: String,
+    pub code: Option<String>,
+    pub timestamp: String,
+}
+
 const PREFERENCE_KEYS: [&str; 4] = ["model.provider", "model.local", "model.cloud", "model.vision"];
 
 impl ModelPreferences {
@@ -99,6 +118,7 @@ impl Core {
             params![Uuid::new_v4().to_string(), session_id],
         )?;
         Self::recover_interrupted_tasks(&transaction, &session_id)?;
+        Self::apply_retention(&transaction, &session_id)?;
         transaction.commit()?;
         Ok(Self { db, session_id })
     }
@@ -127,6 +147,120 @@ impl Core {
             )?;
         }
         Ok(())
+    }
+
+    fn retention_days_in(db: &Connection) -> u32 {
+        db.query_row("SELECT value FROM settings WHERE key = 'history.retention_days'", [], |row| row.get::<_, String>(0))
+            .ok().and_then(|value| value.parse().ok()).filter(|days| RETENTION_RANGE.contains(days))
+            .unwrap_or(DEFAULT_RETENTION_DAYS)
+    }
+
+    /// Deletes the history of past sessions older than the retention period. The current
+    /// session is never purged. Journals `history.purged` with the number of sessions removed.
+    fn apply_retention(db: &Connection, session_id: &str) -> rusqlite::Result<usize> {
+        let days = Self::retention_days_in(db);
+        let cutoff = format!("-{days} days");
+        let old = "SELECT id FROM sessions WHERE id <> ?1
+                   AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2)";
+        for table in ["events", "tasks", "tool_executions"] {
+            db.execute(&format!("DELETE FROM {table} WHERE session_id IN ({old})"), params![session_id, cutoff])?;
+        }
+        let removed = db.execute(
+            "DELETE FROM sessions WHERE id <> ?1 AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2)",
+            params![session_id, cutoff],
+        )?;
+        if removed > 0 {
+            db.execute(
+                "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'history.purged', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session_id, format!("sessions:{removed}")],
+            )?;
+        }
+        Ok(removed)
+    }
+
+    /// Retention of past sessions, in days.
+    pub fn retention_days(&self) -> u32 {
+        Self::retention_days_in(&self.db)
+    }
+
+    /// Changes the retention and applies it at once.
+    pub fn set_retention_days(&mut self, days: u32) -> Result<(), &'static str> {
+        if !RETENTION_RANGE.contains(&days) {
+            return Err("SETTINGS_INVALID");
+        }
+        let session_id = self.session_id.clone();
+        let apply = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('history.retention_days', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [days.to_string()],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.retention.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session_id, format!("days:{days}")],
+            )?;
+            Self::apply_retention(&transaction, &session_id)?;
+            transaction.commit()
+        };
+        apply(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
+    /// Erases the whole history of past sessions (tasks, events, dispatch reservations). The
+    /// current session keeps its journal, ending with `history.cleared`.
+    pub fn clear_history(&mut self) -> Result<usize, &'static str> {
+        let session_id = self.session_id.clone();
+        let clear = |db: &mut Connection| -> rusqlite::Result<usize> {
+            let transaction = db.transaction()?;
+            for table in ["events", "tasks", "tool_executions"] {
+                transaction.execute(&format!("DELETE FROM {table} WHERE session_id <> ?1"), [&session_id])?;
+            }
+            let removed = transaction.execute("DELETE FROM sessions WHERE id <> ?1", [&session_id])?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'history.cleared', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session_id, format!("sessions:{removed}")],
+            )?;
+            transaction.commit()?;
+            Ok(removed)
+        };
+        clear(&mut self.db).map_err(|_| "HISTORY_UNAVAILABLE")
+    }
+
+    /// The whole audit journal (all kept sessions), oldest first, for export. Journals
+    /// `history.exported` with the number of entries.
+    pub fn export_audit(&self) -> Result<Vec<AuditEntry>, &'static str> {
+        let read = || -> rusqlite::Result<Vec<AuditEntry>> {
+            let mut statement = self.db.prepare(
+                "SELECT sequence, id, session_id, task_id, kind, source, code, timestamp FROM events ORDER BY sequence",
+            )?;
+            let rows = statement.query_map([], |row| Ok(AuditEntry {
+                sequence: row.get(0)?, id: row.get(1)?, session_id: row.get(2)?, task_id: row.get(3)?,
+                kind: row.get(4)?, source: row.get(5)?, code: row.get(6)?, timestamp: row.get(7)?,
+            }))?;
+            rows.collect()
+        };
+        let entries = read().map_err(|_| "HISTORY_UNAVAILABLE")?;
+        self.db.execute(
+            "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'history.exported', 'core', ?3)",
+            params![Uuid::new_v4().to_string(), self.session_id, format!("entries:{}", entries.len())],
+        ).map_err(|_| "HISTORY_UNAVAILABLE")?;
+        Ok(entries)
+    }
+
+    /// Writes the audit journal as JSON into `directory` (created if needed) and returns the
+    /// file path. The file name only carries the UTC export time.
+    pub fn export_audit_to(&self, directory: &Path) -> Result<std::path::PathBuf, &'static str> {
+        let stamp: String = self.db.query_row("SELECT strftime('%Y%m%dT%H%M%SZ', 'now')", [], |row| row.get(0))
+            .map_err(|_| "HISTORY_UNAVAILABLE")?;
+        let entries = self.export_audit()?;
+        let json = serde_json::to_vec_pretty(&serde_json::json!({ "format": "aiwin11.audit.v1", "events": entries }))
+            .map_err(|_| "HISTORY_UNAVAILABLE")?;
+        std::fs::create_dir_all(directory).map_err(|_| "EXPORT_FAILED")?;
+        let path = directory.join(format!("aiwin11-audit-{stamp}.json"));
+        std::fs::write(&path, json).map_err(|_| "EXPORT_FAILED")?;
+        Ok(path)
     }
 
     /// Persists a new task in this session.
@@ -349,6 +483,51 @@ mod tests {
         core.db.execute("UPDATE settings SET value = 'x' WHERE key = 'model.provider'", []).unwrap();
         assert_eq!(core.model_preferences().provider, "ollama");
         drop(core);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn old_sessions_are_purged_at_start_and_history_can_be_cleared_and_exported() {
+        let path = std::env::temp_dir().join(format!("aiwin11-retention-{}.sqlite3", Uuid::new_v4()));
+        let old_session = {
+            let mut core = Core::open(&path).unwrap();
+            core.task_created("old-task").unwrap();
+            assert_eq!(core.set_retention_days(0), Err("SETTINGS_INVALID"));
+            core.set_retention_days(30).unwrap();
+            // Age this session beyond the retention period.
+            core.db.execute("UPDATE sessions SET created_at = '2000-01-01T00:00:00.000Z'", []).unwrap();
+            core.session_id().to_owned()
+        };
+        let core = Core::open(&path).unwrap();
+        assert_eq!(core.retention_days(), 30);
+        for sql in [
+            "SELECT COUNT(*) FROM events WHERE session_id = ?1",
+            "SELECT COUNT(*) FROM tasks WHERE session_id = ?1",
+            "SELECT COUNT(*) FROM sessions WHERE id = ?1",
+        ] {
+            let count: u32 = core.db.query_row(sql, [&old_session], |row| row.get(0)).unwrap();
+            assert_eq!(count, 0, "{sql}");
+        }
+        assert!(core.activity().unwrap().iter()
+            .any(|event| event.kind == "history.purged" && event.code.as_deref() == Some("sessions:1")));
+
+        // A recent session is kept by retention but removed by an explicit clear.
+        drop(core);
+        let mut core = Core::open(&path).unwrap();
+        let sessions: u32 = core.db.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0)).unwrap();
+        assert_eq!(sessions, 2);
+        assert_eq!(core.clear_history(), Ok(1));
+        let exported = core.export_audit().unwrap();
+        assert!(exported.iter().all(|entry| entry.session_id == core.session_id()));
+        assert_eq!(exported.last().unwrap().kind, "history.cleared");
+        assert_eq!(core.activity().unwrap()[0].kind, "history.exported");
+        let directory = std::env::temp_dir().join(format!("aiwin11-export-{}", Uuid::new_v4()));
+        let file = core.export_audit_to(&directory).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(json["format"], "aiwin11.audit.v1");
+        assert!(json["events"].as_array().unwrap().iter().any(|event| event["kind"] == "history.cleared"));
+        drop(core);
+        let _ = std::fs::remove_dir_all(&directory);
         let _ = std::fs::remove_file(&path);
     }
 

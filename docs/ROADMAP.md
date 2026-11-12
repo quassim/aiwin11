@@ -156,7 +156,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Services : Memory, Workflow, Speech, Image, Video, Plugin, Telemetry (local) | ❌ | R6–R9 |
 | MCP avec passerelle de sécurité ; autorisation MCP ≠ permission AiWin11 | ❌ | R6 |
 | Tables : sessions ✅, tasks ✅, tool_executions ✅, events ✅, settings ✅ ; providers, models, model_profiles, agents, policies, approvals, memory_entries, workflows, artifacts ❌ | 🟡 | R2, R3, R6, R8 |
-| Dates UTC ✅, migrations versionnées ✅, clés hors SQLite ✅, chiffrement : pas de chiffrement de la base, rien de sensible stocké (✅ décidé, §6), **durée de conservation et effacement** ❌ | 🟡 | R1 |
+| Dates UTC ✅, migrations versionnées ✅, clés hors SQLite ✅, chiffrement : pas de chiffrement de la base, rien de sensible stocké (✅ décidé, §6), durée de conservation et effacement ✅ | ✅ | — |
 | Profil IA : stratégie, capacités requises, `allow_cloud_fallback`, `allow_screen_upload`, `allow_document_upload`, **budget par tâche** | ❌ | R3 |
 | Lots A ✅, B ✅, C 🟡, D ❌, E ❌ | — | — |
 | Matrice de tests T-001 à T-014 | Voir §3 | — |
@@ -235,7 +235,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Distribution de développement simplifiée : embarquer l’agent Python et le pont .NET, supprimer `AIWIN11_PYTHON` manuel ; script de démarrage unique (`scripts/`).
 - ✅ Réglages mémorisés : fournisseur, modèle, modèle de vision (table `settings`, événement `settings.models.changed`).
 - ✅ **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
-- **Durée de conservation et effacement** de l’historique ; export du journal d’audit.
+- ✅ **Durée de conservation et effacement** de l’historique ; export du journal d’audit (JSON).
 - ✅ Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; charge utile = code non sensible (fournisseur, numéro d’étape). 🟡 Pas de payload JSON structuré.
 - Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`, tests de composants React, test E2E de l’application.
 - Mesures : démarrage, RAM au repos, navigation, évaluation de politique ; machine de référence documentée.

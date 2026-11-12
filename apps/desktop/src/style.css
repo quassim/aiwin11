@@ -74,3 +74,4 @@ button:disabled { opacity: .55; cursor: default; }
   aside { gap: 12px; padding: 12px; border-right: 0; border-bottom: 1px solid #314040; }
   nav { display: flex; flex-wrap: wrap; }
 }
+.danger { background: #8c2a20; color: #fff; border-color: #ff9b8f; }
