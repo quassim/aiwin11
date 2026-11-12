@@ -349,6 +349,17 @@ fn delete_memory(state: State<'_, Arc<AppState>>, id: Option<String>) -> Result<
 }
 
 #[tauri::command]
+fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
+}
+
+/// Main window only: saves the current request; it only runs when the user sends it.
+#[tauri::command]
+fn save_routine(state: State<'_, Arc<AppState>>, text: String) -> Result<String, &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.save_routine(&text)
+}
+
+#[tauri::command]
 fn get_privacy(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
     Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.private_mode())
 }
@@ -525,6 +536,8 @@ fn main() {
             get_privacy,
             get_cloud_fallback,
             get_memories,
+            get_routines,
+            save_routine,
             delete_memory,
             get_cloud_vendor,
             set_cloud_vendor,

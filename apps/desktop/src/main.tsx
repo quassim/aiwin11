@@ -5,6 +5,7 @@ import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
 import { History } from "./History";
 import { Memory } from "./Memory";
+import { Routines } from "./Routines";
 import { Routing } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
@@ -772,6 +773,14 @@ function App() {
                 )}
               </div>
             </form>
+            <Routines
+              prompt={prompt}
+              onPick={(text) => {
+                setPrompt(text);
+                resetApproval();
+                setTimeout(() => document.getElementById("prompt")?.focus(), 0);
+              }}
+            />
           </section>
         )}
         {page === "Modèles" && <Routing onFallbackChange={setCloudFallback} />}

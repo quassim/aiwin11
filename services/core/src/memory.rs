@@ -82,6 +82,15 @@ pub fn valid_note(text: &str) -> bool {
 impl Core {
     /// Encrypts and stores one note. Returns its ID.
     pub fn remember(&mut self, text: &str) -> Result<String, &'static str> {
+        self.store(text, "note")
+    }
+
+    /// Saves a request the user wants to run again later (never run automatically).
+    pub fn save_routine(&mut self, text: &str) -> Result<String, &'static str> {
+        self.store(text, "routine")
+    }
+
+    fn store(&mut self, text: &str, kind: &'static str) -> Result<String, &'static str> {
         if !valid_note(text) {
             return Err("MEMORY_INVALID");
         }
@@ -97,10 +106,13 @@ impl Core {
         let session = self.session_id.clone();
         let write = |db: &mut rusqlite::Connection| -> rusqlite::Result<()> {
             let transaction = db.transaction()?;
-            transaction.execute("INSERT INTO memory_entries (id, content) VALUES (?1, ?2)", params![id, cipher])?;
             transaction.execute(
-                "INSERT INTO events (id, session_id, kind, source) VALUES (?1, ?2, 'memory.saved', 'core')",
-                params![Uuid::new_v4().to_string(), session],
+                "INSERT INTO memory_entries (id, content, kind) VALUES (?1, ?2, ?3)",
+                params![id, cipher, kind],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'memory.saved', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, kind],
             )?;
             transaction.commit()
         };
@@ -110,10 +122,19 @@ impl Core {
 
     /// All notes, oldest first. A note that no longer decrypts (other Windows user) is skipped.
     pub fn memories(&self) -> Result<Vec<MemoryEntry>, &'static str> {
+        self.entries("note")
+    }
+
+    pub fn routines(&self) -> Result<Vec<MemoryEntry>, &'static str> {
+        self.entries("routine")
+    }
+
+    fn entries(&self, kind: &str) -> Result<Vec<MemoryEntry>, &'static str> {
         let read = || -> rusqlite::Result<Vec<(String, String, Vec<u8>)>> {
-            let mut statement =
-                self.db.prepare("SELECT id, created_at, content FROM memory_entries ORDER BY created_at, rowid")?;
-            let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            let mut statement = self.db.prepare(
+                "SELECT id, created_at, content FROM memory_entries WHERE kind = ?1 ORDER BY created_at, rowid",
+            )?;
+            let rows = statement.query_map([kind], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
             rows.collect()
         };
         Ok(read()
@@ -133,7 +154,7 @@ impl Core {
             let transaction = db.transaction()?;
             let removed = match id {
                 Some(id) => transaction.execute("DELETE FROM memory_entries WHERE id = ?1", [id])?,
-                None => transaction.execute("DELETE FROM memory_entries", [])?,
+                None => transaction.execute("DELETE FROM memory_entries WHERE kind = 'note'", [])?,
             };
             transaction.execute(
                 "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'memory.deleted', 'core', ?3)",
@@ -169,7 +190,11 @@ mod tests {
         assert!(!String::from_utf8_lossy(&bytes).contains("Zéphyrin"), "plain text written to SQLite");
         let mut core = Core::open(&path).unwrap();
         assert_eq!(core.memories().unwrap()[0].text, "Mon chat s'appelle Zéphyrin");
-        assert_eq!(core.forget(None), Ok(1));
+        let routine = core.save_routine("Résume mes fichiers").unwrap();
+        assert_eq!(core.routines().unwrap()[0].text, "Résume mes fichiers");
+        assert_eq!(core.memories().unwrap().len(), 1, "routines are not notes");
+        assert_eq!(core.forget(None), Ok(1), "clearing notes keeps routines");
+        assert_eq!(core.forget(Some(&routine)), Ok(1));
         drop(core);
         let _ = std::fs::remove_file(&path);
     }

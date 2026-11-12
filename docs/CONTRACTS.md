@@ -283,7 +283,9 @@ The main window can save, remove and check the presence of the `AiWin11/OpenAI` 
 
 ## Durable memory (R6)
 
-Migration 004 adds `memory_entries` (`id`, `created_at`, `content`). `content` is DPAPI ciphertext (`CryptProtectData`, current Windows user, entropy `AiWin11.memory.v1`); the plain text never reaches SQLite (tested by scanning the file). Agent tools, local models only: `remember { text }` (1 to 1000 characters; Observation deny, Assisted ask with the full text shown, Limited/Advanced allow; at most 200 notes) and `recall {}` (read, allowed). Both pass through the broker (`RememberNote` / `RecallNotes`, capabilities `MemoryWrite` / `MemoryRead`; the note itself is not in the command). Notes reach the model framed as data. `get_memories`, `delete_memory { id? }` (none = all) serve the **Mémoire** page. Events `memory.saved`, `memory.deleted` (`entries:N`), no content.
+Migration 004 adds `memory_entries` (`id`, `created_at`, `content`). `content` is DPAPI ciphertext (`CryptProtectData`, current Windows user, entropy `AiWin11.memory.v1`); the plain text never reaches SQLite (tested by scanning the file). Agent tools, local models only: `remember { text }` (1 to 1000 characters; Observation deny, Assisted ask with the full text shown, Limited/Advanced allow; at most 200 notes) and `recall {}` (read, allowed). Both pass through the broker (`RememberNote` / `RecallNotes`, capabilities `MemoryWrite` / `MemoryRead`; the note itself is not in the command). Notes reach the model framed as data. `get_memories`, `delete_memory { id? }` (none = all) serve the **Mémoire** page. Events `memory.saved` (code `note` or `routine`), `memory.deleted` (`entries:N`), no content.
+
+Saved requests (migration 005, `memory_entries.kind = 'routine'`, same DPAPI encryption): `save_routine { text }`, `get_routines`, deletion with `delete_memory { id }` (clearing all notes keeps routines). Picking one only fills the request field: it never runs without the user sending it.
 
 ## Storage invariant: nothing sensitive in SQLite
 

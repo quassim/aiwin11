@@ -104,6 +104,10 @@ Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant d
 
 Dans **Activité**, la section **Historique et journal d’audit** règle la durée de conservation des sessions passées (90 jours par défaut ; les plus anciennes sont supprimées au démarrage), exporte le journal en JSON dans `%LOCALAPPDATA%\app.aiwin11.desktop\exports` et efface l’historique des sessions passées après confirmation (irréversible).
 
+### Demandes enregistrées
+
+Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ; un clic sur une demande enregistrée la remet dans le champ, tu n’as plus qu’à l’envoyer.
+
 ### Mémoire
 
 Dis à l’agent « Souviens-toi que… » : après ton accord, l’information est enregistrée, chiffrée pour ton compte Windows. Il peut la relire dans les demandes suivantes (modèles locaux seulement). La page **Mémoire** liste et efface ces informations.

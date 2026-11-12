@@ -35,6 +35,8 @@ fn main() {
         "set_privacy",
         "get_cloud_fallback",
         "get_memories",
+        "get_routines",
+        "save_routine",
         "delete_memory",
         "get_cloud_vendor",
         "set_cloud_vendor",

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-routine"
+description = "Enables the save_routine command without any pre-configured scope."
+commands.allow = ["save_routine"]
+
+[[permission]]
+identifier = "deny-save-routine"
+description = "Denies the save_routine command without any pre-configured scope."
+commands.deny = ["save_routine"]
