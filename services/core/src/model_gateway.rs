@@ -150,8 +150,8 @@ dossier d’AiWin11 (lecture seule). Renvoie au plus 20 fichiers avec trois lign
         }));
         functions.push(json!({
             "name": "search_memory",
-            "description": "Cherche dans la mémoire durable les 5 informations les plus proches d’une question \
-        (recherche sémantique locale si un modèle d’embedding est choisi, sinon par mots-clés).",
+            "description": "Cherche dans la mémoire durable les 5 informations les plus proches d’une question, \
+        et des extraits des 3 fichiers indexés par l’utilisateur les plus proches (recherche sémantique locale si un modèle d’embedding est choisi, sinon par mots-clés).",
             "parameters": {
                 "type": "object",
                 "properties": { "query": { "type": "string" } },
@@ -865,7 +865,7 @@ struct Embeddings {
 
 impl Ollama {
     /// Local embeddings (`/api/embed`), in batches of 32 texts. Vectors stay in memory only.
-    pub(crate) fn embed(&self, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, GatewayError> {
+    pub fn embed(&self, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, GatewayError> {
         self.describe(model)?;
         self.ensure_cloud_disabled()?;
         let mut vectors = Vec::with_capacity(texts.len());

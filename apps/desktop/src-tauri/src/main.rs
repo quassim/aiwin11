@@ -344,9 +344,16 @@ async fn search_indexed_files(
     tauri::async_runtime::spawn_blocking(move || {
         let (files, model) = {
             let core = lock_core(&state.core);
-            (core.indexed_files()?, core.embedding_model())
+            (core.indexed_files_with_ids()?, core.embedding_model())
         };
-        Ok(aiwin11_core::memory::search_indexed_files(&query, files, model.as_deref()))
+        let entries: Vec<(&str, &str)> = files.iter().map(|(id, file)| (id.as_str(), file.excerpt.as_str())).collect();
+        let vectors = model.as_deref().and_then(|model| {
+            aiwin11_core::memory::semantic_vectors(&state.core, model, &query, &entries, |texts| {
+                aiwin11_core::model_gateway::Ollama::connect().and_then(|ollama| ollama.embed(model, texts)).ok()
+            })
+        });
+        let files = files.into_iter().map(|(_, file)| file).collect();
+        Ok(aiwin11_core::memory::search_indexed_files(&query, files, vectors.as_deref()))
     })
     .await
     .map_err(|_| "MEMORY_UNAVAILABLE")?

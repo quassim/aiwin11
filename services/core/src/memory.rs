@@ -445,21 +445,23 @@ impl Core {
     }
 }
 
-pub fn search_indexed_files(query: &str, mut files: Vec<IndexedFile>, model: Option<&str>) -> Vec<IndexedFile> {
+/// Ranks indexed files for a query: by local embeddings when `vectors` holds the query's vector
+/// then one per file (see `semantic_vectors`), otherwise by keywords. At most 8 files.
+pub fn search_indexed_files(
+    query: &str,
+    mut files: Vec<IndexedFile>,
+    vectors: Option<&[Vec<f32>]>,
+) -> Vec<IndexedFile> {
     let query = query.trim();
     if query.is_empty() || query.chars().count() > MAX_NOTE_CHARS {
         return Vec::new();
     }
-    let vectors = model.and_then(|model| {
-        let texts =
-            std::iter::once(query.to_owned()).chain(files.iter().map(|file| file.excerpt.clone())).collect::<Vec<_>>();
-        crate::model_gateway::Ollama::connect().and_then(|ollama| ollama.embed(model, &texts)).ok()
-    });
+    let vectors = vectors.filter(|vectors| vectors.len() == files.len() + 1);
     let mut scores: Vec<_> = files
         .drain(..)
         .enumerate()
         .filter_map(|(index, file)| {
-            let score = vectors.as_ref().map_or_else(
+            let score = vectors.map_or_else(
                 || keyword_score(query, &format!("{} {}", file.name, file.excerpt)),
                 |vectors| cosine(&vectors[0], &vectors[index + 1]),
             );
@@ -470,10 +472,147 @@ pub fn search_indexed_files(query: &str, mut files: Vec<IndexedFile>, model: Opt
     scores.into_iter().take(8).map(|(_, file)| file).collect()
 }
 
+fn vector_bytes(vector: &[f32]) -> Vec<u8> {
+    vector.iter().flat_map(|value| value.to_le_bytes()).collect()
+}
+
+fn bytes_vector(bytes: &[u8]) -> Option<Vec<f32>> {
+    (bytes.len().is_multiple_of(4) && !bytes.is_empty()).then(|| {
+        bytes.chunks_exact(4).map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])).collect()
+    })
+}
+
+impl Core {
+    /// Cached vectors of `ids` for `model`; `None` where missing or unreadable.
+    fn cached_vectors(&self, model: &str, ids: &[&str]) -> Vec<Option<Vec<f32>>> {
+        let Ok(mut statement) = self.db.prepare("SELECT vector FROM memory_vectors WHERE entry_id = ?1 AND model = ?2")
+        else {
+            return vec![None; ids.len()];
+        };
+        ids.iter()
+            .map(|id| {
+                let cipher: Vec<u8> = statement.query_row(params![id, model], |row| row.get(0)).ok()?;
+                unprotect(&cipher).as_deref().and_then(bytes_vector)
+            })
+            .collect()
+    }
+
+    /// Stores vectors, encrypted. An entry deleted meanwhile is skipped.
+    fn store_vectors(&mut self, model: &str, vectors: &[(&str, &[f32])]) -> Result<(), &'static str> {
+        let session = self.session_id.clone();
+        let tx = self.db.transaction().map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let mut stored = 0;
+        for (id, vector) in vectors {
+            let cipher = protect(&vector_bytes(vector)).ok_or("MEMORY_UNAVAILABLE")?;
+            stored += tx
+                .execute(
+                    "INSERT INTO memory_vectors (entry_id, model, vector)
+                     SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM memory_entries WHERE id = ?1)
+                     ON CONFLICT (entry_id, model) DO UPDATE SET vector = excluded.vector",
+                    params![id, model, cipher],
+                )
+                .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        }
+        tx.execute(
+            "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, 'memory.vectors.stored', 'core', ?3)",
+            params![Uuid::new_v4().to_string(), session, format!("count:{stored}")],
+        )
+        .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        tx.commit().map_err(|_| "MEMORY_UNAVAILABLE")
+    }
+
+    /// Indexed files with the id of their memory entry (for the vector index).
+    pub fn indexed_files_with_ids(&self) -> Result<Vec<(String, IndexedFile)>, &'static str> {
+        Self::indexed_entries(&self.db)
+    }
+}
+
+/// Vectors for semantic search: the query's, then one per `(entry id, text)`. Vectors already
+/// in the index are reused; the query and the missing ones are computed by `embed` in one call
+/// and stored. `None` when `embed` fails or vectors disagree in size: the caller then ranks by
+/// keywords. The core is only locked to read and write the index, never while embedding.
+pub fn semantic_vectors(
+    core: &std::sync::Mutex<Core>,
+    model: &str,
+    query: &str,
+    entries: &[(&str, &str)],
+    embed: impl FnOnce(&[String]) -> Option<Vec<Vec<f32>>>,
+) -> Option<Vec<Vec<f32>>> {
+    let lock = || core.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let ids: Vec<&str> = entries.iter().map(|(id, _)| *id).collect();
+    let mut cached = lock().cached_vectors(model, &ids);
+    let missing: Vec<usize> = (0..entries.len()).filter(|index| cached[*index].is_none()).collect();
+    let texts: Vec<String> =
+        std::iter::once(query.to_owned()).chain(missing.iter().map(|index| entries[*index].1.to_owned())).collect();
+    let mut computed = embed(&texts).filter(|vectors| vectors.len() == texts.len())?.into_iter();
+    let query_vector = computed.next()?;
+    let fresh: Vec<(usize, Vec<f32>)> = missing.into_iter().zip(computed).collect();
+    if fresh.iter().any(|(_, vector)| vector.len() != query_vector.len())
+        || cached.iter().flatten().any(|vector| vector.len() != query_vector.len())
+    {
+        return None;
+    }
+    if !fresh.is_empty() {
+        let rows: Vec<(&str, &[f32])> = fresh.iter().map(|(index, vector)| (ids[*index], vector.as_slice())).collect();
+        // A failed write only costs a recomputation next time.
+        let _ = lock().store_vectors(model, &rows);
+    }
+    for (index, vector) in fresh {
+        cached[index] = Some(vector);
+    }
+    std::iter::once(Some(query_vector)).chain(cached).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn vectors_are_cached_encrypted_and_dropped_with_their_entry() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-vectors-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("store.sqlite3");
+        let files = crate::local_files::LocalFiles::open(&directory).unwrap();
+        let mut core = Core::open(&path).unwrap();
+        let note = core.remember("Le chat s'appelle Minou").unwrap();
+        std::fs::write(files.root().join("a.txt"), "Rapport Zéphyrin").unwrap();
+        core.index_file(&files, "a.txt").unwrap();
+        let file = core.indexed_files_with_ids().unwrap().remove(0).0;
+        let core = std::sync::Mutex::new(core);
+        let entries = [(note.as_str(), "Le chat s'appelle Minou"), (file.as_str(), "Rapport Zéphyrin")];
+        let embed = |texts: &[String]| Some(texts.iter().map(|text| vec![text.len() as f32, 1.0]).collect::<Vec<_>>());
+        let first = semantic_vectors(&core, "m", "chat", &entries, embed).unwrap();
+        assert_eq!(first.len(), 3);
+        // Second search: only the query is embedded.
+        let seen = std::cell::RefCell::new(Vec::new());
+        let again = semantic_vectors(&core, "m", "chat", &entries, |texts: &[String]| {
+            seen.borrow_mut().extend_from_slice(texts);
+            Some(vec![vec![4.0, 1.0]])
+        })
+        .unwrap();
+        assert_eq!(seen.borrow().as_slice(), ["chat"]);
+        assert_eq!(again[1..], first[1..]);
+        // Vectors of another size are never mixed; a failed embedding means keyword search.
+        assert!(semantic_vectors(&core, "m", "chat", &entries, |_| Some(vec![vec![1.0, 2.0, 3.0]])).is_none());
+        assert!(semantic_vectors(&core, "m", "chat", &entries, |_| None).is_none());
+        let mut core = core.into_inner().unwrap();
+        let count = |core: &Core| -> i64 {
+            core.db.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0)).unwrap()
+        };
+        assert_eq!(count(&core), 2);
+        // Indexing the file again drops its stale vector; forgetting the note drops the other.
+        std::fs::write(files.root().join("a.txt"), "Autre rapport").unwrap();
+        core.index_file(&files, "a.txt").unwrap();
+        assert_eq!(count(&core), 1);
+        core.forget(Some(&note)).unwrap();
+        assert_eq!(count(&core), 0);
+        drop(core);
+        let bytes = std::fs::read(&path).unwrap();
+        let plain = vector_bytes(&[24.0, 1.0]);
+        assert!(!bytes.windows(plain.len()).any(|window| window == plain), "vectors are encrypted");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn indexing_is_bounded_encrypted_and_removable() {

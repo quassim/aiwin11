@@ -273,7 +273,7 @@ pub fn valid_model_name(name: &str) -> bool {
 }
 
 /// Schema migrations in order; migration N sets `user_version` to N.
-const MIGRATIONS: [&str; 9] = [
+const MIGRATIONS: [&str; 10] = [
     include_str!("../migrations/001.sql"),
     include_str!("../migrations/002.sql"),
     include_str!("../migrations/003.sql"),
@@ -283,6 +283,7 @@ const MIGRATIONS: [&str; 9] = [
     include_str!("../migrations/007.sql"),
     include_str!("../migrations/008.sql"),
     include_str!("../migrations/009.sql"),
+    include_str!("../migrations/010.sql"),
 ];
 
 pub struct Core {
@@ -1674,6 +1675,10 @@ mod tests {
             "memory_entries.kind",
             "memory_entries.last_run",
             "memory_entries.schedule",
+            // Vector index: DPAPI ciphertext, the entry id and a local model name.
+            "memory_vectors.entry_id",
+            "memory_vectors.model",
+            "memory_vectors.vector",
             // Model manifests: public model identifiers, status codes, a duration, timestamps.
             "models.context_length",
             "models.id",
@@ -1967,7 +1972,7 @@ mod tests {
     #[test]
     fn a_newer_database_is_rejected() {
         let db = Connection::open_in_memory().unwrap();
-        db.pragma_update(None, "user_version", 10).unwrap();
+        db.pragma_update(None, "user_version", 11).unwrap();
         assert!(Core::start(db).is_err());
     }
 
