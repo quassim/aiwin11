@@ -251,6 +251,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
   };
 }
 const MAX_PROMPT_CHARS = 2000;
+const dictationErrors: Record<string, string> = {
+  DICTATION_SILENCE: "Rien n’a été entendu.",
+  DICTATION_NO_RECOGNIZER: "Aucun moteur de reconnaissance vocale Windows n’est installé pour cette langue.",
+  DICTATION_NO_MICROPHONE: "Aucun micro disponible (ou accès au micro refusé dans les paramètres Windows).",
+  CORE_BUSY: "AiWin11 est occupé : réessaie dans un instant.",
+};
 
 const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Mémoire", "Inspecteur", "Fichiers", "Activité"];
 const activityNames: Record<string, string> = {
@@ -405,6 +411,8 @@ function App() {
   const [cloudModel, setCloudModel] = useState("");
   const [cloudApproved, setCloudApproved] = useState(false);
   const [cloudFallback, setCloudFallback] = useState(false);
+  const [dictating, setDictating] = useState(false);
+  const [dictationStatus, setDictationStatus] = useState("");
   const [vendor, setVendor] = useState<"openai" | "deepseek">("openai");
   const vendorName = vendor === "deepseek" ? "DeepSeek" : "OpenAI";
   const [keyConfigured, setKeyConfigured] = useState(false);
@@ -795,12 +803,33 @@ function App() {
                 <button type="submit" disabled={!canSend}>
                   Envoyer
                 </button>
+                <button
+                  type="button"
+                  disabled={running || dictating}
+                  aria-label="Dicter la demande (micro, reconnaissance locale)"
+                  onClick={() => {
+                    setDictating(true);
+                    setDictationStatus("Parle maintenant (10 secondes au plus)…");
+                    void invoke<string>("dictate")
+                      .then(
+                        (text) => {
+                          setPrompt((current) => (current.trim() ? `${current.trim()} ${text}` : text));
+                          setDictationStatus("");
+                        },
+                        (failure) => setDictationStatus(dictationErrors[String(failure)] ?? "La dictée a échoué."),
+                      )
+                      .finally(() => setDictating(false));
+                  }}
+                >
+                  {dictating ? "Écoute…" : "🎤 Dicter"}
+                </button>
                 {running && (
                   <button type="button" onClick={() => void cancelTask()}>
                     Annuler
                   </button>
                 )}
               </div>
+              <p role="status">{dictationStatus}</p>
             </form>
             <Routines
               prompt={prompt}

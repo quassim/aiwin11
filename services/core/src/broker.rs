@@ -204,6 +204,7 @@ impl Policy {
                 Ok("type_in_notepad")
             }
             Some(Operation::CaptureForeground(_)) if peer == Peer::DesktopInspector => Ok("capture_foreground"),
+            Some(Operation::Dictate(dictate)) if desktop && (1..=10).contains(&dictate.max_seconds) => Ok("dictate"),
             Some(Operation::AnalyzeCapture(_)) if peer == Peer::DesktopInspector => Ok("analyze_capture"),
             Some(Operation::PreviewLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("preview_local_text"),
             Some(Operation::ListLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("list_local_text"),

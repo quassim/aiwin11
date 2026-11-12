@@ -10,11 +10,11 @@ use std::{
 
 use aiwin11_contracts::{
     v1::{
-        arrange_window::Arrangement, command::Operation, result::Status, run_diagnostic::Diagnostic,
-        service_entry::StartMode, AnalyzeCapture, ArrangeWindow, CaptureForeground, CaptureWindow, CharacterMapDigit,
-        Command, GetSystemStatus, InspectForeground, InspectWindow, InvokeControl, ListProcesses, ListServices,
-        ListWindows, LocateWindow, ReadClipboard, Result as BridgeReply, RunDiagnostic, TypeInNotepad, UiTree,
-        WriteClipboard,
+        arrange_window::Arrangement, command::Operation, dictation_result::Status as DictationStatus, result::Status,
+        run_diagnostic::Diagnostic, service_entry::StartMode, AnalyzeCapture, ArrangeWindow, CaptureForeground,
+        CaptureWindow, CharacterMapDigit, Command, Dictate, GetSystemStatus, InspectForeground, InspectWindow,
+        InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard, Result as BridgeReply,
+        RunDiagnostic, TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -516,6 +516,34 @@ impl Core {
         result.ok_or("WINDOW_UNAVAILABLE")
     }
 
+    /// Desktop only, after the user's click: one phrase from the microphone, recognized
+    /// offline by Windows. Neither audio nor text is stored or journaled.
+    pub fn dictate(&mut self) -> Result<String, &'static str> {
+        let mut command =
+            self.desktop_command(Operation::Dictate(Dictate { max_seconds: 10 })).map_err(|_| "DICTATION_FAILED")?;
+        command.deadline_ms = unix_millis().ok_or("DICTATION_FAILED")? + 14_000;
+        let task = self
+            .authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
+            .map_err(|_| "DICTATION_FAILED")?;
+        let outcome =
+            match dispatch(&command).filter(|reply| reply.status() == Status::Success).and_then(|r| r.dictation) {
+                Some(result) => match result.status() {
+                    DictationStatus::Recognized if result.text.chars().count() <= 2000 => Ok(result.text),
+                    DictationStatus::Silence => Err("DICTATION_SILENCE"),
+                    DictationStatus::NoRecognizer => Err("DICTATION_NO_RECOGNIZER"),
+                    DictationStatus::NoMicrophone => Err("DICTATION_NO_MICROPHONE"),
+                    _ => Err("DICTATION_FAILED"),
+                },
+                None => Err("DICTATION_FAILED"),
+            };
+        let (kind, code) = match &outcome {
+            Ok(_) => ("dictation.completed", "recognized"),
+            Err(code) => ("dictation.failed", *code),
+        };
+        self.audit(task.as_deref(), kind, code).map_err(|_| "DICTATION_FAILED")?;
+        outcome
+    }
+
     pub fn capture_foreground(&mut self) -> Result<Capture, ExecutionError> {
         let command = self.desktop_command(Operation::CaptureForeground(CaptureForeground {}))?;
         let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
@@ -881,7 +909,9 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
         Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
-        Some(Operation::ReadClipboard(_) | Operation::RunDiagnostic(_)) => MAX_CLIPBOARD_REPLY_BYTES * 3,
+        Some(Operation::ReadClipboard(_) | Operation::RunDiagnostic(_) | Operation::Dictate(_)) => {
+            MAX_CLIPBOARD_REPLY_BYTES * 3
+        }
         Some(Operation::ListWindows(_) | Operation::ListServices(_)) => MAX_WINDOW_LIST_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };

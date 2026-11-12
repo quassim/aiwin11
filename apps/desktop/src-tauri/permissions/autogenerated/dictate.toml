@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dictate"
+description = "Enables the dictate command without any pre-configured scope."
+commands.allow = ["dictate"]
+
+[[permission]]
+identifier = "deny-dictate"
+description = "Denies the dictate command without any pre-configured scope."
+commands.deny = ["dictate"]

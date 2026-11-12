@@ -39,6 +39,7 @@ message Command {
     RememberNote remember_note = 34;
     RecallNotes recall_notes = 35;
     RunDiagnostic run_diagnostic = 36;
+    Dictate dictate = 37;
   }
 }
 
@@ -150,6 +151,24 @@ message InvokeControl {
   string name = 5;
   // When set, replaces the control's value (UI Automation SetValue) instead of clicking it.
   optional string value = 6;
+}
+
+// Desktop only (user's click): listens to the default microphone for one phrase, offline.
+message Dictate { uint32 max_seconds = 1; }
+
+message DictationResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_RECOGNIZED = 1;
+    STATUS_SILENCE = 2;
+    STATUS_NO_RECOGNIZER = 3;
+    STATUS_NO_MICROPHONE = 4;
+  }
+  Status status = 1;
+  // At most 2000 characters.
+  string text = 2;
+  // Recognizer culture, e.g. fr-FR.
+  string language = 3;
 }
 
 // ShellService.ExecuteApprovedCommand: one read-only diagnostic of a closed list.
@@ -302,6 +321,7 @@ message Result {
   WindowList window_list = 13;
   ServiceList service_list = 14;
   CommandOutput command_output = 15;
+  DictationResult dictation = 16;
 }
 
 message Error {

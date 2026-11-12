@@ -373,6 +373,15 @@ fn set_workspace(state: State<'_, Arc<AppState>>, path: String) -> Result<String
     Ok(stored)
 }
 
+/// The user clicked the microphone: one phrase, recognized offline by Windows.
+#[tauri::command]
+async fn dictate(state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || state.core.try_lock().map_err(|_| "CORE_BUSY")?.dictate())
+        .await
+        .map_err(|_| "DICTATION_FAILED")?
+}
+
 #[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
@@ -568,6 +577,7 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            dictate,
             set_workspace,
             get_embedding_model,
             set_embedding_model,

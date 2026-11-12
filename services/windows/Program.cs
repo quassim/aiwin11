@@ -38,7 +38,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
-        && command.InvokeControl is null && command.RunDiagnostic is null
+        && command.InvokeControl is null && command.RunDiagnostic is null && command.Dictate is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -94,6 +94,19 @@ else if (command.ListProcesses is { } listing)
     {
         result.ProcessList = ProcessLister.Read(listing.Limit);
         result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.Dictate is { } dictate)
+{
+    try
+    {
+        result.Dictation = Dictation.Listen(dictate.MaxSeconds, command.DeadlineMs);
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+    catch (Exception error) when (error is InvalidOperationException or ArgumentException
+        or PlatformNotSupportedException or System.Runtime.InteropServices.COMException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "dictation_failed", "Speech recognition failed.");
     }
 }
 else if (command.RunDiagnostic is { } diagnostic)
