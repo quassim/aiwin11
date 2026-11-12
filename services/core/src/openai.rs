@@ -5,8 +5,7 @@ use serde_json::{json, Value};
 use windows_sys::Win32::{
     Foundation::ERROR_NOT_FOUND,
     Security::Credentials::{
-        CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
-        CRED_TYPE_GENERIC,
+        CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
     },
 };
 
@@ -80,9 +79,7 @@ fn read_entry() -> Result<Option<Credential>, &'static str> {
 
 /// Streams the conversation (instructions, request, tool calls and results, in the Chat
 /// Completions format) with the tool catalog. Callers must hold a cloud approval.
-pub(crate) fn propose(
-    model: &str, messages: &[Value], sink: &mut StreamSink<'_>,
-) -> Result<Proposal, &'static str> {
+pub(crate) fn propose(model: &str, messages: &[Value], sink: &mut StreamSink<'_>) -> Result<Proposal, &'static str> {
     if !model.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte)) {
         return Err("MODEL_REQUIRED");
     }
@@ -100,7 +97,8 @@ pub(crate) fn propose(
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(45))
-        .build().map_err(|_| "CLOUD_REQUEST_FAILED")?;
+        .build()
+        .map_err(|_| "CLOUD_REQUEST_FAILED")?;
     let request = client.post(ENDPOINT).bearer_auth(key).json(&json!({
         "model": model,
         "store": false,
@@ -147,7 +145,9 @@ fn fold_stream(reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Propos
                     return Err(INVALID);
                 }
             }
-            for fragment in delta.and_then(|delta| delta.get("tool_calls")).and_then(Value::as_array).into_iter().flatten() {
+            for fragment in
+                delta.and_then(|delta| delta.get("tool_calls")).and_then(Value::as_array).into_iter().flatten()
+            {
                 if fragment.get("index").and_then(Value::as_u64) != Some(0) {
                     return Err(INVALID);
                 }
@@ -161,7 +161,9 @@ fn fold_stream(reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Propos
                     return Err(INVALID);
                 }
             }
-            delta_text = delta.and_then(|delta| delta.get("content")).and_then(Value::as_str)
+            delta_text = delta
+                .and_then(|delta| delta.get("content"))
+                .and_then(Value::as_str)
                 .filter(|content| !content.is_empty());
             if let Some(content) = delta_text {
                 text.push(content).map_err(|()| INVALID)?;
@@ -221,14 +223,20 @@ mod tests {
     fn assembles_one_fragmented_function_call_without_forwarding_it() {
         let (result, deltas) = fold(&[
             delta(json!({"role":"assistant"}), Value::Null),
-            tool_fragment(json!({"type":"function","id":"call_1","function":{"name":"launch_application","arguments":""}})),
+            tool_fragment(
+                json!({"type":"function","id":"call_1","function":{"name":"launch_application","arguments":""}}),
+            ),
             tool_fragment(json!({"function":{"arguments":"{\"applica"}})),
             tool_fragment(json!({"function":{"arguments":"tion\":\"notepad\"}"}})),
             delta(json!({}), json!("tool_calls")),
         ]);
         // The call ID is kept: the tool result sent back later must refer to it.
-        assert_eq!(result, Ok(Proposal::Calls(
-            json!([{"id":"call_1","function":{"name":"launch_application","arguments":{"application":"notepad"}}}]))));
+        assert_eq!(
+            result,
+            Ok(Proposal::Calls(
+                json!([{"id":"call_1","function":{"name":"launch_application","arguments":{"application":"notepad"}}}])
+            ))
+        );
         assert!(deltas.is_empty());
     }
 
@@ -246,8 +254,11 @@ mod tests {
 
     #[test]
     fn rejects_truncated_parallel_or_unterminated_streams() {
-        let second_call = delta(json!({"tool_calls":[{"index":1,"type":"function",
-            "function":{"name":"launch_application","arguments":"{}"}}]}), Value::Null);
+        let second_call = delta(
+            json!({"tool_calls":[{"index":1,"type":"function",
+            "function":{"name":"launch_application","arguments":"{}"}}]}),
+            Value::Null,
+        );
         for chunks in [
             vec![delta(json!({"content":"Bonjour"}), json!("length"))],
             vec![delta(json!({"content":"   "}), json!("stop"))],
@@ -262,10 +273,10 @@ mod tests {
 
     #[test]
     fn stops_reading_when_the_sink_cancels() {
-        let result = fold_stream(sse(&[
-            delta(json!({"content":"a"}), Value::Null),
-            delta(json!({}), json!("stop")),
-        ]), &mut |_| false);
+        let result = fold_stream(
+            sse(&[delta(json!({"content":"a"}), Value::Null), delta(json!({}), json!("stop"))]),
+            &mut |_| false,
+        );
         assert_eq!(result, Err("TASK_CANCELLED"));
     }
 }

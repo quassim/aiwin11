@@ -2,20 +2,22 @@ use std::{
     io::{Read, Write},
     os::windows::{io::AsRawHandle, process::CommandExt},
     process::{Command as Process, Stdio},
-    ptr, sync::Mutex, thread,
+    ptr,
+    sync::Mutex,
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use aiwin11_contracts::{
     v1::{
-        command::Operation, result::Status, AnalyzeCapture, CharacterMapDigit, CaptureForeground, CaptureWindow, Command,
-        InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, TypeInNotepad, UiTree,
+        command::Operation, result::Status, AnalyzeCapture, CaptureForeground, CaptureWindow, CharacterMapDigit,
+        Command, InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, TypeInNotepad, UiTree,
     },
     Message, SCHEMA_VERSION,
 };
-use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 use serde::Serialize;
 use uuid::Uuid;
+use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 
 use crate::{
     broker::{ExecutionError, LaunchOutcome, Peer, Policy},
@@ -80,21 +82,24 @@ pub struct Capture {
 
 impl Core {
     pub fn enter_character_map_digit(&mut self, digit: u32) -> Result<bool, &'static str> {
-        let command = self.desktop_command(Operation::CharacterMapDigit(CharacterMapDigit { digit: Some(digit) }))
+        let command = self
+            .desktop_command(Operation::CharacterMapDigit(CharacterMapDigit { digit: Some(digit) }))
             .map_err(|_| "INPUT_UNAVAILABLE")?;
-        let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
-            .map_err(|_| "INPUT_DENIED")?;
-        let outcome = dispatch(&command).and_then(|reply| {
-            if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
-                return None;
-            }
-            match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
-                (Status::Success, None) => Some(Ok(true)),
-                (Status::Partial, Some("field_unverified")) => Some(Ok(false)),
-                (Status::Denied, Some("character_map_unavailable")) => Some(Err("CHARACTER_MAP_UNAVAILABLE")),
-                _ => None,
-            }
-        }).unwrap_or(Err("INPUT_UNAVAILABLE"));
+        let task =
+            self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command).map_err(|_| "INPUT_DENIED")?;
+        let outcome = dispatch(&command)
+            .and_then(|reply| {
+                if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
+                    return None;
+                }
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Some(Ok(true)),
+                    (Status::Partial, Some("field_unverified")) => Some(Ok(false)),
+                    (Status::Denied, Some("character_map_unavailable")) => Some(Err("CHARACTER_MAP_UNAVAILABLE")),
+                    _ => None,
+                }
+            })
+            .unwrap_or(Err("INPUT_UNAVAILABLE"));
         let (kind, code) = match outcome {
             Ok(true) => ("input.completed", "digit_verified"),
             Ok(false) => ("input.partial", "field_unverified"),
@@ -104,9 +109,7 @@ impl Core {
         outcome
     }
 
-    pub fn analyze_capture(
-        core: &Mutex<Self>, model: &str, jpeg: &[u8],
-    ) -> Result<String, &'static str> {
+    pub fn analyze_capture(core: &Mutex<Self>, model: &str, jpeg: &[u8]) -> Result<String, &'static str> {
         if !valid_jpeg(jpeg) {
             return Err("INVALID_CAPTURE");
         }
@@ -115,8 +118,8 @@ impl Core {
         }
         let task = {
             let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
-            let command = core.desktop_command(Operation::AnalyzeCapture(AnalyzeCapture {}))
-                .map_err(|_| "VISION_UNAVAILABLE")?;
+            let command =
+                core.desktop_command(Operation::AnalyzeCapture(AnalyzeCapture {})).map_err(|_| "VISION_UNAVAILABLE")?;
             core.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
                 .map_err(|_| "VISION_NOT_AUTHORIZED")?
         };
@@ -125,15 +128,16 @@ impl Core {
             Ok(_) => ("vision.completed", "success"),
             Err(error) => ("vision.failed", error.vision_code()),
         };
-        core.lock().map_err(|_| "CORE_UNAVAILABLE")?
-            .audit(task.as_deref(), kind, code).map_err(|_| "VISION_AUDIT_UNAVAILABLE")?;
+        core.lock()
+            .map_err(|_| "CORE_UNAVAILABLE")?
+            .audit(task.as_deref(), kind, code)
+            .map_err(|_| "VISION_AUDIT_UNAVAILABLE")?;
         result.map_err(|error: GatewayError| error.vision_code())
     }
 
     pub(crate) fn desktop_command(&self, operation: Operation) -> Result<Command, ExecutionError> {
         let id = Uuid::new_v4().to_string();
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)
-            .map_err(|_| ExecutionError::ExecutionFailed)?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| ExecutionError::ExecutionFailed)?;
         Ok(Command {
             schema_version: SCHEMA_VERSION,
             request_id: id.clone(),
@@ -169,11 +173,15 @@ impl Core {
             }
             let info = reply.window_info?;
             let bounded = |text: &str, max: usize| !text.is_empty() && text.chars().count() <= max;
-            let valid = info.window != 0 && info.process_id != 0
-                && bounded(&info.title, 120) && bounded(&info.process_name, 64);
+            let valid = info.window != 0
+                && info.process_id != 0
+                && bounded(&info.title, 120)
+                && bounded(&info.process_name, 64);
             valid.then_some(WindowTarget {
-                window: info.window, process_id: info.process_id,
-                title: info.title, process_name: info.process_name,
+                window: info.window,
+                process_id: info.process_id,
+                title: info.title,
+                process_name: info.process_name,
             })
         })
     }
@@ -181,9 +189,13 @@ impl Core {
     /// Agent tool, step 2: reads the named control tree of exactly that window.
     /// The host grants `Capability::WindowInspect` only after the user approved it.
     pub(crate) fn agent_inspect_window(
-        &mut self, task: &str, policy: Policy, target: &WindowTarget,
+        &mut self,
+        task: &str,
+        policy: Policy,
+        target: &WindowTarget,
     ) -> Result<(Vec<NamedNode>, bool), &'static str> {
-        let operation = Operation::InspectWindow(InspectWindow { window: target.window, process_id: target.process_id });
+        let operation =
+            Operation::InspectWindow(InspectWindow { window: target.window, process_id: target.process_id });
         self.agent_bridge_call(task, policy, operation, "window.inspect", |reply| {
             if reply.window_info.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
                 return None;
@@ -195,9 +207,13 @@ impl Core {
     /// Agent tool: captures exactly that window as a JPEG (at most 1024 px per side, 256 KiB),
     /// for a local vision model. The host grants `Capability::WindowCapture` only after approval.
     pub(crate) fn agent_capture_window(
-        &mut self, task: &str, policy: Policy, target: &WindowTarget,
+        &mut self,
+        task: &str,
+        policy: Policy,
+        target: &WindowTarget,
     ) -> Result<Vec<u8>, &'static str> {
-        let operation = Operation::CaptureWindow(CaptureWindow { window: target.window, process_id: target.process_id });
+        let operation =
+            Operation::CaptureWindow(CaptureWindow { window: target.window, process_id: target.process_id });
         self.agent_bridge_call(task, policy, operation, "window.capture", |reply| {
             if reply.ui_tree.is_some() || reply.window_info.is_some() || reply.process_id.is_some() {
                 return None;
@@ -211,7 +227,11 @@ impl Core {
     /// Agent tool: writes `text` into the empty editor of the Notepad process `process_id`,
     /// which the same task launched. Returns whether the text was read back identical.
     pub(crate) fn agent_type_in_notepad(
-        &mut self, task: &str, policy: Policy, process_id: u32, text: &str,
+        &mut self,
+        task: &str,
+        policy: Policy,
+        process_id: u32,
+        text: &str,
     ) -> Result<bool, &'static str> {
         let operation = Operation::TypeInNotepad(TypeInNotepad { process_id, text: text.to_owned() });
         let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
@@ -220,8 +240,11 @@ impl Core {
             _ => "INPUT_AUDIT_UNAVAILABLE",
         })?;
         let outcome = match dispatch(&command) {
-            Some(reply) if reply.ui_tree.is_none() && reply.window_capture.is_none()
-                && reply.window_info.is_none() && reply.process_id.is_none() =>
+            Some(reply)
+                if reply.ui_tree.is_none()
+                    && reply.window_capture.is_none()
+                    && reply.window_info.is_none()
+                    && reply.process_id.is_none() =>
             {
                 match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
                     (Status::Success, None) => Ok(true),
@@ -243,7 +266,11 @@ impl Core {
     }
 
     fn agent_bridge_call<T>(
-        &mut self, task: &str, policy: Policy, operation: Operation, event: &str,
+        &mut self,
+        task: &str,
+        policy: Policy,
+        operation: Operation,
+        event: &str,
         accept: impl FnOnce(BridgeReply) -> Option<T>,
     ) -> Result<T, &'static str> {
         let command = self.agent_command(task, operation).map_err(|_| "WINDOW_UNAVAILABLE")?;
@@ -255,8 +282,7 @@ impl Core {
             .filter(|reply| reply.status() == Status::Success && reply.error.is_none())
             .and_then(accept);
         let (suffix, code) = if result.is_some() { ("completed", "success") } else { ("failed", "window_unavailable") };
-        self.audit(task_id.as_deref(), &format!("{event}.{suffix}"), code)
-            .map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        self.audit(task_id.as_deref(), &format!("{event}.{suffix}"), code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
         result.ok_or("WINDOW_UNAVAILABLE")
     }
 
@@ -264,15 +290,15 @@ impl Core {
         let command = self.desktop_command(Operation::CaptureForeground(CaptureForeground {}))?;
         let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
         let capture = dispatch(&command).and_then(|reply| {
-            if reply.status() != Status::Success || reply.error.is_some()
-                || reply.process_id.is_some() || reply.ui_tree.is_some()
+            if reply.status() != Status::Success
+                || reply.error.is_some()
+                || reply.process_id.is_some()
+                || reply.ui_tree.is_some()
             {
                 return None;
             }
             let frame = reply.window_capture?;
-            if !(1..=1024).contains(&frame.width) || !(1..=1024).contains(&frame.height)
-                || !valid_jpeg(&frame.jpeg)
-            {
+            if !(1..=1024).contains(&frame.width) || !(1..=1024).contains(&frame.height) || !valid_jpeg(&frame.jpeg) {
                 return None;
             }
             Some(Capture { jpeg: frame.jpeg, width: frame.width, height: frame.height })
@@ -289,27 +315,38 @@ impl Core {
     pub fn inspect_foreground(&mut self) -> Result<Inspection, ExecutionError> {
         let command = self.desktop_command(Operation::InspectForeground(InspectForeground {}))?;
         let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
-        let tree = dispatch(&command).and_then(|reply| {
-            if reply.status() != Status::Success || reply.error.is_some()
-                || reply.process_id.is_some() || reply.window_capture.is_some() {
-                return None;
-            }
-            let tree = reply.ui_tree?;
-            if tree.nodes.is_empty() || tree.nodes.len() > 40
-                || tree.nodes.iter().enumerate().any(|(i, node)| {
-                    (i == 0 && node.parent != 0) || (i > 0 && !(1..=i as u32).contains(&node.parent))
+        let tree =
+            dispatch(&command).and_then(|reply| {
+                if reply.status() != Status::Success
+                    || reply.error.is_some()
+                    || reply.process_id.is_some()
+                    || reply.window_capture.is_some()
+                {
+                    return None;
+                }
+                let tree = reply.ui_tree?;
+                if tree.nodes.is_empty()
+                    || tree.nodes.len() > 40
+                    || tree.nodes.iter().enumerate().any(|(i, node)| {
+                        (i == 0 && node.parent != 0) || (i > 0 && !(1..=i as u32).contains(&node.parent))
+                    })
+                {
+                    return None;
+                }
+                Some(Inspection {
+                    truncated: tree.truncated,
+                    nodes: tree
+                        .nodes
+                        .into_iter()
+                        .map(|node| InspectionNode {
+                            parent: node.parent,
+                            control_type: node.control_type,
+                            enabled: node.enabled,
+                            focused: node.focused,
+                        })
+                        .collect(),
                 })
-            {
-                return None;
-            }
-            Some(Inspection {
-                truncated: tree.truncated,
-                nodes: tree.nodes.into_iter().map(|node| InspectionNode {
-                    parent: node.parent, control_type: node.control_type,
-                    enabled: node.enabled, focused: node.focused,
-                }).collect(),
-            })
-        });
+            });
         let (kind, code) = if tree.is_some() {
             ("inspection.completed", "success")
         } else {
@@ -319,21 +356,20 @@ impl Core {
         tree.ok_or(ExecutionError::ExecutionFailed)
     }
 
-    pub fn execute_windows(
-        &mut self,
-        policy: Policy,
-        peer: Peer,
-        command: &Command,
-    ) -> Result<u32, ExecutionError> {
+    pub fn execute_windows(&mut self, policy: Policy, peer: Peer, command: &Command) -> Result<u32, ExecutionError> {
         self.execute(policy, peer, command, || {
             let mut trusted_command = command.clone();
             trusted_command.authenticated_actor_id = "agent".into();
             match dispatch(&trusted_command) {
-                Some(reply) if reply.ui_tree.is_none() && reply.window_capture.is_none() => match (reply.status(), reply.process_id) {
-                    (Status::Success, Some(pid)) if pid != 0 && reply.error.is_none() => LaunchOutcome::Verified(pid),
-                    (Status::Partial, None) => LaunchOutcome::Unverified,
-                    _ => LaunchOutcome::Failed,
-                },
+                Some(reply) if reply.ui_tree.is_none() && reply.window_capture.is_none() => {
+                    match (reply.status(), reply.process_id) {
+                        (Status::Success, Some(pid)) if pid != 0 && reply.error.is_none() => {
+                            LaunchOutcome::Verified(pid)
+                        }
+                        (Status::Partial, None) => LaunchOutcome::Unverified,
+                        _ => LaunchOutcome::Failed,
+                    }
+                }
                 _ => LaunchOutcome::Failed,
             }
         })
@@ -343,24 +379,31 @@ impl Core {
 /// Checks the shape of an agent inspection: 1 to 80 nodes, parents pointing backwards
 /// (one-based, zero for the root), names of at most 80 characters.
 fn named_tree(tree: UiTree) -> Option<(Vec<NamedNode>, bool)> {
-    let valid = !tree.nodes.is_empty() && tree.nodes.len() <= MAX_AGENT_NODES
+    let valid = !tree.nodes.is_empty()
+        && tree.nodes.len() <= MAX_AGENT_NODES
         && tree.nodes.iter().enumerate().all(|(index, node)| {
             (if index == 0 { node.parent == 0 } else { (1..=index as u32).contains(&node.parent) })
                 && node.name.chars().count() <= 80
         });
-    valid.then(|| (
-        tree.nodes.into_iter().map(|node| NamedNode {
-            parent: node.parent, control_type: node.control_type,
-            enabled: node.enabled, focused: node.focused, name: node.name,
-        }).collect(),
-        tree.truncated,
-    ))
+    valid.then(|| {
+        (
+            tree.nodes
+                .into_iter()
+                .map(|node| NamedNode {
+                    parent: node.parent,
+                    control_type: node.control_type,
+                    enabled: node.enabled,
+                    focused: node.focused,
+                    name: node.name,
+                })
+                .collect(),
+            tree.truncated,
+        )
+    })
 }
 
 fn valid_jpeg(jpeg: &[u8]) -> bool {
-    jpeg.len() <= MAX_JPEG_BYTES
-        && jpeg.starts_with(&[0xff, 0xd8])
-        && jpeg.ends_with(&[0xff, 0xd9])
+    jpeg.len() <= MAX_JPEG_BYTES && jpeg.starts_with(&[0xff, 0xd8]) && jpeg.ends_with(&[0xff, 0xd9])
 }
 
 /// One bridge process started ahead of time. It blocks on its private stdin and does
@@ -489,14 +532,7 @@ fn bridge_wait(deadline_ms: i64, now_ms: i64) -> Duration {
 fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
     let mut available = 0;
     unsafe {
-        PeekNamedPipe(
-            stdout.as_raw_handle(),
-            ptr::null_mut(),
-            0,
-            ptr::null_mut(),
-            &mut available,
-            ptr::null_mut(),
-        );
+        PeekNamedPipe(stdout.as_raw_handle(), ptr::null_mut(), 0, ptr::null_mut(), &mut available, ptr::null_mut());
     }
     available
 }
@@ -512,7 +548,8 @@ mod tests {
     #[test]
     fn named_trees_are_shape_checked() {
         let tree = |nodes, truncated| UiTree { nodes, truncated };
-        let (nodes, truncated) = named_tree(tree(vec![node(0, "Fenêtre"), node(1, "Fichier"), node(2, "")], true)).unwrap();
+        let (nodes, truncated) =
+            named_tree(tree(vec![node(0, "Fenêtre"), node(1, "Fichier"), node(2, "")], true)).unwrap();
         assert_eq!(nodes.len(), 3);
         assert_eq!(nodes[1].name, "Fichier");
         assert!(truncated);
@@ -531,8 +568,13 @@ mod tests {
     fn expired_command() -> Command {
         let id = Uuid::new_v4().to_string();
         Command {
-            schema_version: SCHEMA_VERSION, request_id: id.clone(), session_id: id.clone(), task_id: id.clone(),
-            correlation_id: id.clone(), authenticated_actor_id: "test".into(), idempotency_key: id,
+            schema_version: SCHEMA_VERSION,
+            request_id: id.clone(),
+            session_id: id.clone(),
+            task_id: id.clone(),
+            correlation_id: id.clone(),
+            authenticated_actor_id: "test".into(),
+            idempotency_key: id,
             deadline_ms: unix_millis().unwrap() - 1_000,
             operation: Some(Operation::LaunchApplication(aiwin11_contracts::v1::LaunchApplication {
                 application: aiwin11_contracts::v1::launch_application::Application::Notepad as i32,

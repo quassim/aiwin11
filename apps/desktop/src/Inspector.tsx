@@ -13,14 +13,38 @@ const actionErrors: Record<Action, string> = {
 };
 
 const roles: Record<number, string> = {
-  50000: "Bouton", 50001: "Calendrier", 50002: "Case à cocher", 50003: "Liste déroulante",
-  50004: "Champ de saisie", 50005: "Lien", 50006: "Image", 50007: "Élément de liste",
-  50008: "Liste", 50009: "Menu", 50010: "Barre de menus", 50011: "Élément de menu",
-  50013: "Bouton radio", 50014: "Barre de défilement", 50017: "Onglets",
-  50018: "Onglet", 50020: "Texte", 50021: "Barre d’outils", 50022: "Info-bulle",
-  50023: "Arborescence", 50024: "Nœud", 50025: "Contrôle personnalisé", 50026: "Groupe",
-  50028: "Grille", 50029: "Cellule", 50030: "Document", 50031: "Bouton scindé",
-  50032: "Fenêtre", 50033: "Volet", 50034: "En-tête", 50036: "Tableau", 50037: "Barre de titre",
+  50000: "Bouton",
+  50001: "Calendrier",
+  50002: "Case à cocher",
+  50003: "Liste déroulante",
+  50004: "Champ de saisie",
+  50005: "Lien",
+  50006: "Image",
+  50007: "Élément de liste",
+  50008: "Liste",
+  50009: "Menu",
+  50010: "Barre de menus",
+  50011: "Élément de menu",
+  50013: "Bouton radio",
+  50014: "Barre de défilement",
+  50017: "Onglets",
+  50018: "Onglet",
+  50020: "Texte",
+  50021: "Barre d’outils",
+  50022: "Info-bulle",
+  50023: "Arborescence",
+  50024: "Nœud",
+  50025: "Contrôle personnalisé",
+  50026: "Groupe",
+  50028: "Grille",
+  50029: "Cellule",
+  50030: "Document",
+  50031: "Bouton scindé",
+  50032: "Fenêtre",
+  50033: "Volet",
+  50034: "En-tête",
+  50036: "Tableau",
+  50037: "Barre de titre",
 };
 
 export function Inspector({ onFinished }: { onFinished: () => void }) {
@@ -39,24 +63,36 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
       if (count !== 1) return;
       setBusy(true);
       setMessage(`${actionLabels[action]} en cours…`);
-      const request = action === "input"
-        ? invoke<boolean>("enter_character_map_digit", { digit: Number(digit) }).then((verified) => {
-          setMessage(verified ? "Chiffre saisi. Le champ de la Table des caractères contient le chiffre."
-            : "Saisie envoyée. La valeur du champ n’a pas pu être confirmée.");
-        })
-        : action === "capture"
-        ? invoke<Capture>("capture_foreground").then((frame) => {
-          setCapture(frame);
-          setMessage("");
-        })
-        : invoke<Inspection>("inspect_foreground").then((tree) => {
-          setResult(tree);
-          setMessage(tree.truncated ? "Inspection partielle. La limite de parcours a été atteinte." : "");
+      const request =
+        action === "input"
+          ? invoke<boolean>("enter_character_map_digit", { digit: Number(digit) }).then((verified) => {
+              setMessage(
+                verified
+                  ? "Chiffre saisi. Le champ de la Table des caractères contient le chiffre."
+                  : "Saisie envoyée. La valeur du champ n’a pas pu être confirmée.",
+              );
+            })
+          : action === "capture"
+            ? invoke<Capture>("capture_foreground").then((frame) => {
+                setCapture(frame);
+                setMessage("");
+              })
+            : invoke<Inspection>("inspect_foreground").then((tree) => {
+                setResult(tree);
+                setMessage(tree.truncated ? "Inspection partielle. La limite de parcours a été atteinte." : "");
+              });
+      void request
+        .catch((error) =>
+          setMessage(
+            error === "CHARACTER_MAP_UNAVAILABLE"
+              ? "Place la Table des caractères au premier plan et vérifie que son champ est accessible."
+              : actionErrors[action],
+          ),
+        )
+        .finally(() => {
+          setBusy(false);
+          onFinished();
         });
-      void request.catch((error) => setMessage(error === "CHARACTER_MAP_UNAVAILABLE"
-        ? "Place la Table des caractères au premier plan et vérifie que son champ est accessible."
-        : actionErrors[action]))
-        .finally(() => { setBusy(false); onFinished(); });
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [action, count, digit, onFinished]);
@@ -70,12 +106,14 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
   }
 
   function renderChildren(parent: number) {
-    return result?.nodes.map((node, index) => ({ node, index }))
+    return result?.nodes
+      .map((node, index) => ({ node, index }))
       .filter(({ node }) => node.parent === parent)
       .map(({ node, index }): React.ReactNode => (
         <li key={index}>
           {roles[node.controlType] ?? `Contrôle ${node.controlType}`}
-          {node.focused && " · Focus"}{!node.enabled && " · Désactivé"}
+          {node.focused && " · Focus"}
+          {!node.enabled && " · Désactivé"}
           {result.nodes.some((child) => child.parent === index + 1) && <ul>{renderChildren(index + 1)}</ul>}
         </li>
       ));
@@ -85,16 +123,26 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
     <section className="card">
       <p>Choisis une action, puis place la fenêtre à examiner au premier plan dans les trois secondes.</p>
       <div className="section-header">
-        <button disabled={busy || count > 0} onClick={() => start("inspect")}>Inspecter une fenêtre</button>
-        <button disabled={busy || count > 0} onClick={() => start("capture")}>Capturer la fenêtre</button>
+        <button disabled={busy || count > 0} onClick={() => start("inspect")}>
+          Inspecter une fenêtre
+        </button>
+        <button disabled={busy || count > 0} onClick={() => start("capture")}>
+          Capturer la fenêtre
+        </button>
         {count > 0 && <button onClick={() => setCount(0)}>Annuler</button>}
       </div>
       <div className="task-form">
         <label htmlFor="character-map-digit">Chiffre qui remplacera le champ « Caractères à copier »</label>
-        <select id="character-map-digit" value={digit} disabled={busy || count > 0}
-          onChange={(event) => setDigit(event.target.value)}>
+        <select
+          id="character-map-digit"
+          value={digit}
+          disabled={busy || count > 0}
+          onChange={(event) => setDigit(event.target.value)}
+        >
           <option value="">Sélectionner un chiffre</option>
-          {Array.from({ length: 10 }, (_, value) => <option key={value}>{value}</option>)}
+          {Array.from({ length: 10 }, (_, value) => (
+            <option key={value}>{value}</option>
+          ))}
         </select>
         <div>
           <button disabled={busy || count > 0 || digit === ""} onClick={() => start("input")}>
@@ -103,7 +151,11 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
         </div>
       </div>
       <p role="status">{count > 0 ? `${actionLabels[action]} dans ${count} s…` : message}</p>
-      {result && <ul className="inspection-tree" aria-label="Structure de la fenêtre">{renderChildren(0)}</ul>}
+      {result && (
+        <ul className="inspection-tree" aria-label="Structure de la fenêtre">
+          {renderChildren(0)}
+        </ul>
+      )}
       {capture && <CapturePreview capture={capture} onClear={() => setCapture(undefined)} onFinished={onFinished} />}
     </section>
   );
@@ -115,8 +167,14 @@ const visionErrors: Record<string, string> = {
   VISION_BUSY: "Une analyse est déjà en cours.",
 };
 
-function CapturePreview({ capture, onClear, onFinished }: {
-  capture: Capture; onClear: () => void; onFinished: () => void;
+function CapturePreview({
+  capture,
+  onClear,
+  onFinished,
+}: {
+  capture: Capture;
+  onClear: () => void;
+  onFinished: () => void;
 }) {
   const [url, setUrl] = useState("");
   const [models, setModels] = useState<string[]>([]);
@@ -166,20 +224,35 @@ function CapturePreview({ capture, onClear, onFinished }: {
   return (
     <section aria-label="Aperçu local">
       <div className="section-header">
-        <p>{capture.width} × {capture.height} px</p>
+        <p>
+          {capture.width} × {capture.height} px
+        </p>
         <button onClick={onClear}>Effacer l’aperçu</button>
       </div>
       {url && <img className="capture-preview" src={url} alt="Capture de la fenêtre au premier plan" />}
       <div className="task-form">
         <label htmlFor="vision-model">Modèle de vision Ollama</label>
-        <select id="vision-model" value={model} disabled={busy || !models.length}
-          onChange={(event) => { setModel(event.target.value); setDescription(""); }}>
+        <select
+          id="vision-model"
+          value={model}
+          disabled={busy || !models.length}
+          onChange={(event) => {
+            setModel(event.target.value);
+            setDescription("");
+          }}
+        >
           <option value="">Sélectionner un modèle</option>
-          {models.map((name) => <option key={name}>{name}</option>)}
+          {models.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
         </select>
         <div className="section-header">
-          <button disabled={busy} onClick={() => void discover()}>Détecter les modèles</button>
-          <button disabled={busy || !model} onClick={() => void analyze()}>Analyser avec Ollama</button>
+          <button disabled={busy} onClick={() => void discover()}>
+            Détecter les modèles
+          </button>
+          <button disabled={busy || !model} onClick={() => void analyze()}>
+            Analyser avec Ollama
+          </button>
         </div>
         <div role="status">{description || message}</div>
       </div>

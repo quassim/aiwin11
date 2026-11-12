@@ -1,10 +1,10 @@
 pub mod broker;
-pub mod model_gateway;
-pub mod policy;
 #[cfg(windows)]
 pub mod local_files;
+pub mod model_gateway;
 #[cfg(windows)]
 pub mod openai;
+pub mod policy;
 #[cfg(windows)]
 pub mod task;
 #[cfg(windows)]
@@ -54,9 +54,14 @@ pub struct AuditEntry {
 /// (free text, a path, a prompt fragment) is replaced by `REDACTED` before it is stored, so a
 /// programming error can never write user content into the audit journal.
 pub(crate) fn journal_code(value: &str) -> &str {
-    let safe = !value.is_empty() && value.len() <= 96
+    let safe = !value.is_empty()
+        && value.len() <= 96
         && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:+/-".contains(&b));
-    if safe { value } else { "REDACTED" }
+    if safe {
+        value
+    } else {
+        "REDACTED"
+    }
 }
 
 const PREFERENCE_KEYS: [&str; 4] = ["model.provider", "model.local", "model.cloud", "model.vision"];
@@ -70,7 +75,8 @@ impl ModelPreferences {
     fn validated(self) -> Option<Self> {
         let provider_ok = matches!(self.provider.as_str(), "ollama" | "openai");
         let identifiers_ok = [&self.local_model, &self.cloud_model, &self.vision_model]
-            .iter().all(|value| Self::valid_identifier(value));
+            .iter()
+            .all(|value| Self::valid_identifier(value));
         (provider_ok && identifiers_ok).then_some(self)
     }
 }
@@ -159,9 +165,13 @@ impl Core {
     }
 
     fn retention_days_in(db: &Connection) -> u32 {
-        db.query_row("SELECT value FROM settings WHERE key = 'history.retention_days'", [], |row| row.get::<_, String>(0))
-            .ok().and_then(|value| value.parse().ok()).filter(|days| RETENTION_RANGE.contains(days))
-            .unwrap_or(DEFAULT_RETENTION_DAYS)
+        db.query_row("SELECT value FROM settings WHERE key = 'history.retention_days'", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|days| RETENTION_RANGE.contains(days))
+        .unwrap_or(DEFAULT_RETENTION_DAYS)
     }
 
     /// Deletes the history of past sessions older than the retention period. The current
@@ -244,10 +254,18 @@ impl Core {
             let mut statement = self.db.prepare(
                 "SELECT sequence, id, session_id, task_id, kind, source, code, timestamp FROM events ORDER BY sequence",
             )?;
-            let rows = statement.query_map([], |row| Ok(AuditEntry {
-                sequence: row.get(0)?, id: row.get(1)?, session_id: row.get(2)?, task_id: row.get(3)?,
-                kind: row.get(4)?, source: row.get(5)?, code: row.get(6)?, timestamp: row.get(7)?,
-            }))?;
+            let rows = statement.query_map([], |row| {
+                Ok(AuditEntry {
+                    sequence: row.get(0)?,
+                    id: row.get(1)?,
+                    session_id: row.get(2)?,
+                    task_id: row.get(3)?,
+                    kind: row.get(4)?,
+                    source: row.get(5)?,
+                    code: row.get(6)?,
+                    timestamp: row.get(7)?,
+                })
+            })?;
             rows.collect()
         };
         let entries = read().map_err(|_| "HISTORY_UNAVAILABLE")?;
@@ -261,7 +279,9 @@ impl Core {
     /// Writes the audit journal as JSON into `directory` (created if needed) and returns the
     /// file path. The file name only carries the UTC export time.
     pub fn export_audit_to(&self, directory: &Path) -> Result<std::path::PathBuf, &'static str> {
-        let stamp: String = self.db.query_row("SELECT strftime('%Y%m%dT%H%M%SZ', 'now')", [], |row| row.get(0))
+        let stamp: String = self
+            .db
+            .query_row("SELECT strftime('%Y%m%dT%H%M%SZ', 'now')", [], |row| row.get(0))
             .map_err(|_| "HISTORY_UNAVAILABLE")?;
         let entries = self.export_audit()?;
         let json = serde_json::to_vec_pretty(&serde_json::json!({ "format": "aiwin11.audit.v1", "events": entries }))
@@ -299,10 +319,15 @@ impl Core {
             "SELECT id, state, outcome, created_at, updated_at FROM tasks
              ORDER BY created_at DESC, rowid DESC LIMIT ?1",
         )?;
-        let rows = statement.query_map([limit], |row| Ok(TaskRecord {
-            id: row.get(0)?, state: row.get(1)?, outcome: row.get(2)?,
-            created_at: row.get(3)?, updated_at: row.get(4)?,
-        }))?;
+        let rows = statement.query_map([limit], |row| {
+            Ok(TaskRecord {
+                id: row.get(0)?,
+                state: row.get(1)?,
+                outcome: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
         rows.collect()
     }
 
@@ -320,18 +345,17 @@ impl Core {
     }
 
     fn setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
-        self.db.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
-            .map(Some)
-            .or_else(|error| match error {
+        self.db.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0)).map(Some).or_else(
+            |error| match error {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 error => Err(error),
-            })
+            },
+        )
     }
 
     /// Remembered model choices; defaults (local provider, nothing chosen) when absent or invalid.
     pub fn model_preferences(&self) -> ModelPreferences {
-        let mut values = PREFERENCE_KEYS.iter()
-            .map(|key| self.setting(key).ok().flatten().unwrap_or_default());
+        let mut values = PREFERENCE_KEYS.iter().map(|key| self.setting(key).ok().flatten().unwrap_or_default());
         let preferences = ModelPreferences {
             provider: values.next().unwrap_or_default(),
             local_model: values.next().unwrap_or_default(),
@@ -347,7 +371,10 @@ impl Core {
         let write = |db: &mut Connection| -> rusqlite::Result<()> {
             let transaction = db.transaction()?;
             for (key, value) in PREFERENCE_KEYS.iter().zip([
-                &preferences.provider, &preferences.local_model, &preferences.cloud_model, &preferences.vision_model,
+                &preferences.provider,
+                &preferences.local_model,
+                &preferences.cloud_model,
+                &preferences.vision_model,
             ]) {
                 transaction.execute(
                     "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -448,19 +475,27 @@ mod tests {
                 core.task_state(task, state, if state == "completed" { Some("ok") } else { None }).unwrap();
             }
             core.task_state("c", "planning", None).unwrap();
-            assert_eq!(core.recent_tasks(10).unwrap().iter().find(|task| task.id == "c").unwrap().state,
-                "completed", "a final state never changes");
+            assert_eq!(
+                core.recent_tasks(10).unwrap().iter().find(|task| task.id == "c").unwrap().state,
+                "completed",
+                "a final state never changes"
+            );
         } // The process "crashes" with a and b still in progress.
         let core = Core::open(&path).unwrap();
         let tasks = core.recent_tasks(10).unwrap();
-        let state = |id: &str| tasks.iter().find(|task| task.id == id)
-            .map(|task| (task.state.clone(), task.outcome.clone())).unwrap();
+        let state = |id: &str| {
+            tasks.iter().find(|task| task.id == id).map(|task| (task.state.clone(), task.outcome.clone())).unwrap()
+        };
         assert_eq!(state("a"), ("interrupted".into(), Some("dispatching".into())));
         assert_eq!(state("b"), ("interrupted".into(), Some("awaiting_approval".into())));
         assert_eq!(state("c"), ("completed".into(), Some("ok".into())));
-        let recovered: Vec<_> = core.activity().unwrap().into_iter()
+        let recovered: Vec<_> = core
+            .activity()
+            .unwrap()
+            .into_iter()
             .filter(|event| event.kind == "task.recovered")
-            .map(|event| (event.task_id.unwrap(), event.code.unwrap())).collect();
+            .map(|event| (event.task_id.unwrap(), event.code.unwrap()))
+            .collect();
         assert_eq!(recovered.len(), 2);
         assert!(recovered.contains(&("a".into(), "dispatching".into())));
         core.task_state("a", "planning", None).unwrap();
@@ -473,8 +508,10 @@ mod tests {
     fn model_preferences_persist_and_invalid_values_are_refused() {
         let path = std::env::temp_dir().join(format!("aiwin11-prefs-{}.sqlite3", Uuid::new_v4()));
         let chosen = ModelPreferences {
-            provider: "openai".into(), local_model: "qwen3:8b".into(),
-            cloud_model: "gpt-x".into(), vision_model: "gemma3:4b".into(),
+            provider: "openai".into(),
+            local_model: "qwen3:8b".into(),
+            cloud_model: "gpt-x".into(),
+            vision_model: "gemma3:4b".into(),
         };
         {
             let mut core = Core::open(&path).unwrap();
@@ -517,7 +554,10 @@ mod tests {
             let count: u32 = core.db.query_row(sql, [&old_session], |row| row.get(0)).unwrap();
             assert_eq!(count, 0, "{sql}");
         }
-        assert!(core.activity().unwrap().iter()
+        assert!(core
+            .activity()
+            .unwrap()
+            .iter()
             .any(|event| event.kind == "history.purged" && event.code.as_deref() == Some("sessions:1")));
 
         // A recent session is kept by retention but removed by an explicit clear.
@@ -542,8 +582,14 @@ mod tests {
 
     #[test]
     fn journal_codes_reject_free_text() {
-        for code in ["policy.evaluated", "ask:launch_application:profile", "step:1/8", "MODEL_REQUIRED",
-            "assisted+simulate", "0b6f7c1e-0f3a-4b8e-9a51-2a3c4d5e6f70"] {
+        for code in [
+            "policy.evaluated",
+            "ask:launch_application:profile",
+            "step:1/8",
+            "MODEL_REQUIRED",
+            "assisted+simulate",
+            "0b6f7c1e-0f3a-4b8e-9a51-2a3c4d5e6f70",
+        ] {
             assert_eq!(journal_code(code), code);
         }
         for text in ["", "Mon mot de passe est hunter2", "C:\\Users\\x\\secret.txt", "a\nb", "é", &"a".repeat(97)] {
@@ -557,26 +603,44 @@ mod tests {
     fn the_schema_only_holds_identifiers_codes_and_timestamps() {
         let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let reviewed = [
-            "events.code", "events.id", "events.kind", "events.sequence", "events.session_id",
-            "events.source", "events.task_id", "events.timestamp",
-            "sessions.created_at", "sessions.id",
+            "events.code",
+            "events.id",
+            "events.kind",
+            "events.sequence",
+            "events.session_id",
+            "events.source",
+            "events.task_id",
+            "events.timestamp",
+            "sessions.created_at",
+            "sessions.id",
             // Keys are fixed by the core; values are profile codes, booleans, retention days and
             // public model identifiers. Secrets stay in Windows Credential Manager.
-            "settings.key", "settings.updated_at", "settings.value",
-            "tasks.created_at", "tasks.id", "tasks.outcome", "tasks.session_id", "tasks.state", "tasks.updated_at",
-            "tool_executions.idempotency_key", "tool_executions.session_id", "tool_executions.task_id",
+            "settings.key",
+            "settings.updated_at",
+            "settings.value",
+            "tasks.created_at",
+            "tasks.id",
+            "tasks.outcome",
+            "tasks.session_id",
+            "tasks.state",
+            "tasks.updated_at",
+            "tool_executions.idempotency_key",
+            "tool_executions.session_id",
+            "tool_executions.task_id",
         ];
         let mut columns: Vec<String> = Vec::new();
         let tables: Vec<String> = {
-            let mut statement = core.db.prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
+            let mut statement = core
+                .db
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+                .unwrap();
             let rows = statement.query_map([], |row| row.get(0)).unwrap();
             rows.collect::<rusqlite::Result<_>>().unwrap()
         };
         for table in tables {
             let mut statement = core.db.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
-            let names: Vec<String> = statement.query_map([], |row| row.get(0)).unwrap()
-                .collect::<rusqlite::Result<_>>().unwrap();
+            let names: Vec<String> =
+                statement.query_map([], |row| row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
             columns.extend(names.into_iter().map(|name| format!("{table}.{name}")));
         }
         columns.sort();

@@ -4,8 +4,11 @@ The agent never executes anything. It validates the model output against the
 tool registry below and returns either a typed tool request or a plain reply.
 The host validates the decision again and submits tool requests to the broker.
 """
+
 import json
 import sys
+from collections.abc import Callable
+from typing import Any
 
 VERSION = 2
 MAX_INPUT_BYTES = 32 * 1024
@@ -16,15 +19,13 @@ _NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012
 _RESERVED = {"CON", "PRN", "AUX", "NUL"}
 
 
-def is_text_file_name(value):
+def is_text_file_name(value: object) -> bool:
     """Flat ASCII `.txt` name, as accepted by the host's local file store."""
     if not isinstance(value, str) or len(value) > MAX_FILE_NAME or "." not in value:
         return False
     stem, extension = value.rsplit(".", 1)
     upper = stem.upper()
-    reserved = upper in _RESERVED or (
-        len(upper) == 4 and upper[:3] in ("COM", "LPT") and upper[3].isdigit()
-    )
+    reserved = upper in _RESERVED or (len(upper) == 4 and upper[:3] in ("COM", "LPT") and upper[3].isdigit())
     return (
         extension.lower() == "txt"
         and stem != ""
@@ -37,14 +38,15 @@ def is_text_file_name(value):
 MAX_TYPED_CHARS = 2000
 
 
-def is_typed_text(value):
+def is_typed_text(value: object) -> bool:
     """Text for Notepad: 1 to 2000 characters, no NUL."""
     return isinstance(value, str) and 0 < len(value) <= MAX_TYPED_CHARS and "\x00" not in value
 
 
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
-TOOLS = {
+Rule = tuple[str, ...] | Callable[[object], bool]
+TOOLS: dict[str, dict[str, Rule]] = {
     "launch_application": {"application": ("notepad",)},
     "list_text_files": {},
     "read_text_file": {"name": is_text_file_name},
@@ -60,7 +62,7 @@ TOOLS = {
 TRANSFERS = {"copy_text_file", "move_text_file"}
 
 
-def _tool_request(calls):
+def _tool_request(calls: object) -> dict[str, Any]:
     if not isinstance(calls, list) or len(calls) != 1:
         raise ValueError("expected one tool call")
     call = calls[0]
@@ -71,7 +73,7 @@ def _tool_request(calls):
     schema = TOOLS.get(name) if isinstance(name, str) else None
     if schema is None:
         raise ValueError("unknown tool")
-    arguments = function.get("arguments")
+    arguments: object = function.get("arguments")
     if not isinstance(arguments, dict) or set(arguments) != set(schema):
         raise ValueError("invalid arguments")
     for key, rule in schema.items():
@@ -84,7 +86,7 @@ def _tool_request(calls):
     return {"version": VERSION, "action": "tool", "tool": name, "arguments": dict(arguments)}
 
 
-def _reply(text):
+def _reply(text: object) -> dict[str, Any]:
     if not isinstance(text, str):
         raise ValueError("invalid reply")
     text = text.strip()
@@ -93,7 +95,7 @@ def _reply(text):
     return {"version": VERSION, "action": "reply", "text": text}
 
 
-def decide(message):
+def decide(message: object) -> dict[str, Any]:
     if not isinstance(message, dict) or message.get("version") != VERSION:
         raise ValueError("invalid protocol")
     proposal = message.get("proposal")
@@ -106,7 +108,7 @@ def decide(message):
     raise ValueError("invalid proposal")
 
 
-def main():
+def main() -> int:
     try:
         data = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
         if len(data) > MAX_INPUT_BYTES:

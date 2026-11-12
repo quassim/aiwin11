@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+# assert is the test runner's assertion style; subprocess use is reviewed (no shell, fixed argv).
+per-file-ignores = { "test_agent.py" = ["S101", "S603", "S607"] }
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+# Test methods are unannotated unittest cases; their bodies are still type-checked.
+[[tool.mypy.overrides]]
+module = "test_agent"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+check_untyped_defs = true

@@ -172,7 +172,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|---|
 | Dépôt privé pour versionner le travail de Codex | ✅ Décidé : dépôt git **local** uniquement | — |
 | CI sur un vrai runner Windows 11 | 🟡 Workflow présent mais pas exécuté (dépôt local) ; remplacé par `scripts/verify.ps1` sur la machine de référence | R1 |
-| Code linté et typé | 🟡 clippy ✅, TypeScript strict ✅ ; ESLint, ruff/mypy, `cargo fmt --check` ❌ | R1 |
+| Code linté et typé | ✅ clippy, TypeScript strict, ESLint (règles typées) + Prettier, ruff + mypy strict, `cargo fmt --check`, tous dans `scripts/verify.ps1` ; 🟡 pas d’analyseurs .NET supplémentaires | — |
 | Tests unitaires, intégration, sécurité | ✅ 59 tests Rust, 10 Python, 11 tests réels | — |
 | Aucune opération hors broker | ✅ | — |
 | APIs publiques et migrations documentées | ✅ `docs/CONTRACTS.md` | — |
@@ -237,7 +237,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - ✅ **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
 - ✅ **Durée de conservation et effacement** de l’historique ; export du journal d’audit (JSON).
 - ✅ Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; charge utile = code non sensible (fournisseur, numéro d’étape). 🟡 Pas de payload JSON structuré.
-- Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`, tests de composants React, test E2E de l’application.
+- ✅ Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`. ❌ Tests de composants React, test E2E de l’application.
 - Mesures : démarrage, RAM au repos, navigation, évaluation de politique ; machine de référence documentée.
 - Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).
 - Audit d’accessibilité au lecteur d’écran (Narrateur, NVDA).

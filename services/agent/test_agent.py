@@ -1,9 +1,8 @@
 import json
-from pathlib import Path
 import subprocess
 import sys
 import unittest
-
+from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("agent.py")
 
@@ -54,8 +53,21 @@ class AgentProtocolTest(unittest.TestCase):
                 result = self.invoke({"version": 2, "proposal": {"calls": [proposal]}})
                 self.assertEqual(result.returncode, 0)
                 self.assertEqual(json.loads(result.stdout)["arguments"], arguments)
-        for name in ["../x.txt", "C:\\x.txt", "x.txt:stream", "dir/x.txt", "NUL.txt", "COM1.txt",
-                     "x.txt ", "x..txt", "x.exe", "é.txt", "a" * 125 + ".txt", 42, None]:
+        for name in [
+            "../x.txt",
+            "C:\\x.txt",
+            "x.txt:stream",
+            "dir/x.txt",
+            "NUL.txt",
+            "COM1.txt",
+            "x.txt ",
+            "x..txt",
+            "x.exe",
+            "é.txt",
+            "a" * 125 + ".txt",
+            42,
+            None,
+        ]:
             with self.subTest(name=name):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("read_text_file", {"name": name})]}})
         self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_text_files", {"path": "C:\\"})]}})
@@ -81,8 +93,14 @@ class AgentProtocolTest(unittest.TestCase):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("type_in_notepad", {"text": "Pain\nLait"})]}})
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout)["arguments"], {"text": "Pain\nLait"})
-        for arguments in [{"text": ""}, {"text": "a" * 2001}, {"text": "a\x00b"}, {"text": 3},
-                          {"text": "ok", "process_id": 1234}, {"text": "ok", "window": 1}]:
+        for arguments in [
+            {"text": ""},
+            {"text": "a" * 2001},
+            {"text": "a\x00b"},
+            {"text": 3},
+            {"text": "ok", "process_id": 1234},
+            {"text": "ok", "window": 1},
+        ]:
             with self.subTest(arguments=arguments):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("type_in_notepad", arguments)]}})
 
@@ -115,9 +133,7 @@ class AgentProtocolTest(unittest.TestCase):
     def test_text_proposal_returns_trimmed_reply(self):
         result = self.invoke({"version": 2, "proposal": {"text": "  Bonjour, été ! \n"}})
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(
-            json.loads(result.stdout), {"version": 2, "action": "reply", "text": "Bonjour, été !"}
-        )
+        self.assertEqual(json.loads(result.stdout), {"version": 2, "action": "reply", "text": "Bonjour, été !"})
 
     def test_rejected_tool_proposals_never_return_an_operation(self):
         proposals = [
@@ -131,9 +147,7 @@ class AgentProtocolTest(unittest.TestCase):
             {"version": 2, "proposal": {"calls": [call("launch_application", {"application": ["notepad"]})]}},
             {
                 "version": 2,
-                "proposal": {
-                    "calls": [call("launch_application", {"application": "notepad", "path": "x.exe"})]
-                },
+                "proposal": {"calls": [call("launch_application", {"application": "notepad", "path": "x.exe"})]},
             },
             {"version": 2, "proposal": {"calls": [NOTEPAD], "text": "ok"}},
             {"version": 2, "proposal": {}},

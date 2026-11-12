@@ -36,7 +36,20 @@ function Step([string]$name, [scriptblock]$command) {
 }
 
 Step 'Agent Python' { python -B services/agent/test_agent.py }
+$venvPython = Join-Path $root '.venv\Scripts\python.exe'
+if (Test-Path $venvPython) {
+    Step 'Ruff (lint + format)' {
+        & $venvPython -m ruff check services/agent
+        if ($LASTEXITCODE -eq 0) { & $venvPython -m ruff format --check services/agent }
+    }
+    Step 'Mypy (strict)' { & $venvPython -m mypy --config-file services/agent/pyproject.toml services/agent }
+} else {
+    Write-Host 'Ruff/mypy sautés : créez .venv (voir services/agent/requirements-dev.txt).' -ForegroundColor Yellow
+    $results.Add([pscustomobject]@{ Step = 'Ruff + mypy'; Result = 'SAUTÉ'; Seconds = 0 })
+}
+Step 'ESLint + Prettier' { npm --prefix apps/desktop run lint }
 Step 'Interface (tsc + vite)' { npm --prefix apps/desktop run build }
+Step 'cargo fmt --check' { cargo fmt --all --check }
 Step 'Pont .NET' { dotnet build services/windows/AiWin11.Windows.csproj --configuration Release -nologo -v q }
 Step 'Tests Rust' { cargo test --locked -p aiwin11-core }
 Step 'Clippy' { cargo clippy --locked --workspace --all-targets -- -D warnings }

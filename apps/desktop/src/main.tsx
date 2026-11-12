@@ -47,17 +47,16 @@ type ApprovalAction =
   | { kind: "typeText"; text: string; characters: number };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
-  | { type: "stage"; stage: string }
-  | { type: "delta"; text: string }
-  | ({ type: "approvalRequired" } & PendingApproval);
+  { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
 const applicationNames: Record<"notepad", string> = { notepad: "le Bloc-notes" };
 
 function describeApproval(action: ApprovalAction): { title: string; detail: string; quote?: string } {
   if (action.kind === "typeText") {
     return {
       title: "L’agent propose d’écrire dans le Bloc-notes",
-      detail: `Action : écrire ce texte (${action.characters} caractères) dans le Bloc-notes qu’il vient d’ouvrir. `
-        + "Rien n’est écrit si le document contient déjà du texte.",
+      detail:
+        `Action : écrire ce texte (${action.characters} caractères) dans le Bloc-notes qu’il vient d’ouvrir. ` +
+        "Rien n’est écrit si le document contient déjà du texte.",
       quote: action.text,
     };
   }
@@ -69,45 +68,56 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     };
   }
   if (action.kind === "listFiles") {
-    return { title: "L’agent demande à lister tes fichiers", detail: "Action : lister les fichiers .txt du dossier de Fichiers." };
+    return {
+      title: "L’agent demande à lister tes fichiers",
+      detail: "Action : lister les fichiers .txt du dossier de Fichiers.",
+    };
   }
   if (action.kind === "readFile") {
-    return { title: "L’agent demande à lire un fichier", detail: `Action : lire « ${action.name} » dans le dossier de Fichiers.` };
+    return {
+      title: "L’agent demande à lire un fichier",
+      detail: `Action : lire « ${action.name} » dans le dossier de Fichiers.`,
+    };
   }
   if (action.kind === "moveFile") {
     return {
       title: "L’agent propose de renommer un fichier",
-      detail: `Action : renommer « ${action.source} » (${action.characters} caractères) en « ${action.destination} », `
-        + "dans le dossier de Fichiers. Aucun fichier existant ne sera remplacé.",
+      detail:
+        `Action : renommer « ${action.source} » (${action.characters} caractères) en « ${action.destination} », ` +
+        "dans le dossier de Fichiers. Aucun fichier existant ne sera remplacé.",
     };
   }
   if (action.kind === "trashFile") {
     return {
       title: "L’agent propose de mettre un fichier à la corbeille",
-      detail: `Action : déplacer « ${action.name} » (${action.characters} caractères) dans la corbeille d’AiWin11. `
-        + "Le fichier n’est pas supprimé : il reste récupérable dans le dossier trash d’AiWin11.",
+      detail:
+        `Action : déplacer « ${action.name} » (${action.characters} caractères) dans la corbeille d’AiWin11. ` +
+        "Le fichier n’est pas supprimé : il reste récupérable dans le dossier trash d’AiWin11.",
     };
   }
   if (action.kind === "describeWindow") {
     return {
       title: "L’agent demande à décrire une fenêtre",
-      detail: `Fenêtre : « ${action.title} » (application ${action.application}), la dernière que tu utilisais `
-        + `avant AiWin11. Une capture de cette fenêtre sera analysée par le modèle de vision local ${action.model} ; `
-        + "l’agent ne recevra que la description. L’image n’est ni enregistrée ni envoyée ailleurs.",
+      detail:
+        `Fenêtre : « ${action.title} » (application ${action.application}), la dernière que tu utilisais ` +
+        `avant AiWin11. Une capture de cette fenêtre sera analysée par le modèle de vision local ${action.model} ; ` +
+        "l’agent ne recevra que la description. L’image n’est ni enregistrée ni envoyée ailleurs.",
     };
   }
   if (action.kind === "inspectWindow") {
     return {
       title: "L’agent demande à lire une fenêtre",
-      detail: `Fenêtre : « ${action.title} » (application ${action.application}), la dernière que tu utilisais `
-        + "avant AiWin11. L’agent recevra les types et les noms de ses contrôles, sans capture d’écran ni "
-        + "contenu des champs de mot de passe. Rien ne quitte ta machine.",
+      detail:
+        `Fenêtre : « ${action.title} » (application ${action.application}), la dernière que tu utilisais ` +
+        "avant AiWin11. L’agent recevra les types et les noms de ses contrôles, sans capture d’écran ni " +
+        "contenu des champs de mot de passe. Rien ne quitte ta machine.",
     };
   }
   return {
     title: "L’agent propose de copier un fichier",
-    detail: `Action : copier « ${action.source} » (${action.characters} caractères) vers le nouveau fichier `
-      + `« ${action.destination} », dans le dossier de Fichiers. Aucun fichier existant ne sera remplacé.`,
+    detail:
+      `Action : copier « ${action.source} » (${action.characters} caractères) vers le nouveau fichier ` +
+      `« ${action.destination} », dans le dossier de Fichiers. Aucun fichier existant ne sera remplacé.`,
   };
 }
 const MAX_PROMPT_CHARS = 2000;
@@ -190,7 +200,8 @@ const taskErrors: Record<string, string> = {
   CLOUD_PROPOSAL_INVALID: "Le modèle OpenAI n’a renvoyé ni réponse complète ni appel d’outil valide.",
   CREDENTIAL_STORE_UNAVAILABLE: "Le Gestionnaire d’identifiants Windows est indisponible.",
   INVALID_API_KEY: "Le format de la clé API est invalide.",
-  MODEL_UNAVAILABLE_OR_INVALID: "Ollama ou le modèle est indisponible, ou le modèle ne prend pas en charge les appels d’outils.",
+  MODEL_UNAVAILABLE_OR_INVALID:
+    "Ollama ou le modèle est indisponible, ou le modèle ne prend pas en charge les appels d’outils.",
   AGENT_UNAVAILABLE: "L’agent Python est indisponible. Vérifie son installation.",
   AGENT_REJECTED: "L’agent a rejeté la proposition du modèle : outil inconnu ou arguments invalides.",
   APPROVAL_NOT_PENDING: "Cette proposition n’est plus en attente.",
@@ -205,7 +216,8 @@ const taskErrors: Record<string, string> = {
   FILE_TOO_LARGE: "Le fichier dépasse 64 Kio.",
   FILE_NOT_UTF8: "Le fichier n’est pas un texte UTF-8.",
   INVALID_FILE_NAME: "Le nom de fichier n’est pas valide.",
-  FILE_AUDIT_UNAVAILABLE: "Le journal local est indisponible ; l’opération n’a pas été effectuée ou n’a pas pu être journalisée.",
+  FILE_AUDIT_UNAVAILABLE:
+    "Le journal local est indisponible ; l’opération n’a pas été effectuée ou n’a pas pu être journalisée.",
   TASK_CANCELLED: "Demande annulée. Aucune action n’a été exécutée.",
   BRIDGE_FAILED: "Le pont Windows n’a pas pu confirmer le résultat de l’action.",
   OUTCOME_UNRECORDED: "Le résultat de l’action n’a pas pu être journalisé.",
@@ -242,8 +254,11 @@ function App() {
   const [actionReports, setActionReports] = useState<ActionReport[]>([]);
   const [stopState, setStopState] = useState<"" | "idle" | "stopped" | "requested" | "confirmed" | "failed">("");
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
-  const canSend = !running && !!selectedModel && !!prompt.trim()
-    && (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
+  const canSend =
+    !running &&
+    !!selectedModel &&
+    !!prompt.trim() &&
+    (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
 
   function resetApproval() {
     setCloudApproved(false);
@@ -294,18 +309,22 @@ function App() {
   }, []);
 
   useEffect(refresh, [refresh]);
-  useEffect(() => { void refreshKey(); }, []);
+  useEffect(() => {
+    void refreshKey();
+  }, []);
   useEffect(() => {
     // Restore the remembered choices, then check them against what is installed locally.
-    void invoke<ModelPreferences>("get_model_preferences").then((saved) => {
-      setProvider(saved.provider === "openai" ? "openai" : "ollama");
-      setModel(saved.localModel);
-      setCloudModel(saved.cloudModel);
-      setVisionModel(saved.visionModel);
-      if (saved.provider !== "openai" && saved.localModel) void discoverModels();
-      if (saved.provider !== "openai" && saved.visionModel) void discoverVisionModels();
-    }, () => undefined);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    void invoke<ModelPreferences>("get_model_preferences").then(
+      (saved) => {
+        setProvider(saved.provider === "openai" ? "openai" : "ollama");
+        setModel(saved.localModel);
+        setCloudModel(saved.cloudModel);
+        setVisionModel(saved.visionModel);
+        if (saved.provider !== "openai" && saved.localModel) void discoverModels();
+        if (saved.provider !== "openai" && saved.visionModel) void discoverVisionModels();
+      },
+      () => undefined,
+    );
   }, []);
 
   /** Remembers an explicit choice of the user (never the cloud approval nor the key). */
@@ -318,14 +337,16 @@ function App() {
     try {
       const available = await invoke<string[]>("discover_vision_models");
       setVisionModels(available);
-      setVisionModel((current) => available.includes(current) ? current : "");
+      setVisionModel((current) => (available.includes(current) ? current : ""));
       setVisionStatus(available.length ? "" : "Aucun modèle de vision local installé.");
     } catch (failure) {
       setVisionModels([]);
       setVisionModel("");
-      setVisionStatus(String(failure) === "OLLAMA_CLOUD_NOT_DISABLED"
-        ? "Ollama doit tourner avec ses fonctions cloud désactivées (voir le README)."
-        : "Les modèles de vision locaux sont indisponibles.");
+      setVisionStatus(
+        String(failure) === "OLLAMA_CLOUD_NOT_DISABLED"
+          ? "Ollama doit tourner avec ses fonctions cloud désactivées (voir le README)."
+          : "Les modèles de vision locaux sont indisponibles.",
+      );
     }
   }
 
@@ -335,7 +356,7 @@ function App() {
     try {
       const available = await invoke<string[]>("discover_models");
       setModels(available);
-      setModel((current) => available.includes(current) ? current : "");
+      setModel((current) => (available.includes(current) ? current : ""));
       setCatalogStatus(available.length ? "" : "Aucun modèle local installé.");
     } catch {
       setModels([]);
@@ -377,7 +398,10 @@ function App() {
     try {
       const outcome = await invoke<TaskOutcome>("run_task", {
         request: {
-          prompt, model: selectedModel, provider, cloudApproved,
+          prompt,
+          model: selectedModel,
+          provider,
+          cloudApproved,
           // Vision stays local: only sent for Ollama tasks.
           visionModel: provider === "ollama" && visionModel ? visionModel : null,
         },
@@ -394,7 +418,7 @@ function App() {
       setDraftReply("");
       setPendingApproval(undefined);
       setRunning(false);
-      setStopState((current) => current === "requested" ? "confirmed" : current);
+      setStopState((current) => (current === "requested" ? "confirmed" : current));
       refresh();
     }
   }
@@ -412,71 +436,115 @@ function App() {
   async function cancelTask() {
     try {
       const accepted = await invoke<boolean>("cancel_task");
-      setTaskStatus((current) => current === "Demande en cours…" ? (
-        accepted ? "Annulation demandée…" : "L’annulation n’est plus disponible pour cette demande."
-      ) : current);
+      setTaskStatus((current) =>
+        current === "Demande en cours…"
+          ? accepted
+            ? "Annulation demandée…"
+            : "L’annulation n’est plus disponible pour cette demande."
+          : current,
+      );
     } catch {
-      setTaskStatus((current) => current === "Demande en cours…" ? "Le cœur local n’a pas pu traiter l’annulation." : current);
+      setTaskStatus((current) =>
+        current === "Demande en cours…" ? "Le cœur local n’a pas pu traiter l’annulation." : current,
+      );
     }
   }
 
   return (
     <div className="workspace">
       <aside>
-        <div className="brand"><span aria-hidden="true">✦</span> AiWin11</div>
+        <div className="brand">
+          <span aria-hidden="true">✦</span> AiWin11
+        </div>
         <nav aria-label="Navigation principale">
           {pages.map((item) => (
-            <button key={item} aria-current={item === page ? "page" : undefined}
-              onClick={() => setPage(item)}>{item}</button>
+            <button key={item} aria-current={item === page ? "page" : undefined} onClick={() => setPage(item)}>
+              {item}
+            </button>
           ))}
         </nav>
-        <div className="connection"><span aria-hidden="true" />{provider === "ollama" ? "Ollama · Local" : "OpenAI · Cloud"}</div>
-        <button className="stop-all" onClick={() => void stopAll()}
-          aria-describedby="stop-status">Stoppe toutes les tâches</button>
-        <p id="stop-status" role="status" className="stop-status">{{
-          "": "",
-          idle: "Aucune tâche en cours.",
-          stopped: "Arrêt confirmé : la tâche est annulée.",
-          requested: "Arrêt demandé : l’action en cours se termine, puis la tâche s’arrête.",
-          confirmed: "Arrêt confirmé : aucune autre action n’a été lancée.",
-          failed: "Le cœur local n’a pas pu traiter l’arrêt.",
-        }[stopState]}</p>
+        <div className="connection">
+          <span aria-hidden="true" />
+          {provider === "ollama" ? "Ollama · Local" : "OpenAI · Cloud"}
+        </div>
+        <button className="stop-all" onClick={() => void stopAll()} aria-describedby="stop-status">
+          Stoppe toutes les tâches
+        </button>
+        <p id="stop-status" role="status" className="stop-status">
+          {
+            {
+              "": "",
+              idle: "Aucune tâche en cours.",
+              stopped: "Arrêt confirmé : la tâche est annulée.",
+              requested: "Arrêt demandé : l’action en cours se termine, puis la tâche s’arrête.",
+              confirmed: "Arrêt confirmé : aucune autre action n’a été lancée.",
+              failed: "Le cœur local n’a pas pu traiter l’arrêt.",
+            }[stopState]
+          }
+        </p>
       </aside>
       <main>
         <h1>{page === "Accueil" ? "Espace de travail" : page}</h1>
-        {error && <p role="alert">Le cœur local est indisponible. <button onClick={refresh}>Réessayer</button></p>}
+        {error && (
+          <p role="alert">
+            Le cœur local est indisponible. <button onClick={refresh}>Réessayer</button>
+          </p>
+        )}
         {page === "Accueil" && (
           <section className="card" aria-labelledby="session-heading">
             <div className="section-header">
               <h2 id="session-heading">Assistant</h2>
-              <button className="link-button" onClick={() => setPage("Modèles")}>{selectedModel || "Choisir un modèle"}</button>
+              <button className="link-button" onClick={() => setPage("Modèles")}>
+                {selectedModel || "Choisir un modèle"}
+              </button>
             </div>
             {lastPrompt && <p className="user-message">{lastPrompt}</p>}
-            {agentReply && <p className="agent-message" aria-label="Réponse de l’agent">{agentReply}</p>}
+            {agentReply && (
+              <p className="agent-message" aria-label="Réponse de l’agent">
+                {agentReply}
+              </p>
+            )}
             {actionReports.length > 0 && (
               <section className="action-report" aria-labelledby="report-heading">
                 <h3 id="report-heading">Actions réellement effectuées</h3>
-                <ul>{actionReports.map((report, index) => (
-                  <li key={index} className={`status-${report.status}`}>
-                    <span>{report.summary}</span>
-                    <strong>{statusNames[report.status]}{report.code && report.status !== "done" ? ` (${report.code})` : ""}</strong>
-                  </li>
-                ))}</ul>
+                <ul>
+                  {actionReports.map((report, index) => (
+                    <li key={index} className={`status-${report.status}`}>
+                      <span>{report.summary}</span>
+                      <strong>
+                        {statusNames[report.status]}
+                        {report.code && report.status !== "done" ? ` (${report.code})` : ""}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
               </section>
             )}
-            {running && draftReply && <p className="agent-message draft" aria-busy="true"
-              aria-label="Réponse en cours de rédaction, non encore validée">{draftReply}</p>}
-            {taskStatus && <p role="status">
-              {running && taskStatus === "Demande en cours…" && taskProgress ? taskProgress : taskStatus}
-            </p>}
+            {running && draftReply && (
+              <p
+                className="agent-message draft"
+                aria-busy="true"
+                aria-label="Réponse en cours de rédaction, non encore validée"
+              >
+                {draftReply}
+              </p>
+            )}
+            {taskStatus && (
+              <p role="status">
+                {running && taskStatus === "Demande en cours…" && taskProgress ? taskProgress : taskStatus}
+              </p>
+            )}
             {pendingApproval && (
-              <div className="approval-request" role="group" aria-labelledby="approval-heading"
-                aria-describedby="approval-detail">
+              <div
+                className="approval-request"
+                role="group"
+                aria-labelledby="approval-heading"
+                aria-describedby="approval-detail"
+              >
                 <h3 id="approval-heading">{describeApproval(pendingApproval.action).title}</h3>
                 <p id="approval-detail">
-                  {describeApproval(pendingApproval.action).detail}{" "}
-                  Ton accord vaut pour cette action uniquement. Sans réponse, la proposition expire
-                  dans {Math.round(pendingApproval.expiresInMs / 1000)} secondes.
+                  {describeApproval(pendingApproval.action).detail} Ton accord vaut pour cette action uniquement. Sans
+                  réponse, la proposition expire dans {Math.round(pendingApproval.expiresInMs / 1000)} secondes.
                 </p>
                 {describeApproval(pendingApproval.action).quote !== undefined && (
                   <blockquote className="approval-quote" aria-label="Texte qui sera écrit">
@@ -484,29 +552,56 @@ function App() {
                   </blockquote>
                 )}
                 <div className="section-header">
-                  <button type="button" disabled={approvalBusy}
-                    onClick={() => void resolveApproval(true)}>Autoriser</button>
+                  <button type="button" disabled={approvalBusy} onClick={() => void resolveApproval(true)}>
+                    Autoriser
+                  </button>
                   {/* Focus starts on the safe choice, so Enter alone never approves. */}
-                  <button type="button" autoFocus disabled={approvalBusy}
-                    onClick={() => void resolveApproval(false)}>Refuser</button>
+                  <button type="button" autoFocus disabled={approvalBusy} onClick={() => void resolveApproval(false)}>
+                    Refuser
+                  </button>
                 </div>
               </div>
             )}
-            <form className="task-form" onSubmit={(event) => {
-              event.preventDefault();
-              if (canSend) void runTask();
-            }}>
+            <form
+              className="task-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (canSend) void runTask();
+              }}
+            >
               <label htmlFor="prompt">Ta demande</label>
-              <textarea id="prompt" rows={3} maxLength={MAX_PROMPT_CHARS} placeholder="Ouvre le Bloc-notes"
-                value={prompt} disabled={running} onChange={(event) => { setPrompt(event.target.value); resetApproval(); }} />
-              {provider === "openai" && <label className="approval">
-                <input type="checkbox" checked={cloudApproved} disabled={running}
-                  onChange={(event) => setCloudApproved(event.target.checked)} />
-                Envoyer le texte de cette demande à OpenAI
-              </label>}
+              <textarea
+                id="prompt"
+                rows={3}
+                maxLength={MAX_PROMPT_CHARS}
+                placeholder="Ouvre le Bloc-notes"
+                value={prompt}
+                disabled={running}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  resetApproval();
+                }}
+              />
+              {provider === "openai" && (
+                <label className="approval">
+                  <input
+                    type="checkbox"
+                    checked={cloudApproved}
+                    disabled={running}
+                    onChange={(event) => setCloudApproved(event.target.checked)}
+                  />
+                  Envoyer le texte de cette demande à OpenAI
+                </label>
+              )}
               <div className="section-header">
-                <button type="submit" disabled={!canSend}>Envoyer</button>
-                {running && <button type="button" onClick={() => void cancelTask()}>Annuler</button>}
+                <button type="submit" disabled={!canSend}>
+                  Envoyer
+                </button>
+                {running && (
+                  <button type="button" onClick={() => void cancelTask()}>
+                    Annuler
+                  </button>
+                )}
               </div>
             </form>
           </section>
@@ -515,105 +610,177 @@ function App() {
           <section className="card">
             <div className="task-form">
               <label htmlFor="provider">Fournisseur pour les actions Windows</label>
-              <select id="provider" value={provider} disabled={running || keyBusy} onChange={(event) => {
-                const chosen: Provider = event.target.value === "openai" ? "openai" : "ollama";
-                setProvider(chosen);
-                rememberModels({ provider: chosen });
-                resetApproval();
-              }}>
+              <select
+                id="provider"
+                value={provider}
+                disabled={running || keyBusy}
+                onChange={(event) => {
+                  const chosen: Provider = event.target.value === "openai" ? "openai" : "ollama";
+                  setProvider(chosen);
+                  rememberModels({ provider: chosen });
+                  resetApproval();
+                }}
+              >
                 <option value="ollama">Ollama · Local</option>
                 <option value="openai">OpenAI · Cloud</option>
               </select>
             </div>
-            {provider === "ollama" ? <>
-            <div className="section-header">
-              <button onClick={() => void discoverModels()} disabled={loadingModels || running}>Détecter les modèles</button>
-            </div>
-            <p role="status">{catalogStatus}</p>
-            <div className="task-form">
-              <label htmlFor="model">Modèle pour les actions Windows</label>
-              <select id="model" value={model} disabled={!models.length || running || loadingModels}
-                onChange={(event) => { setModel(event.target.value); rememberModels({ localModel: event.target.value }); resetApproval(); }}>
-                <option value="">Sélectionner un modèle</option>
-                {models.map((name) => <option key={name}>{name}</option>)}
-              </select>
-            </div>
-            <div className="section-header">
-              <button onClick={() => void discoverVisionModels()} disabled={running}>Détecter les modèles de vision</button>
-            </div>
-            <p role="status">{visionStatus}</p>
-            <div className="task-form">
-              <label htmlFor="vision-model">Modèle de vision local (facultatif)</label>
-              <select id="vision-model" value={visionModel} disabled={!visionModels.length || running}
-                onChange={(event) => { setVisionModel(event.target.value); rememberModels({ visionModel: event.target.value }); }}>
-                <option value="">Aucun : l’agent ne peut pas décrire de fenêtre</option>
-                {visionModels.map((name) => <option key={name}>{name}</option>)}
-              </select>
-            </div>
-            </> : <>
-              <div className="task-form">
-                <label htmlFor="cloud-model">Identifiant du modèle OpenAI</label>
-                <input id="cloud-model" value={cloudModel} maxLength={256} disabled={running}
-                  onChange={(event) => { setCloudModel(event.target.value); resetApproval(); }}
-                  onBlur={() => rememberModels({ cloudModel: cloudModel.trim() })} />
-              </div>
-              <form className="task-form" autoComplete="off" onSubmit={(event) => {
-                event.preventDefault();
-                const field = event.currentTarget.elements.namedItem("api-key");
-                if (!(field instanceof HTMLInputElement) || !field.value.trim() || keyBusy || running) return;
-                const key = field.value;
-                field.value = "";
-                void updateKey(key);
-              }}>
-                <label htmlFor="api-key">Clé API OpenAI</label>
-                <input id="api-key" name="api-key" type="password" autoComplete="new-password"
-                  maxLength={1024} required disabled={running || keyBusy} />
+            {provider === "ollama" ? (
+              <>
                 <div className="section-header">
-                  <button type="submit" disabled={running || keyBusy}>Enregistrer la clé</button>
-                  {keyConfigured && <button type="button" disabled={running || keyBusy}
-                    onClick={() => void updateKey()}>Supprimer la clé</button>}
+                  <button onClick={() => void discoverModels()} disabled={loadingModels || running}>
+                    Détecter les modèles
+                  </button>
                 </div>
-                <p role="status">{keyStatus || (keyConfigured ? "Clé enregistrée dans Windows." : "Aucune clé enregistrée.")}</p>
-              </form>
-            </>}
+                <p role="status">{catalogStatus}</p>
+                <div className="task-form">
+                  <label htmlFor="model">Modèle pour les actions Windows</label>
+                  <select
+                    id="model"
+                    value={model}
+                    disabled={!models.length || running || loadingModels}
+                    onChange={(event) => {
+                      setModel(event.target.value);
+                      rememberModels({ localModel: event.target.value });
+                      resetApproval();
+                    }}
+                  >
+                    <option value="">Sélectionner un modèle</option>
+                    {models.map((name) => (
+                      <option key={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="section-header">
+                  <button onClick={() => void discoverVisionModels()} disabled={running}>
+                    Détecter les modèles de vision
+                  </button>
+                </div>
+                <p role="status">{visionStatus}</p>
+                <div className="task-form">
+                  <label htmlFor="vision-model">Modèle de vision local (facultatif)</label>
+                  <select
+                    id="vision-model"
+                    value={visionModel}
+                    disabled={!visionModels.length || running}
+                    onChange={(event) => {
+                      setVisionModel(event.target.value);
+                      rememberModels({ visionModel: event.target.value });
+                    }}
+                  >
+                    <option value="">Aucun : l’agent ne peut pas décrire de fenêtre</option>
+                    {visionModels.map((name) => (
+                      <option key={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="task-form">
+                  <label htmlFor="cloud-model">Identifiant du modèle OpenAI</label>
+                  <input
+                    id="cloud-model"
+                    value={cloudModel}
+                    maxLength={256}
+                    disabled={running}
+                    onChange={(event) => {
+                      setCloudModel(event.target.value);
+                      resetApproval();
+                    }}
+                    onBlur={() => rememberModels({ cloudModel: cloudModel.trim() })}
+                  />
+                </div>
+                <form
+                  className="task-form"
+                  autoComplete="off"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const field = event.currentTarget.elements.namedItem("api-key");
+                    if (!(field instanceof HTMLInputElement) || !field.value.trim() || keyBusy || running) return;
+                    const key = field.value;
+                    field.value = "";
+                    void updateKey(key);
+                  }}
+                >
+                  <label htmlFor="api-key">Clé API OpenAI</label>
+                  <input
+                    id="api-key"
+                    name="api-key"
+                    type="password"
+                    autoComplete="new-password"
+                    maxLength={1024}
+                    required
+                    disabled={running || keyBusy}
+                  />
+                  <div className="section-header">
+                    <button type="submit" disabled={running || keyBusy}>
+                      Enregistrer la clé
+                    </button>
+                    {keyConfigured && (
+                      <button type="button" disabled={running || keyBusy} onClick={() => void updateKey()}>
+                        Supprimer la clé
+                      </button>
+                    )}
+                  </div>
+                  <p role="status">
+                    {keyStatus || (keyConfigured ? "Clé enregistrée dans Windows." : "Aucune clé enregistrée.")}
+                  </p>
+                </form>
+              </>
+            )}
           </section>
         )}
         {page === "Sécurité" && <Security onFinished={refresh} />}
         {page === "Inspecteur" && <Inspector onFinished={refresh} />}
         {page === "Fichiers" && <LocalFiles onFinished={refresh} />}
-        {page === "Activité" && (<>
-          <section className="card" aria-labelledby="tasks-heading">
-            <div className="section-header"><h2 id="tasks-heading">Demandes récentes</h2><button onClick={refresh}>Actualiser</button></div>
-            {tasks.length ? (
-              <ul>{tasks.map((task) => (
-                <li key={task.id}>
-                  <span>
-                    {taskStateNames[task.state] ?? task.state}
-                    {task.outcome && task.outcome !== "ok" ? ` (${task.outcome})` : ""}
-                    {task.state === "interrupted" && task.outcome === "dispatching"
-                      && " — une action était peut-être en cours : vérifie son résultat"}
-                  </span>
-                  <time dateTime={task.createdAt}>{new Date(task.createdAt).toLocaleString("fr-FR")}</time>
-                </li>
-              ))}</ul>
-            ) : <p>Aucune demande enregistrée.</p>}
-          </section>
-          <History running={running} onChange={refresh} />
-          <section className="card" aria-labelledby="journal-heading">
-            <h2 id="journal-heading">Journal de la session</h2>
-            {snapshot?.events.length ? (
-              <ul>{snapshot.events.map((event) => (
-                <li key={event.sequence}>
-                  <span>
-                    {activityNames[event.kind] ?? event.kind}
-                    {event.code && <code className="event-code">{event.code}</code>}
-                  </span>
-                  <time dateTime={event.timestamp}>{new Date(event.timestamp).toLocaleString("fr-FR")}</time>
-                </li>
-              ))}</ul>
-            ) : <p>Aucun événement à afficher.</p>}
-          </section>
-        </>)}
+        {page === "Activité" && (
+          <>
+            <section className="card" aria-labelledby="tasks-heading">
+              <div className="section-header">
+                <h2 id="tasks-heading">Demandes récentes</h2>
+                <button onClick={refresh}>Actualiser</button>
+              </div>
+              {tasks.length ? (
+                <ul>
+                  {tasks.map((task) => (
+                    <li key={task.id}>
+                      <span>
+                        {taskStateNames[task.state] ?? task.state}
+                        {task.outcome && task.outcome !== "ok" ? ` (${task.outcome})` : ""}
+                        {task.state === "interrupted" &&
+                          task.outcome === "dispatching" &&
+                          " — une action était peut-être en cours : vérifie son résultat"}
+                      </span>
+                      <time dateTime={task.createdAt}>{new Date(task.createdAt).toLocaleString("fr-FR")}</time>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Aucune demande enregistrée.</p>
+              )}
+            </section>
+            <History running={running} onChange={refresh} />
+            <section className="card" aria-labelledby="journal-heading">
+              <h2 id="journal-heading">Journal de la session</h2>
+              {snapshot?.events.length ? (
+                <ul>
+                  {snapshot.events.map((event) => (
+                    <li key={event.sequence}>
+                      <span>
+                        {activityNames[event.kind] ?? event.kind}
+                        {event.code && <code className="event-code">{event.code}</code>}
+                      </span>
+                      <time dateTime={event.timestamp}>{new Date(event.timestamp).toLocaleString("fr-FR")}</time>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Aucun événement à afficher.</p>
+              )}
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

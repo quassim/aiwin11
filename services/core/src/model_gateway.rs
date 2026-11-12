@@ -62,7 +62,7 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
         functions.push(json!({
             "name": "copy_text_file",
             "description": "Copie un fichier .txt du dossier d’AiWin11 vers un nouveau nom dans le même dossier. \
-Ne remplace jamais un fichier existant. L’utilisateur doit l’approuver.",
+        Ne remplace jamais un fichier existant. L’utilisateur doit l’approuver.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -76,7 +76,7 @@ Ne remplace jamais un fichier existant. L’utilisateur doit l’approuver.",
         functions.push(json!({
             "name": "move_text_file",
             "description": "Renomme un fichier .txt du dossier d’AiWin11. Ne remplace jamais un fichier existant. \
-Selon le profil de sécurité, l’utilisateur doit l’approuver.",
+        Selon le profil de sécurité, l’utilisateur doit l’approuver.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -90,7 +90,7 @@ Selon le profil de sécurité, l’utilisateur doit l’approuver.",
         functions.push(json!({
             "name": "trash_text_file",
             "description": "Place un fichier .txt du dossier d’AiWin11 dans la corbeille d’AiWin11 (récupérable, \
-pas de suppression définitive). L’utilisateur doit toujours l’approuver.",
+        pas de suppression définitive). L’utilisateur doit toujours l’approuver.",
             "parameters": {
                 "type": "object",
                 "properties": { "name": { "type": "string", "description": "Nom exact du fichier" } },
@@ -103,13 +103,13 @@ pas de suppression définitive). L’utilisateur doit toujours l’approuver.",
         functions.push(json!({
             "name": "inspect_window",
             "description": "Lit la structure (types et noms des contrôles) de la fenêtre que l’utilisateur utilisait \
-juste avant AiWin11. Sans capture d’écran. L’utilisateur doit l’approuver.",
+        juste avant AiWin11. Sans capture d’écran. L’utilisateur doit l’approuver.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
             "name": "type_in_notepad",
             "description": "Écrit un texte dans le Bloc-notes que tu as ouvert avec launch_application dans cette même \
-demande. Le document doit être vide ; aucun texte existant n’est jamais remplacé. 2000 caractères au plus.",
+        demande. Le document doit être vide ; aucun texte existant n’est jamais remplacé. 2000 caractères au plus.",
             "parameters": {
                 "type": "object",
                 "properties": { "text": { "type": "string", "description": "Texte à écrire" } },
@@ -127,12 +127,17 @@ L’utilisateur doit l’approuver.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
     }
-    Value::Array(functions.into_iter().map(|mut function| {
-        if strict {
-            function["strict"] = Value::Bool(true);
-        }
-        json!({ "type": "function", "function": function })
-    }).collect())
+    Value::Array(
+        functions
+            .into_iter()
+            .map(|mut function| {
+                if strict {
+                    function["strict"] = Value::Bool(true);
+                }
+                json!({ "type": "function", "function": function })
+            })
+            .collect(),
+    )
 }
 
 /// A provider-neutral proposal: one or more tool calls, or a text answer.
@@ -206,9 +211,7 @@ impl StreamedText {
 }
 
 /// Opens a streamed response body, bounded like non-streamed replies.
-pub(crate) fn open_stream(
-    request: reqwest::blocking::RequestBuilder,
-) -> Result<impl BufRead, GatewayError> {
+pub(crate) fn open_stream(request: reqwest::blocking::RequestBuilder) -> Result<impl BufRead, GatewayError> {
     let response = request.send().map_err(|_| GatewayError::Unavailable)?;
     if !response.status().is_success() {
         return Err(GatewayError::Unavailable);
@@ -325,22 +328,19 @@ impl Ollama {
         }
         self.ensure_cloud_disabled()?;
         let reply: Value = Self::receive(
-            self.client.post(format!("{OLLAMA}/api/chat"))
-                .timeout(LOCAL_INFERENCE_TIMEOUT)
-                .json(&json!({
-                    "model": model,
-                    "stream": false,
-                    "think": false,
-                    "options": { "temperature": 0, "num_predict": 256 },
-                    "messages": [{
-                        "role": "user",
-                        "content": "Décris brièvement en français ce qui est visible dans cette fenêtre. Reste factuel.",
-                        "images": [STANDARD.encode(jpeg)]
-                    }]
-                })),
+            self.client.post(format!("{OLLAMA}/api/chat")).timeout(LOCAL_INFERENCE_TIMEOUT).json(&json!({
+                "model": model,
+                "stream": false,
+                "think": false,
+                "options": { "temperature": 0, "num_predict": 256 },
+                "messages": [{
+                    "role": "user",
+                    "content": "Décris brièvement en français ce qui est visible dans cette fenêtre. Reste factuel.",
+                    "images": [STANDARD.encode(jpeg)]
+                }]
+            })),
         )?;
-        let location: Location = serde_json::from_value(reply.clone())
-            .map_err(|_| GatewayError::InvalidResponse)?;
+        let location: Location = serde_json::from_value(reply.clone()).map_err(|_| GatewayError::InvalidResponse)?;
         if !location.is_local(model) {
             return Err(GatewayError::NonLocalModel);
         }
@@ -349,15 +349,17 @@ impl Ollama {
         {
             return Err(GatewayError::InvalidResponse);
         }
-        reply.pointer("/message/content").and_then(Value::as_str).map(str::trim)
+        reply
+            .pointer("/message/content")
+            .and_then(Value::as_str)
+            .map(str::trim)
             .filter(|text| !text.is_empty() && text.len() <= 8192)
-            .map(str::to_owned).ok_or(GatewayError::InvalidResponse)
+            .map(str::to_owned)
+            .ok_or(GatewayError::InvalidResponse)
     }
 
     fn details(&self, model: &str) -> Result<Model, GatewayError> {
-        let details = Self::receive(
-            self.client.post(format!("{OLLAMA}/api/show")).json(&json!({ "model": model })),
-        )?;
+        let details = Self::receive(self.client.post(format!("{OLLAMA}/api/show")).json(&json!({ "model": model })))?;
         describe(model, details)
     }
 
@@ -375,31 +377,30 @@ impl Ollama {
     /// Streams the conversation so far (instructions, request, tool calls and observations)
     /// with the tool catalog to a local model.
     pub(crate) fn propose(
-        &self, model: &str, messages: &[Value], tools: Value, sink: &mut StreamSink<'_>,
+        &self,
+        model: &str,
+        messages: &[Value],
+        tools: Value,
+        sink: &mut StreamSink<'_>,
     ) -> Result<Proposal, GatewayError> {
         if !self.describe(model)?.tool_calling_advertised {
             return Err(GatewayError::InvalidResponse);
         }
         let stream = open_stream(
-            self.client
-                .post(format!("{OLLAMA}/api/chat"))
-                .timeout(LOCAL_INFERENCE_TIMEOUT)
-                .json(&json!({
-                    "model": model,
-                    "stream": true,
-                    "think": false,
-                    // A larger context leaves room for file observations (16 000 characters each).
-                    "options": { "temperature": 0, "num_predict": 1024, "num_ctx": 16384 },
-                    "messages": messages,
-                    "tools": tools
-                })),
+            self.client.post(format!("{OLLAMA}/api/chat")).timeout(LOCAL_INFERENCE_TIMEOUT).json(&json!({
+                "model": model,
+                "stream": true,
+                "think": false,
+                // A larger context leaves room for file observations (16 000 characters each).
+                "options": { "temperature": 0, "num_predict": 1024, "num_ctx": 16384 },
+                "messages": messages,
+                "tools": tools
+            })),
         )?;
         fold_ollama_stream(model, stream, sink)
     }
 
-    pub(crate) fn receive<T: DeserializeOwned>(
-        request: reqwest::blocking::RequestBuilder,
-    ) -> Result<T, GatewayError> {
+    pub(crate) fn receive<T: DeserializeOwned>(request: reqwest::blocking::RequestBuilder) -> Result<T, GatewayError> {
         let response = request.send().map_err(|_| GatewayError::Unavailable)?;
         if !response.status().is_success() {
             return Err(GatewayError::Unavailable);
@@ -435,27 +436,24 @@ impl LocalModelProvider for Ollama {
             return Ok(false);
         }
         let reply = Self::receive(
-            self.client
-                .post(format!("{OLLAMA}/api/chat"))
-                .timeout(LOCAL_INFERENCE_TIMEOUT)
-                .json(&json!({
-                    "model": model,
-                    "stream": false,
-                    "think": false,
-                    "options": { "temperature": 0, "num_predict": 128 },
-                    "messages": [{
-                        "role": "user",
-                        "content": "Call the capability_probe tool once with no arguments."
-                    }],
-                    "tools": [{
-                        "type": "function",
-                        "function": {
-                            "name": "capability_probe",
-                            "description": "A synthetic test. This tool performs no action.",
-                            "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
-                        }
-                    }]
-                })),
+            self.client.post(format!("{OLLAMA}/api/chat")).timeout(LOCAL_INFERENCE_TIMEOUT).json(&json!({
+                "model": model,
+                "stream": false,
+                "think": false,
+                "options": { "temperature": 0, "num_predict": 128 },
+                "messages": [{
+                    "role": "user",
+                    "content": "Call the capability_probe tool once with no arguments."
+                }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "capability_probe",
+                        "description": "A synthetic test. This tool performs no action.",
+                        "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
+                    }
+                }]
+            })),
         )?;
         verify_probe(model, reply)
     }
@@ -463,9 +461,7 @@ impl LocalModelProvider for Ollama {
 
 /// Folds Ollama's NDJSON chat stream into one proposal. Every chunk must come from
 /// the local model; tool calls are collected silently and only text reaches the sink.
-fn fold_ollama_stream(
-    model: &str, reader: impl BufRead, sink: &mut StreamSink<'_>,
-) -> Result<Proposal, GatewayError> {
+fn fold_ollama_stream(model: &str, reader: impl BufRead, sink: &mut StreamSink<'_>) -> Result<Proposal, GatewayError> {
     let invalid = GatewayError::InvalidResponse;
     let mut text = StreamedText::default();
     let mut calls = Vec::new();
@@ -478,8 +474,7 @@ fn fold_ollama_stream(
         if chunk.get("error").is_some() {
             return Err(GatewayError::Unavailable);
         }
-        let location: Location = serde_json::from_value(chunk.clone())
-            .map_err(|_| GatewayError::InvalidResponse)?;
+        let location: Location = serde_json::from_value(chunk.clone()).map_err(|_| GatewayError::InvalidResponse)?;
         if !location.is_local(model) {
             return Err(GatewayError::NonLocalModel);
         }
@@ -568,7 +563,8 @@ mod tests {
             { "name": "alias:latest", "remote_host": "https://example.test" },
             { "name": "model-cloud" },
             { "name": "model:cloud" }
-        ]})).unwrap();
+        ]}))
+        .unwrap();
         assert_eq!(local_names(catalog), ["local:latest"]);
     }
 
@@ -577,7 +573,8 @@ mod tests {
         let details = serde_json::from_value(json!({
             "capabilities": ["tools"],
             "remote_host": "https://example.test"
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(describe("local:latest", details), Err(GatewayError::NonLocalModel));
     }
 
@@ -608,9 +605,7 @@ mod tests {
 
     #[test]
     fn ollama_stream_forwards_text_deltas_and_folds_a_reply() {
-        let (result, deltas) = fold(&[
-            text_chunk("  Bon", false), text_chunk("jour", false), text_chunk("", true),
-        ]);
+        let (result, deltas) = fold(&[text_chunk("  Bon", false), text_chunk("jour", false), text_chunk("", true)]);
         assert_eq!(result, Ok(Proposal::Text("Bonjour".into())));
         assert_eq!(deltas, ["  Bon", "jour"]);
     }
@@ -633,10 +628,16 @@ mod tests {
             (vec![text_chunk("Bonjour", false)], GatewayError::InvalidResponse),
             (vec![text_chunk("   ", true)], GatewayError::InvalidResponse),
             (vec![text_chunk(&long, false), text_chunk("x", true)], GatewayError::InvalidResponse),
-            (vec![json!({ "done": true, "message": { "role": "user", "content": "x" } })], GatewayError::InvalidResponse),
+            (
+                vec![json!({ "done": true, "message": { "role": "user", "content": "x" } })],
+                GatewayError::InvalidResponse,
+            ),
             (vec![json!({ "error": "model failed" })], GatewayError::Unavailable),
-            (vec![json!({ "done": true, "remote_host": "https://example.test",
-                "message": { "role": "assistant", "content": "x" } })], GatewayError::NonLocalModel),
+            (
+                vec![json!({ "done": true, "remote_host": "https://example.test",
+                "message": { "role": "assistant", "content": "x" } })],
+                GatewayError::NonLocalModel,
+            ),
         ] {
             assert_eq!(fold(&chunks).0, Err(expected));
         }
@@ -648,7 +649,10 @@ mod tests {
         let result = fold_ollama_stream(
             "local:latest",
             ndjson(&[text_chunk("a", false), text_chunk("b", false), text_chunk("", true)]),
-            &mut |_| { seen += 1; false },
+            &mut |_| {
+                seen += 1;
+                false
+            },
         );
         assert_eq!(result, Err(GatewayError::Cancelled));
         assert_eq!(seen, 1);
@@ -657,20 +661,40 @@ mod tests {
     #[test]
     fn tool_catalog_offers_file_tools_only_when_asked() {
         let names = |catalog: Value| -> Vec<String> {
-            catalog.as_array().unwrap().iter()
-                .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned()).collect()
+            catalog
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
+                .collect()
         };
         assert_eq!(names(tool_catalog(true, false, false, false)), ["launch_application"]);
         assert_eq!(
             names(tool_catalog(false, true, true, true)),
-            ["launch_application", "list_text_files", "read_text_file", "copy_text_file", "move_text_file",
-             "trash_text_file", "inspect_window", "type_in_notepad", "describe_window"]
+            [
+                "launch_application",
+                "list_text_files",
+                "read_text_file",
+                "copy_text_file",
+                "move_text_file",
+                "trash_text_file",
+                "inspect_window",
+                "type_in_notepad",
+                "describe_window"
+            ]
         );
-        assert_eq!(names(tool_catalog(false, false, true, false)), ["launch_application", "inspect_window", "type_in_notepad"]);
+        assert_eq!(
+            names(tool_catalog(false, false, true, false)),
+            ["launch_application", "inspect_window", "type_in_notepad"]
+        );
         let catalog = tool_catalog(true, false, false, false);
         assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));
         assert_eq!(catalog[0]["function"]["strict"], true);
-        assert!(tool_catalog(false, true, true, true).as_array().unwrap().iter().all(|tool| tool["function"].get("strict").is_none()));
+        assert!(tool_catalog(false, true, true, true)
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["function"].get("strict").is_none()));
     }
 
     #[test]
@@ -682,15 +706,9 @@ mod tests {
                 "tool_calls": [{ "function": { "name": "capability_probe", "arguments": {} } }]
             }
         });
-        assert_eq!(
-            verify_probe("local:latest", serde_json::from_value(reply.clone()).unwrap()),
-            Ok(true)
-        );
+        assert_eq!(verify_probe("local:latest", serde_json::from_value(reply.clone()).unwrap()), Ok(true));
         let mut invalid = reply;
         invalid["message"]["tool_calls"][0]["function"]["arguments"] = json!({ "extra": true });
-        assert_eq!(
-            verify_probe("local:latest", serde_json::from_value(invalid).unwrap()),
-            Ok(false)
-        );
+        assert_eq!(verify_probe("local:latest", serde_json::from_value(invalid).unwrap()), Ok(false));
     }
 }

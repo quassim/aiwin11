@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{fs, sync::{Arc, Mutex}};
+use std::{
+    fs,
+    sync::{Arc, Mutex},
+};
 
 use aiwin11_core::{
     local_files::LocalFiles,
@@ -48,11 +51,19 @@ async fn get_tasks(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskEntry>, &'
     tauri::async_runtime::spawn_blocking(move || {
         let core = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
         let tasks = core.recent_tasks(30).map_err(|_| "ACTIVITY_UNAVAILABLE")?;
-        Ok(tasks.into_iter().map(|task| TaskEntry {
-            id: task.id, state: task.state, outcome: task.outcome,
-            created_at: task.created_at, updated_at: task.updated_at,
-        }).collect())
-    }).await.map_err(|_| "CORE_UNAVAILABLE")?
+        Ok(tasks
+            .into_iter()
+            .map(|task| TaskEntry {
+                id: task.id,
+                state: task.state,
+                outcome: task.outcome,
+                created_at: task.created_at,
+                updated_at: task.updated_at,
+            })
+            .collect())
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 struct AppState {
@@ -75,26 +86,31 @@ async fn preview_local_text(state: State<'_, Arc<AppState>>, name: String) -> Re
         let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?;
         let mut core = state.core.try_lock().map_err(|_| "CORE_BUSY")?;
         files.preview(&mut core, &name)
-    }).await.map_err(|_| "FILE_UNAVAILABLE")?
+    })
+    .await
+    .map_err(|_| "FILE_UNAVAILABLE")?
 }
 
 #[tauri::command]
 async fn copy_local_text(
-    state: State<'_, Arc<AppState>>, name: String, destination: String,
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    destination: String,
 ) -> Result<(), &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
         let files = state.files.as_ref().ok_or("FILE_UNAVAILABLE")?;
         let mut core = state.core.try_lock().map_err(|_| "CORE_BUSY")?;
         files.copy(&mut core, &name, &destination)
-    }).await.map_err(|_| "FILE_UNAVAILABLE")?
+    })
+    .await
+    .map_err(|_| "FILE_UNAVAILABLE")?
 }
 
 #[tauri::command]
 async fn get_snapshot(state: State<'_, Arc<AppState>>) -> Result<Snapshot, &'static str> {
     let state = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || snapshot(&state))
-        .await.map_err(|_| "CORE_UNAVAILABLE")?
+    tauri::async_runtime::spawn_blocking(move || snapshot(&state)).await.map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 fn snapshot(state: &AppState) -> Result<Snapshot, &'static str> {
@@ -118,57 +134,64 @@ fn snapshot(state: &AppState) -> Result<Snapshot, &'static str> {
 #[tauri::command]
 async fn discover_models() -> Result<Vec<String>, &'static str> {
     tauri::async_runtime::spawn_blocking(|| {
-        Ollama::connect()
-            .and_then(|provider| provider.discover())
-            .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")
-    }).await.map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?
+        Ollama::connect().and_then(|provider| provider.discover()).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")
+    })
+    .await
+    .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?
 }
 
 #[tauri::command]
 async fn inspect_foreground(state: State<'_, Arc<AppState>>) -> Result<Inspection, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        state.core.try_lock().map_err(|_| "CORE_BUSY")?
-            .inspect_foreground().map_err(|_| "INSPECTION_UNAVAILABLE")
-    }).await.map_err(|_| "CORE_UNAVAILABLE")?
+        state.core.try_lock().map_err(|_| "CORE_BUSY")?.inspect_foreground().map_err(|_| "INSPECTION_UNAVAILABLE")
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 #[tauri::command]
 async fn capture_foreground(state: State<'_, Arc<AppState>>) -> Result<Capture, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        state.core.try_lock().map_err(|_| "CORE_BUSY")?
-            .capture_foreground().map_err(|_| "CAPTURE_UNAVAILABLE")
-    }).await.map_err(|_| "CORE_UNAVAILABLE")?
+        state.core.try_lock().map_err(|_| "CORE_BUSY")?.capture_foreground().map_err(|_| "CAPTURE_UNAVAILABLE")
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 #[tauri::command]
-async fn enter_character_map_digit(
-    state: State<'_, Arc<AppState>>, digit: u32,
-) -> Result<bool, &'static str> {
+async fn enter_character_map_digit(state: State<'_, Arc<AppState>>, digit: u32) -> Result<bool, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
         state.core.try_lock().map_err(|_| "CORE_BUSY")?.enter_character_map_digit(digit)
-    }).await.map_err(|_| "CORE_UNAVAILABLE")?
+    })
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 #[tauri::command]
 async fn discover_vision_models() -> Result<Vec<String>, &'static str> {
     tauri::async_runtime::spawn_blocking(|| {
-        Ollama::connect().and_then(|provider| provider.vision_models())
-            .map_err(|error| error.vision_code())
-    }).await.map_err(|_| "VISION_UNAVAILABLE")?
+        Ollama::connect().and_then(|provider| provider.vision_models()).map_err(|error| error.vision_code())
+    })
+    .await
+    .map_err(|_| "VISION_UNAVAILABLE")?
 }
 
 #[tauri::command]
 async fn analyze_capture(
-    state: State<'_, Arc<AppState>>, model: String, jpeg: Vec<u8>,
+    state: State<'_, Arc<AppState>>,
+    model: String,
+    jpeg: Vec<u8>,
 ) -> Result<String, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
         let _analysis = state.vision.try_lock().map_err(|_| "VISION_BUSY")?;
         Core::analyze_capture(&state.core, &model, &jpeg)
-    }).await.map_err(|_| "VISION_UNAVAILABLE")?
+    })
+    .await
+    .map_err(|_| "VISION_UNAVAILABLE")?
 }
 
 #[tauri::command]
@@ -183,7 +206,8 @@ async fn run_task(
             let _ = progress.send(update);
         })
     })
-        .await.map_err(|_| "CORE_UNAVAILABLE")?
+    .await
+    .map_err(|_| "CORE_UNAVAILABLE")?
 }
 
 #[tauri::command]
@@ -240,7 +264,9 @@ async fn export_audit(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) ->
         let path = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.export_audit_to(&directory)?;
         let path = path.to_string_lossy();
         Ok(path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned())
-    }).await.map_err(|_| "EXPORT_FAILED")?
+    })
+    .await
+    .map_err(|_| "EXPORT_FAILED")?
 }
 
 /// "Stoppe toutes les tâches": always available, journaled with its immediate result. The stop
@@ -272,16 +298,15 @@ struct PolicyOverview {
 #[tauri::command]
 fn get_policy_overview(state: State<'_, Arc<AppState>>) -> Result<PolicyOverview, &'static str> {
     let settings = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
-    let table = policy::table(settings.simulate).into_iter()
-        .map(|(action, effects)| PolicyRow { action, effects }).collect();
+    let table =
+        policy::table(settings.simulate).into_iter().map(|(action, effects)| PolicyRow { action, effects }).collect();
     Ok(PolicyOverview { settings, table })
 }
 
 /// Applies to the next task; a running task keeps the settings it started with.
 #[tauri::command]
 fn set_policy_settings(state: State<'_, Arc<AppState>>, settings: PolicySettings) -> Result<(), &'static str> {
-    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?
-        .set_policy_settings(settings).map_err(|_| "SETTINGS_UNAVAILABLE")
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_policy_settings(settings).map_err(|_| "SETTINGS_UNAVAILABLE")
 }
 
 #[tauri::command]
@@ -290,17 +315,13 @@ fn get_model_preferences(state: State<'_, Arc<AppState>>) -> Result<ModelPrefere
 }
 
 #[tauri::command]
-fn set_model_preferences(
-    state: State<'_, Arc<AppState>>, preferences: ModelPreferences,
-) -> Result<(), &'static str> {
+fn set_model_preferences(state: State<'_, Arc<AppState>>, preferences: ModelPreferences) -> Result<(), &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_model_preferences(preferences)
 }
 
 /// The user's answer to the action the agent proposed for the running task.
 #[tauri::command]
-fn resolve_approval(
-    state: State<'_, Arc<AppState>>, approval_id: String, approved: bool,
-) -> Result<(), &'static str> {
+fn resolve_approval(state: State<'_, Arc<AppState>>, approval_id: String, approved: bool) -> Result<(), &'static str> {
     state.task.resolve_approval(&approval_id, approved)
 }
 
@@ -321,12 +342,32 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_snapshot, discover_models, run_task, cancel_task, stop_all_tasks,
-            get_history_settings, set_retention_days, clear_history, export_audit, resolve_approval,
-            get_policy_overview, set_policy_settings, get_tasks, get_model_preferences, set_model_preferences,
-            openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
-            capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,
-            local_files_root, preview_local_text, copy_local_text,
+            get_snapshot,
+            discover_models,
+            run_task,
+            cancel_task,
+            stop_all_tasks,
+            get_history_settings,
+            set_retention_days,
+            clear_history,
+            export_audit,
+            resolve_approval,
+            get_policy_overview,
+            set_policy_settings,
+            get_tasks,
+            get_model_preferences,
+            set_model_preferences,
+            openai_key_configured,
+            save_openai_key,
+            delete_openai_key,
+            inspect_foreground,
+            capture_foreground,
+            discover_vision_models,
+            analyze_capture,
+            enter_character_map_digit,
+            local_files_root,
+            preview_local_text,
+            copy_local_text,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AiWin11");

@@ -2,32 +2,40 @@ use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    os::windows::{ffi::OsStringExt, fs::{MetadataExt, OpenOptionsExt}, io::{AsRawHandle, FromRawHandle}},
-    path::{Path, PathBuf, Prefix, Component},
+    os::windows::{
+        ffi::OsStringExt,
+        fs::{MetadataExt, OpenOptionsExt},
+        io::{AsRawHandle, FromRawHandle},
+    },
+    path::{Component, Path, PathBuf, Prefix},
 };
 
 use aiwin11_contracts::v1::{
-    command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, MoveLocalText, PreviewLocalText,
-    TrashLocalText,
+    command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, MoveLocalText, PreviewLocalText, TrashLocalText,
 };
-use windows_sys::Wdk::{Foundation::OBJECT_ATTRIBUTES, Storage::FileSystem::{
-    NtCreateFile, NtSetInformationFile, FileRenameInformation, FILE_CREATE,
-    FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_DISPOSITION,
-}};
+use windows_sys::Wdk::{
+    Foundation::OBJECT_ATTRIBUTES,
+    Storage::FileSystem::{
+        FileRenameInformation, NtCreateFile, NtSetInformationFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
+        FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_DISPOSITION,
+    },
+};
 use windows_sys::Win32::Foundation::{
-    HANDLE, UNICODE_STRING, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, STATUS_OBJECT_NAME_COLLISION,
+    HANDLE, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, STATUS_OBJECT_NAME_COLLISION, UNICODE_STRING,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    GetFileInformationByHandle, GetFinalPathNameByHandleW, BY_HANDLE_FILE_INFORMATION,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_FLAG_BACKUP_SEMANTICS, FILE_ATTRIBUTE_NORMAL,
-    DELETE, SYNCHRONIZE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FileDispositionInfo, FILE_DISPOSITION_INFO,
-    SetFileInformationByHandle,
+    FileDispositionInfo, GetFileInformationByHandle, GetFinalPathNameByHandleW, SetFileInformationByHandle,
+    BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+    FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE,
 };
 
-use crate::{broker::{ExecutionError, Peer, Policy}, Core};
 #[cfg(test)]
 use crate::broker::Capability;
+use crate::{
+    broker::{ExecutionError, Peer, Policy},
+    Core,
+};
 
 const MAX_BYTES: usize = 64 * 1024;
 const MAX_NAME: usize = 128;
@@ -80,28 +88,42 @@ impl LocalFiles {
     /// Agent tool: renames one text file inside the folder, never replacing an existing file.
     /// The host grants `Capability::FileMove` only when the policy engine or the user allowed it.
     pub fn agent_move(
-        &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        source: &str,
+        destination: &str,
     ) -> Result<(), &'static str> {
-        let command = core.agent_command(task, Operation::MoveLocalText(MoveLocalText {}))
-            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let command =
+            core.agent_command(task, Operation::MoveLocalText(MoveLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.move", || self.move_text(source, destination))
     }
 
     /// Agent tool: moves one text file into its own new folder of AiWin11's trash, keeping its
     /// name. Nothing is deleted. Returns the folder that now holds the file.
     pub fn agent_trash(
-        &self, core: &mut Core, task: &str, policy: Policy, name: &str,
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        name: &str,
     ) -> Result<PathBuf, &'static str> {
-        let command = core.agent_command(task, Operation::TrashLocalText(TrashLocalText {}))
-            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let command =
+            core.agent_command(task, Operation::TrashLocalText(TrashLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.trash", || self.trash_text(name))
     }
 
     /// Read-only check before a trash: the file is readable and in scope.
     pub fn agent_trash_preview(
-        &self, core: &mut Core, task: &str, policy: Policy, name: &str,
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        name: &str,
     ) -> Result<usize, &'static str> {
-        let command = core.agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
+        let command = core
+            .agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
             .map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.preview", || {
             let text = self.read(self.resolve(name)?, name)?;
@@ -135,14 +157,15 @@ impl LocalFiles {
     }
 
     pub fn preview(&self, core: &mut Core, name: &str) -> Result<String, &'static str> {
-        let command = core.desktop_command(Operation::PreviewLocalText(PreviewLocalText {}))
-            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let command =
+            core.desktop_command(Operation::PreviewLocalText(PreviewLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
         let path = self.resolve(name);
-        let task = core.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
+        let task = core
+            .authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
             .map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
-        let result = path.and_then(|path| self.read(path, name)).map(|text| {
-            text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned()
-        });
+        let result = path
+            .and_then(|path| self.read(path, name))
+            .map(|text| text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned());
         let (kind, code) = match &result {
             Ok(_) => ("file.preview.completed", "success"),
             Err(code) => ("file.preview.failed", *code),
@@ -154,16 +177,15 @@ impl LocalFiles {
     /// Agent tool: lists the text files of the dedicated folder for `task`.
     /// The broker decides with `policy` under the agent identity, and the outcome is audited.
     pub fn agent_list(&self, core: &mut Core, task: &str, policy: Policy) -> Result<Vec<String>, &'static str> {
-        let command = core.agent_command(task, Operation::ListLocalText(ListLocalText {}))
-            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let command =
+            core.agent_command(task, Operation::ListLocalText(ListLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.list", || self.list_names())
     }
 
     /// Agent tool: reads one text file of the dedicated folder for `task`.
-    pub fn agent_read(
-        &self, core: &mut Core, task: &str, policy: Policy, name: &str,
-    ) -> Result<String, &'static str> {
-        let command = core.agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
+    pub fn agent_read(&self, core: &mut Core, task: &str, policy: Policy, name: &str) -> Result<String, &'static str> {
+        let command = core
+            .agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
             .map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.preview", || {
             let text = self.read(self.resolve(name)?, name)?;
@@ -174,9 +196,15 @@ impl LocalFiles {
     /// Agent tool, read-only dry run of a copy: reads the source and checks that the
     /// destination name is free. Returns the source length in characters for the approval.
     pub fn agent_copy_preview(
-        &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        source: &str,
+        destination: &str,
     ) -> Result<usize, &'static str> {
-        let command = core.agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
+        let command = core
+            .agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
             .map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.preview", || {
             if !valid_name(destination) {
@@ -197,29 +225,36 @@ impl LocalFiles {
     /// Agent tool: copies one text file inside the folder. The host passes a policy with
     /// `Capability::FileCopy` only when the policy engine or the user allowed this exact copy.
     pub fn agent_copy(
-        &self, core: &mut Core, task: &str, policy: Policy, source: &str, destination: &str,
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        source: &str,
+        destination: &str,
     ) -> Result<(), &'static str> {
-        let command = core.agent_command(task, Operation::CopyLocalText(CopyLocalText {}))
-            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let command =
+            core.agent_command(task, Operation::CopyLocalText(CopyLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
         self.observe(core, &command, policy, "file.copy", || self.copy_text(source, destination))
     }
 
     fn observe<T>(
-        &self, core: &mut Core, command: &aiwin11_contracts::v1::Command, policy: Policy, event: &str,
+        &self,
+        core: &mut Core,
+        command: &aiwin11_contracts::v1::Command,
+        policy: Policy,
+        event: &str,
         execute: impl FnOnce() -> Result<T, &'static str>,
     ) -> Result<T, &'static str> {
-        let task = core.authorize_dispatch(policy, Peer::Agent, command)
-            .map_err(|error| match error {
-                ExecutionError::Denied(_) => "FILE_ACCESS_DENIED",
-                _ => "FILE_AUDIT_UNAVAILABLE",
-            })?;
+        let task = core.authorize_dispatch(policy, Peer::Agent, command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "FILE_ACCESS_DENIED",
+            _ => "FILE_AUDIT_UNAVAILABLE",
+        })?;
         let result = execute();
         let (suffix, code) = match &result {
             Ok(_) => ("completed", "success"),
             Err(code) => ("failed", *code),
         };
-        core.audit(task.as_deref(), &format!("{event}.{suffix}"), code)
-            .map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
+        core.audit(task.as_deref(), &format!("{event}.{suffix}"), code).map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
         result
     }
 
@@ -243,8 +278,7 @@ impl LocalFiles {
     }
 
     pub fn copy(&self, core: &mut Core, name: &str, destination: &str) -> Result<(), &'static str> {
-        self.mutate(core, Operation::CopyLocalText(CopyLocalText {}), "file.copy",
-            || self.copy_text(name, destination))
+        self.mutate(core, Operation::CopyLocalText(CopyLocalText {}), "file.copy", || self.copy_text(name, destination))
     }
 
     pub fn move_file(&self, core: &mut Core, name: &str, destination: &str) -> Result<(), &'static str> {
@@ -260,23 +294,26 @@ impl LocalFiles {
     }
 
     fn mutate(
-        &self, core: &mut Core, operation: Operation, event: &str,
+        &self,
+        core: &mut Core,
+        operation: Operation,
+        event: &str,
         execute: impl FnOnce() -> Result<(), &'static str>,
     ) -> Result<(), &'static str> {
-        let command = core.desktop_command(operation)
-            .map_err(|_| "FILE_UNAVAILABLE")?;
-        let task = core.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
-            .map_err(|error| match error {
-                ExecutionError::Denied("confirmation_required") => "FILE_CONFIRMATION_REQUIRED",
-                _ => "FILE_AUDIT_UNAVAILABLE",
-            })?;
+        let command = core.desktop_command(operation).map_err(|_| "FILE_UNAVAILABLE")?;
+        let task =
+            core.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command).map_err(
+                |error| match error {
+                    ExecutionError::Denied("confirmation_required") => "FILE_CONFIRMATION_REQUIRED",
+                    _ => "FILE_AUDIT_UNAVAILABLE",
+                },
+            )?;
         let result = execute();
         let (suffix, code) = match result {
             Ok(()) => ("completed", "success"),
             Err(code) => ("failed", code),
         };
-        core.audit(task.as_deref(), &format!("{event}.{suffix}"), code)
-            .map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
+        core.audit(task.as_deref(), &format!("{event}.{suffix}"), code).map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
         result
     }
 
@@ -287,7 +324,9 @@ impl LocalFiles {
         let root = self.open_root()?;
         let text = self.read(self.resolve(name)?, name)?;
         let mut staging = create_staging(&root)?;
-        let result = staging.write_all(text.as_bytes()).and_then(|()| staging.sync_all())
+        let result = staging
+            .write_all(text.as_bytes())
+            .and_then(|()| staging.sync_all())
             .map_err(|_| "FILE_COPY_FAILED")
             .and_then(|()| rename_in_directory(&staging, &root, destination, "FILE_COPY_FAILED"));
         if result.is_err() && !mark_for_deletion(&staging) {
@@ -304,16 +343,14 @@ impl LocalFiles {
         if !valid_name(name) {
             return Err("INVALID_FILE_NAME");
         }
-        let file = open_relative(root, name, FILE_GENERIC_READ | DELETE, FILE_OPEN)
-            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let file = open_relative(root, name, FILE_GENERIC_READ | DELETE, FILE_OPEN).map_err(|_| "FILE_UNAVAILABLE")?;
         self.read_checked(&file, name)?;
         Ok(file)
     }
 
     fn matches_scope(&self, path: &Path, name: &str) -> bool {
         path.parent() == Some(self.root.as_path())
-            && path.file_name().and_then(|leaf| leaf.to_str())
-                .is_some_and(|leaf| leaf.eq_ignore_ascii_case(name))
+            && path.file_name().and_then(|leaf| leaf.to_str()).is_some_and(|leaf| leaf.eq_ignore_ascii_case(name))
     }
 
     fn resolve(&self, name: &str) -> Result<PathBuf, &'static str> {
@@ -335,10 +372,12 @@ impl LocalFiles {
     }
 
     fn read(&self, path: PathBuf, name: &str) -> Result<String, &'static str> {
-        let file = OpenOptions::new().read(true)
+        let file = OpenOptions::new()
+            .read(true)
             .share_mode(FILE_SHARE_READ)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path).map_err(|_| "FILE_UNAVAILABLE")?;
+            .open(path)
+            .map_err(|_| "FILE_UNAVAILABLE")?;
         self.read_checked(&file, name)
     }
 
@@ -373,13 +412,15 @@ impl LocalFiles {
 /// Opens a directory by handle and checks that it is a real directory (no junction or link)
 /// whose final path is exactly `path`.
 fn open_checked_directory(path: &Path) -> Result<File, &'static str> {
-    let directory = OpenOptions::new().read(true)
+    let directory = OpenOptions::new()
+        .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path).map_err(|_| "FILE_UNAVAILABLE")?;
+        .open(path)
+        .map_err(|_| "FILE_UNAVAILABLE")?;
     let attributes = directory.metadata().map_err(|_| "FILE_UNAVAILABLE")?.file_attributes();
-    if attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
-        != FILE_ATTRIBUTE_DIRECTORY || final_path(&directory)? != path
+    if attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != FILE_ATTRIBUTE_DIRECTORY
+        || final_path(&directory)? != path
     {
         return Err("FILE_OUTSIDE_SCOPE");
     }
@@ -388,11 +429,15 @@ fn open_checked_directory(path: &Path) -> Result<File, &'static str> {
 
 fn create_staging(root: &File) -> Result<File, &'static str> {
     let name = format!(".aiwin11-{}.tmp", uuid::Uuid::new_v4());
-    open_relative(root, &name, FILE_GENERIC_WRITE | DELETE, FILE_CREATE)
-        .map_err(|_| "FILE_COPY_FAILED")
+    open_relative(root, &name, FILE_GENERIC_WRITE | DELETE, FILE_CREATE).map_err(|_| "FILE_COPY_FAILED")
 }
 
-fn open_relative(root: &File, name: &str, access: u32, disposition: NTCREATEFILE_CREATE_DISPOSITION) -> Result<File, i32> {
+fn open_relative(
+    root: &File,
+    name: &str,
+    access: u32,
+    disposition: NTCREATEFILE_CREATE_DISPOSITION,
+) -> Result<File, i32> {
     let mut name: Vec<u16> = name.encode_utf16().collect();
     let length = (name.len() * size_of::<u16>()) as u16;
     let name = UNICODE_STRING { Length: length, MaximumLength: length, Buffer: name.as_mut_ptr() };
@@ -407,10 +452,19 @@ fn open_relative(root: &File, name: &str, access: u32, disposition: NTCREATEFILE
     let mut status_block = Default::default();
     // The directory handle anchors the lookup and OBJ_DONT_REPARSE blocks redirects.
     let status = unsafe {
-        NtCreateFile(&mut handle, access | SYNCHRONIZE,
-            &attributes, &mut status_block, std::ptr::null(), FILE_ATTRIBUTE_NORMAL, 0,
-            disposition, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
-            std::ptr::null(), 0)
+        NtCreateFile(
+            &mut handle,
+            access | SYNCHRONIZE,
+            &attributes,
+            &mut status_block,
+            std::ptr::null(),
+            FILE_ATTRIBUTE_NORMAL,
+            0,
+            disposition,
+            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+            std::ptr::null(),
+            0,
+        )
     };
     if status < 0 {
         return Err(status);
@@ -421,8 +475,12 @@ fn open_relative(root: &File, name: &str, access: u32, disposition: NTCREATEFILE
 fn mark_for_deletion(file: &File) -> bool {
     let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
     let result = unsafe {
-        SetFileInformationByHandle(file.as_raw_handle(), FileDispositionInfo,
-            std::ptr::from_ref(&disposition).cast(), size_of::<FILE_DISPOSITION_INFO>() as u32)
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileDispositionInfo,
+            std::ptr::from_ref(&disposition).cast(),
+            size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
     };
     result != 0
 }
@@ -440,8 +498,13 @@ fn rename_in_directory(file: &File, root: &File, destination: &str, failure: &'s
     let mut status_block = Default::default();
     // Rename the opened file inside the checked directory without replacement.
     let status = unsafe {
-        NtSetInformationFile(file.as_raw_handle(), &mut status_block,
-            std::ptr::from_ref(&info).cast(), size_of::<RenameInfo>() as u32, FileRenameInformation)
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut status_block,
+            std::ptr::from_ref(&info).cast(),
+            size_of::<RenameInfo>() as u32,
+            FileRenameInformation,
+        )
     };
     match status {
         STATUS_OBJECT_NAME_COLLISION => Err("FILE_DESTINATION_EXISTS"),
@@ -452,9 +515,8 @@ fn rename_in_directory(file: &File, root: &File, destination: &str, failure: &'s
 
 fn final_path(file: &File) -> Result<PathBuf, &'static str> {
     let mut buffer = vec![0u16; 32768];
-    let length = unsafe {
-        GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), buffer.len() as u32, 0)
-    } as usize;
+    let length = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), buffer.len() as u32, 0) }
+        as usize;
     if length == 0 || length >= buffer.len() {
         return Err("FILE_UNAVAILABLE");
     }
@@ -465,10 +527,14 @@ fn valid_name(name: &str) -> bool {
     let Some((stem, extension)) = name.rsplit_once('.') else { return false };
     let uppercase = stem.to_ascii_uppercase();
     let reserved = matches!(uppercase.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (uppercase.len() == 4 && (uppercase.starts_with("COM") || uppercase.starts_with("LPT"))
+        || (uppercase.len() == 4
+            && (uppercase.starts_with("COM") || uppercase.starts_with("LPT"))
             && uppercase.as_bytes()[3].is_ascii_digit());
-    name.len() <= MAX_NAME && extension.eq_ignore_ascii_case("txt")
-        && !stem.is_empty() && stem == stem.trim() && !reserved
+    name.len() <= MAX_NAME
+        && extension.eq_ignore_ascii_case("txt")
+        && !stem.is_empty()
+        && stem == stem.trim()
+        && !reserved
         && stem.bytes().all(|byte| byte.is_ascii_alphanumeric() || b" -_".contains(&byte))
 }
 
@@ -508,7 +574,9 @@ mod tests {
         let events = core.activity().unwrap();
         assert_eq!(events[0].kind, "file.copy.failed");
         assert_eq!(events[4].kind, "file.copy.completed");
-        for path in [source, destination] { fs::remove_file(path).unwrap(); }
+        for path in [source, destination] {
+            fs::remove_file(path).unwrap();
+        }
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -533,7 +601,10 @@ mod tests {
 
         let reads = Policy::granting(&[Capability::FileRead]);
         // Hard links are listed by name but refused when read, like in the preview.
-        assert_eq!(files.agent_list(&mut core, &task, reads), Ok(vec!["A.txt".into(), "b note.txt".into(), "lien.txt".into()]));
+        assert_eq!(
+            files.agent_list(&mut core, &task, reads),
+            Ok(vec!["A.txt".into(), "b note.txt".into(), "lien.txt".into()])
+        );
         assert_eq!(files.agent_read(&mut core, &task, reads, "b note.txt"), Ok("Deuxième".into()));
         assert_eq!(files.agent_read(&mut core, &task, reads, "lien.txt"), Err("FILE_OUTSIDE_SCOPE"));
         assert_eq!(files.agent_read(&mut core, &task, reads, "../outside.txt"), Err("INVALID_FILE_NAME"));
@@ -558,10 +629,22 @@ mod tests {
         let copy = Policy::granting(&[Capability::FileCopy]);
 
         assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "copie.txt"), Ok(9));
-        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "PRIS.txt"), Err("FILE_DESTINATION_EXISTS"));
-        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "source.txt", "SOURCE.TXT"), Err("FILE_SAME_NAME"));
-        assert_eq!(files.agent_copy_preview(&mut core, &task, reads, "absent.txt", "copie.txt"), Err("FILE_UNAVAILABLE"));
-        assert_eq!(files.agent_copy_preview(&mut core, &task, Policy::default(), "source.txt", "copie.txt"), Err("FILE_ACCESS_DENIED"));
+        assert_eq!(
+            files.agent_copy_preview(&mut core, &task, reads, "source.txt", "PRIS.txt"),
+            Err("FILE_DESTINATION_EXISTS")
+        );
+        assert_eq!(
+            files.agent_copy_preview(&mut core, &task, reads, "source.txt", "SOURCE.TXT"),
+            Err("FILE_SAME_NAME")
+        );
+        assert_eq!(
+            files.agent_copy_preview(&mut core, &task, reads, "absent.txt", "copie.txt"),
+            Err("FILE_UNAVAILABLE")
+        );
+        assert_eq!(
+            files.agent_copy_preview(&mut core, &task, Policy::default(), "source.txt", "copie.txt"),
+            Err("FILE_ACCESS_DENIED")
+        );
         assert!(!files.root().join("copie.txt").exists(), "the preview writes nothing");
 
         assert_eq!(files.agent_copy(&mut core, &task, reads, "source.txt", "copie.txt"), Err("FILE_ACCESS_DENIED"));
@@ -589,10 +672,19 @@ mod tests {
         let trashes = Policy::granting(&[Capability::FileTrash]);
 
         assert_eq!(files.agent_move(&mut core, &task, reads, "brouillon.txt", "final.txt"), Err("FILE_ACCESS_DENIED"));
-        assert_eq!(files.agent_move(&mut core, &task, trashes, "brouillon.txt", "final.txt"), Err("FILE_ACCESS_DENIED"));
-        assert_eq!(files.agent_move(&mut core, &task, moves, "brouillon.txt", "pris.txt"), Err("FILE_DESTINATION_EXISTS"));
+        assert_eq!(
+            files.agent_move(&mut core, &task, trashes, "brouillon.txt", "final.txt"),
+            Err("FILE_ACCESS_DENIED")
+        );
+        assert_eq!(
+            files.agent_move(&mut core, &task, moves, "brouillon.txt", "pris.txt"),
+            Err("FILE_DESTINATION_EXISTS")
+        );
         assert_eq!(fs::read_to_string(files.root().join("pris.txt")).unwrap(), "garder");
-        assert_eq!(files.agent_move(&mut core, &task, moves, "brouillon.txt", "../final.txt"), Err("INVALID_FILE_NAME"));
+        assert_eq!(
+            files.agent_move(&mut core, &task, moves, "brouillon.txt", "../final.txt"),
+            Err("INVALID_FILE_NAME")
+        );
         assert_eq!(files.agent_move(&mut core, &task, moves, "brouillon.txt", "final.txt"), Ok(()));
         assert!(!files.root().join("brouillon.txt").exists());
         assert_eq!(fs::read_to_string(files.root().join("final.txt")).unwrap(), "Texte");
@@ -606,7 +698,9 @@ mod tests {
         assert_eq!(files.agent_trash(&mut core, &task, trashes, "absent.txt"), Err("FILE_UNAVAILABLE"));
         assert_eq!(fs::read_dir(files.trash()).unwrap().count(), 1, "a failed trash leaves no empty folder");
         let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
-        assert!(kinds.contains(&"file.trash.completed".to_owned()) && kinds.contains(&"file.move.completed".to_owned()));
+        assert!(
+            kinds.contains(&"file.trash.completed".to_owned()) && kinds.contains(&"file.move.completed".to_owned())
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -627,7 +721,9 @@ mod tests {
         let events = core.activity().unwrap();
         assert_eq!(events[0].kind, "file.preview.failed");
         assert_eq!(events[2].kind, "file.preview.completed");
-        for path in [original, alias, outside] { fs::remove_file(path).unwrap(); }
+        for path in [original, alias, outside] {
+            fs::remove_file(path).unwrap();
+        }
         fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -8,10 +8,28 @@ type PolicyRow = { action: string; effects: [Effect, Effect, Effect, Effect] };
 type PolicyOverview = { settings: PolicySettings; table: PolicyRow[] };
 
 const profiles: { id: Autonomy; label: string; description: string }[] = [
-  { id: "observation", label: "Observation", description: "L’agent lit, mais ne modifie rien : toute action avec effet est refusée." },
-  { id: "assisted", label: "Assisté", description: "L’agent lit librement et te demande ton accord avant chaque action. Recommandé." },
-  { id: "limited", label: "Autonome limité", description: "Les actions à faible risque dans le périmètre d’AiWin11 (ouvrir le Bloc-notes, copier, écrire dans le Bloc-notes qu’il a ouvert) se font sans demander." },
-  { id: "advanced", label: "Avancé", description: "Les renommages se font aussi sans demander. La corbeille et la lecture de l’écran demandent toujours ton accord." },
+  {
+    id: "observation",
+    label: "Observation",
+    description: "L’agent lit, mais ne modifie rien : toute action avec effet est refusée.",
+  },
+  {
+    id: "assisted",
+    label: "Assisté",
+    description: "L’agent lit librement et te demande ton accord avant chaque action. Recommandé.",
+  },
+  {
+    id: "limited",
+    label: "Autonome limité",
+    description:
+      "Les actions à faible risque dans le périmètre d’AiWin11 (ouvrir le Bloc-notes, copier, écrire dans le Bloc-notes qu’il a ouvert) se font sans demander.",
+  },
+  {
+    id: "advanced",
+    label: "Avancé",
+    description:
+      "Les renommages se font aussi sans demander. La corbeille et la lecture de l’écran demandent toujours ton accord.",
+  },
 ];
 
 const actionNames: Record<string, string> = {
@@ -46,7 +64,9 @@ export function Security({ onFinished }: { onFinished: () => void }) {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   async function save(settings: PolicySettings) {
     setBusy(true);
@@ -63,7 +83,12 @@ export function Security({ onFinished }: { onFinished: () => void }) {
     }
   }
 
-  if (!overview) return <section className="card"><p role="status">{status || "Chargement…"}</p></section>;
+  if (!overview)
+    return (
+      <section className="card">
+        <p role="status">{status || "Chargement…"}</p>
+      </section>
+    );
   const { settings, table } = overview;
   const column = profiles.findIndex((profile) => profile.id === settings.autonomy);
 
@@ -74,29 +99,45 @@ export function Security({ onFinished }: { onFinished: () => void }) {
         <legend>Profil</legend>
         {profiles.map((profile) => (
           <label key={profile.id} className="approval">
-            <input type="radio" name="autonomy" value={profile.id} checked={settings.autonomy === profile.id}
-              onChange={() => void save({ ...settings, autonomy: profile.id })} />
-            <span><strong>{profile.label}</strong> — {profile.description}</span>
+            <input
+              type="radio"
+              name="autonomy"
+              value={profile.id}
+              checked={settings.autonomy === profile.id}
+              onChange={() => void save({ ...settings, autonomy: profile.id })}
+            />
+            <span>
+              <strong>{profile.label}</strong> — {profile.description}
+            </span>
           </label>
         ))}
         <label className="approval">
-          <input type="checkbox" checked={settings.simulate}
-            onChange={(event) => void save({ ...settings, simulate: event.target.checked })} />
-          <span><strong>Mode simulation</strong> — les actions avec effet ne sont pas exécutées :
-            l’agent te montre ce qu’il aurait fait.</span>
+          <input
+            type="checkbox"
+            checked={settings.simulate}
+            onChange={(event) => void save({ ...settings, simulate: event.target.checked })}
+          />
+          <span>
+            <strong>Mode simulation</strong> — les actions avec effet ne sont pas exécutées : l’agent te montre ce qu’il
+            aurait fait.
+          </span>
         </label>
       </fieldset>
       <p role="status">{status}</p>
       <h3>Décisions par action</h3>
-      <p>Avec un modèle local. Avec OpenAI, seuls l’ouverture du Bloc-notes et les réponses texte sont possibles :
-        aucun fichier ni contenu d’écran n’est envoyé au cloud.</p>
+      <p>
+        Avec un modèle local. Avec OpenAI, seuls l’ouverture du Bloc-notes et les réponses texte sont possibles : aucun
+        fichier ni contenu d’écran n’est envoyé au cloud.
+      </p>
       <div className="table-scroll">
         <table>
           <thead>
             <tr>
               <th scope="col">Action</th>
               {profiles.map((profile, index) => (
-                <th key={profile.id} scope="col" aria-current={index === column ? "true" : undefined}>{profile.label}</th>
+                <th key={profile.id} scope="col" aria-current={index === column ? "true" : undefined}>
+                  {profile.label}
+                </th>
               ))}
             </tr>
           </thead>

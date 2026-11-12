@@ -81,7 +81,22 @@ Dans **Inspecteur**, **Inspecter une fenêtre** et **Capturer la fenêtre** lise
 
 ## Vérifier le projet
 
+Le plus simple : `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1` lance tout (tests de l’agent, ruff et mypy, ESLint et Prettier, build de l’interface, `cargo fmt --check`, pont .NET, tests Rust, clippy) et affiche un résumé ; `-Live` ajoute les tests réels, `-Tauri` le build release.
+
+Outils d’analyse de l’agent Python (une fois) :
+
 ```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r services/agent/requirements-dev.txt
+```
+
+Commandes individuelles :
+
+```powershell
+npm --prefix apps/desktop run lint
+.venv\Scripts\python -m ruff check services/agent
+.venv\Scripts\python -m mypy --config-file services/agent/pyproject.toml services/agent
+cargo fmt --all --check
 npm --prefix apps/desktop run build
 python -B services/agent/test_agent.py
 cargo test --locked -p aiwin11-core

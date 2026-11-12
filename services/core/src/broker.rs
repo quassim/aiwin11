@@ -55,7 +55,11 @@ impl Policy {
 
     /// Grants `capability` only if `condition` holds, e.g. the user approved.
     pub fn granting_if(condition: bool, capability: Capability) -> Self {
-        if condition { Self::granting(&[capability]) } else { Self::default() }
+        if condition {
+            Self::granting(&[capability])
+        } else {
+            Self::default()
+        }
     }
 
     pub fn allows(self, capability: Capability) -> bool {
@@ -86,20 +90,12 @@ impl Policy {
         if command.session_id != session || peer == Peer::Other {
             return Err("invalid_scope");
         }
-        for id in [
-            &command.request_id,
-            &command.task_id,
-            &command.correlation_id,
-            &command.idempotency_key,
-        ] {
+        for id in [&command.request_id, &command.task_id, &command.correlation_id, &command.idempotency_key] {
             if !matches!(Uuid::parse_str(id), Ok(uuid) if uuid.to_string() == *id) {
                 return Err("invalid_identifier");
             }
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| "clock_unavailable")?
-            .as_millis() as i64;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| "clock_unavailable")?.as_millis() as i64;
         if command.deadline_ms <= now {
             return Err("expired");
         }
@@ -128,7 +124,11 @@ impl Policy {
             Some(Operation::MoveLocalText(_)) if desktop || agent(Capability::FileMove) => Ok("move_local_text"),
             Some(Operation::TrashLocalText(_)) if agent(Capability::FileTrash) => Ok("trash_local_text"),
             Some(Operation::DeleteLocalText(input)) if peer == Peer::DesktopInspector => {
-                if input.confirmed { Ok("delete_local_text") } else { Err("confirmation_required") }
+                if input.confirmed {
+                    Ok("delete_local_text")
+                } else {
+                    Err("confirmation_required")
+                }
             }
             Some(Operation::CharacterMapDigit(input))
                 if peer == Peer::DesktopInspector && input.digit.is_some_and(|digit| digit <= 9) =>
@@ -152,31 +152,26 @@ impl Core {
         let task_id = self.authorize_dispatch(policy, peer, command)?;
         let (kind, code, result) = match launch_notepad() {
             LaunchOutcome::Verified(pid) => ("tool.execution.completed", "success", Ok(pid)),
-            LaunchOutcome::Unverified => (
-                "tool.execution.partial",
-                "window_unverified",
-                Err(ExecutionError::WindowUnverified),
-            ),
-            LaunchOutcome::Failed => (
-                "tool.execution.failed",
-                "launch_failed",
-                Err(ExecutionError::ExecutionFailed),
-            ),
+            LaunchOutcome::Unverified => {
+                ("tool.execution.partial", "window_unverified", Err(ExecutionError::WindowUnverified))
+            }
+            LaunchOutcome::Failed => ("tool.execution.failed", "launch_failed", Err(ExecutionError::ExecutionFailed)),
         };
-        self.audit(task_id.as_deref(), kind, code)
-            .map_err(|_| ExecutionError::OutcomeUnrecorded)?;
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| ExecutionError::OutcomeUnrecorded)?;
         result
     }
 
     pub(crate) fn authorize_dispatch(
-        &mut self, policy: Policy, peer: Peer, command: &Command,
+        &mut self,
+        policy: Policy,
+        peer: Peer,
+        command: &Command,
     ) -> Result<Option<String>, ExecutionError> {
         let task_id = Uuid::parse_str(&command.task_id).ok().map(|id| id.to_string());
         let operation = match policy.authorize(peer, command, self.session_id()) {
             Ok(operation) => operation,
             Err(code) => {
-                self.audit(task_id.as_deref(), "policy.denied", code)
-                    .map_err(|_| ExecutionError::AuditUnavailable)?;
+                self.audit(task_id.as_deref(), "policy.denied", code).map_err(|_| ExecutionError::AuditUnavailable)?;
                 return Err(ExecutionError::Denied(code));
             }
         };
@@ -189,17 +184,19 @@ impl Core {
                 params![self.session_id, command.idempotency_key, task_id],
             )
             .map_err(|_| ExecutionError::AuditUnavailable)?;
-        let (kind, code) = if reserved == 0 {
-            ("policy.denied", "duplicate_request")
-        } else {
-            ("policy.allowed", operation)
-        };
+        let (kind, code) =
+            if reserved == 0 { ("policy.denied", "duplicate_request") } else { ("policy.allowed", operation) };
         transaction
             .execute(
                 "INSERT INTO events (id, session_id, task_id, kind, source, code)
                  VALUES (?1, ?2, ?3, ?4, 'broker', ?5)",
-                params![Uuid::new_v4().to_string(), self.session_id, task_id.as_deref().map(crate::journal_code),
-                    kind, crate::journal_code(code)],
+                params![
+                    Uuid::new_v4().to_string(),
+                    self.session_id,
+                    task_id.as_deref().map(crate::journal_code),
+                    kind,
+                    crate::journal_code(code)
+                ],
             )
             .map_err(|_| ExecutionError::AuditUnavailable)?;
         transaction.commit().map_err(|_| ExecutionError::AuditUnavailable)?;
@@ -208,8 +205,7 @@ impl Core {
         }
 
         if let Err(code) = policy.authorize(peer, command, self.session_id()) {
-            self.audit(task_id.as_deref(), "policy.denied", code)
-                .map_err(|_| ExecutionError::AuditUnavailable)?;
+            self.audit(task_id.as_deref(), "policy.denied", code).map_err(|_| ExecutionError::AuditUnavailable)?;
             return Err(ExecutionError::Denied(code));
         }
         Ok(task_id)
@@ -219,8 +215,13 @@ impl Core {
         self.db.execute(
             "INSERT INTO events (id, session_id, task_id, kind, source, code)
              VALUES (?1, ?2, ?3, ?4, 'broker', ?5)",
-            params![Uuid::new_v4().to_string(), self.session_id, task_id.map(crate::journal_code),
-                crate::journal_code(kind), crate::journal_code(code)],
+            params![
+                Uuid::new_v4().to_string(),
+                self.session_id,
+                task_id.map(crate::journal_code),
+                crate::journal_code(kind),
+                crate::journal_code(code)
+            ],
         )?;
         Ok(())
     }
@@ -241,8 +242,7 @@ mod tests {
             idempotency_key: Uuid::new_v4().to_string(),
             session_id: core.session_id().into(),
             authenticated_actor_id: "agent".into(),
-            deadline_ms: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
-                + 60_000) as i64,
+            deadline_ms: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() + 60_000) as i64,
             operation: Some(Operation::LaunchApplication(LaunchApplication {
                 application: Application::Notepad as i32,
             })),
@@ -299,10 +299,7 @@ mod tests {
         let mut command = request(&core);
         command.operation = Some(Operation::CaptureForeground(Default::default()));
         let policy = Policy::granting(&[Capability::LaunchNotepad]);
-        assert_eq!(
-            core.authorize_dispatch(policy, Peer::Agent, &command),
-            Err(ExecutionError::Denied("default_deny"))
-        );
+        assert_eq!(core.authorize_dispatch(policy, Peer::Agent, &command), Err(ExecutionError::Denied("default_deny")));
         assert!(core.authorize_dispatch(policy, Peer::DesktopInspector, &command).is_ok());
     }
 
@@ -312,19 +309,13 @@ mod tests {
         let mut command = request(&core);
         command.operation = Some(Operation::CopyLocalText(Default::default()));
         let policy = Policy::granting(&[Capability::LaunchNotepad]);
-        assert_eq!(
-            core.authorize_dispatch(policy, Peer::Agent, &command),
-            Err(ExecutionError::Denied("default_deny"))
-        );
+        assert_eq!(core.authorize_dispatch(policy, Peer::Agent, &command), Err(ExecutionError::Denied("default_deny")));
         assert!(core.authorize_dispatch(policy, Peer::DesktopInspector, &command).is_ok());
     }
 
     #[test]
     fn agent_file_reads_require_their_own_grant_and_never_extend_to_writes() {
-        let reads = [
-            Operation::PreviewLocalText(Default::default()),
-            Operation::ListLocalText(Default::default()),
-        ];
+        let reads = [Operation::PreviewLocalText(Default::default()), Operation::ListLocalText(Default::default())];
         let launch_only = Policy::granting(&[Capability::LaunchNotepad]);
         let reads_only = Policy::granting(&[Capability::FileRead]);
         for operation in reads {
@@ -369,8 +360,13 @@ mod tests {
         let lookup = Policy::granting(&[Capability::WindowLookup]);
         let inspection = Policy::granting(&[Capability::WindowInspect]);
         let everything_else = Policy::granting(&[
-            Capability::LaunchNotepad, Capability::FileRead, Capability::FileCopy, Capability::FileMove,
-            Capability::FileTrash, Capability::WindowCapture, Capability::TypeText,
+            Capability::LaunchNotepad,
+            Capability::FileRead,
+            Capability::FileCopy,
+            Capability::FileMove,
+            Capability::FileTrash,
+            Capability::WindowCapture,
+            Capability::TypeText,
         ]);
         let locate = Operation::LocateWindow(Default::default());
         let inspect = Operation::InspectWindow(Default::default());
@@ -425,10 +421,7 @@ mod tests {
             core.execute(policy, Peer::Other, &command, || panic!("dispatched")),
             Err(ExecutionError::Denied("invalid_scope"))
         );
-        assert_eq!(
-            core.execute(policy, Peer::Agent, &command, || LaunchOutcome::Verified(42)),
-            Ok(42)
-        );
+        assert_eq!(core.execute(policy, Peer::Agent, &command, || LaunchOutcome::Verified(42)), Ok(42));
         assert_eq!(core.activity().unwrap()[0].kind, "tool.execution.completed");
         assert_eq!(
             core.execute(policy, Peer::Agent, &command, || panic!("dispatched twice")),
@@ -441,9 +434,7 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let mut command = request(&core);
         let policy = Policy::granting(&[Capability::LaunchNotepad]);
-        command.operation = Some(Operation::LaunchApplication(LaunchApplication {
-            application: i32::MAX,
-        }));
+        command.operation = Some(Operation::LaunchApplication(LaunchApplication { application: i32::MAX }));
         assert_eq!(
             core.execute(policy, Peer::Agent, &command, || panic!("unknown application")),
             Err(ExecutionError::Denied("default_deny"))
@@ -465,10 +456,7 @@ mod tests {
             core.execute(policy, Peer::Agent, &command, || panic!("without audit")),
             Err(ExecutionError::AuditUnavailable)
         );
-        let reserved: u32 = core
-            .db
-            .query_row("SELECT COUNT(*) FROM tool_executions", [], |row| row.get(0))
-            .unwrap();
+        let reserved: u32 = core.db.query_row("SELECT COUNT(*) FROM tool_executions", [], |row| row.get(0)).unwrap();
         assert_eq!(reserved, 0);
     }
 

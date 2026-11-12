@@ -50,7 +50,8 @@ impl Autonomy {
 
     pub fn from_code(code: &str) -> Option<Self> {
         [Self::Observation, Self::Assisted, Self::Limited, Self::Advanced]
-            .into_iter().find(|autonomy| autonomy.code() == code)
+            .into_iter()
+            .find(|autonomy| autonomy.code() == code)
     }
 }
 
@@ -80,8 +81,15 @@ pub enum AgentAction {
 
 impl AgentAction {
     pub const ALL: [Self; 9] = [
-        Self::LaunchApplication, Self::ListFiles, Self::ReadFile, Self::CopyFile, Self::MoveFile,
-        Self::TrashFile, Self::InspectWindow, Self::DescribeWindow, Self::TypeText,
+        Self::LaunchApplication,
+        Self::ListFiles,
+        Self::ReadFile,
+        Self::CopyFile,
+        Self::MoveFile,
+        Self::TrashFile,
+        Self::InspectWindow,
+        Self::DescribeWindow,
+        Self::TypeText,
     ];
 
     pub fn code(self) -> &'static str {
@@ -161,8 +169,7 @@ fn column(autonomy: Autonomy) -> usize {
 
 /// Base effect from the matrix; an action missing from it is denied.
 pub fn base_effect(action: AgentAction, autonomy: Autonomy) -> Effect {
-    MATRIX.iter().find(|(entry, _)| *entry == action)
-        .map_or(E::Deny, |(_, effects)| effects[column(autonomy)])
+    MATRIX.iter().find(|(entry, _)| *entry == action).map_or(E::Deny, |(_, effects)| effects[column(autonomy)])
 }
 
 /// Decides the effect of one proposed action. Invariants are applied in this order and can
@@ -191,11 +198,14 @@ pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionCo
 /// The full table for the UI: effect of every action in every profile, for a local model.
 pub fn table(simulate: bool) -> Vec<(AgentAction, [Effect; 4])> {
     let context = ActionContext { local_model: true };
-    AgentAction::ALL.into_iter().map(|action| {
-        let effects = [P::Observation, P::Assisted, P::Limited, P::Advanced]
-            .map(|autonomy| evaluate(PolicySettings { autonomy, simulate }, action, context).effect);
-        (action, effects)
-    }).collect()
+    AgentAction::ALL
+        .into_iter()
+        .map(|action| {
+            let effects = [P::Observation, P::Assisted, P::Limited, P::Advanced]
+                .map(|autonomy| evaluate(PolicySettings { autonomy, simulate }, action, context).effect);
+            (action, effects)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -249,7 +259,12 @@ mod tests {
 
     #[test]
     fn autonomy_only_grows_from_observation_to_advanced() {
-        let rank = |effect| match effect { E::Deny => 0, E::Ask => 1, E::Simulate => 1, E::Allow => 2 };
+        let rank = |effect| match effect {
+            E::Deny => 0,
+            E::Ask => 1,
+            E::Simulate => 1,
+            E::Allow => 2,
+        };
         for action in AgentAction::ALL {
             let effects = [P::Observation, P::Assisted, P::Limited, P::Advanced]
                 .map(|autonomy| rank(effect(autonomy, false, action, LOCAL)));
