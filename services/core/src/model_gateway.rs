@@ -88,6 +88,32 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
             }
         }));
         functions.push(json!({
+            "name": "organize_files",
+            "description": "Range le dossier : propose un plan de 1 à 20 renommages de fichiers .txt, montré en entier \
+        à l’utilisateur et approuvé en une fois. Aucun fichier existant n’est remplacé.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "moves": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source": { "type": "string" },
+                                "destination": { "type": "string" }
+                            },
+                            "required": ["source", "destination"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["moves"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "trash_text_file",
             "description": "Place un fichier .txt du dossier d’AiWin11 dans la corbeille d’AiWin11 (récupérable, \
         pas de suppression définitive). L’utilisateur doit toujours l’approuver.",
@@ -873,6 +899,7 @@ mod tests {
                 "read_text_file",
                 "copy_text_file",
                 "move_text_file",
+                "organize_files",
                 "trash_text_file",
                 "remember",
                 "search_memory",

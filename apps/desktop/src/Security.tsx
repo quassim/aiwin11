@@ -62,6 +62,7 @@ const actionNames: Record<string, string> = {
   readFile: "Lire un fichier",
   copyFile: "Copier un fichier",
   moveFile: "Renommer un fichier",
+  organizeFiles: "Ranger le dossier (plan de renommages approuvé en une fois)",
   trashFile: "Mettre un fichier à la corbeille",
   inspectWindow: "Lire la structure d’une fenêtre",
   describeWindow: "Décrire une fenêtre (capture + vision locale)",

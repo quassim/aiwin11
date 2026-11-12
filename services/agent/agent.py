@@ -73,6 +73,26 @@ def is_service_name(value: object) -> bool:
     )
 
 
+MAX_PLAN_MOVES = 20
+
+
+def is_move_plan(value: object) -> bool:
+    """1 to 20 renames with valid, distinct names; no name is both a source and a destination."""
+    if not isinstance(value, list) or not 0 < len(value) <= MAX_PLAN_MOVES:
+        return False
+    sources: set[str] = set()
+    destinations: set[str] = set()
+    for move in value:
+        if not isinstance(move, dict) or set(move) != {"source", "destination"}:
+            return False
+        source, destination = move["source"], move["destination"]
+        if not (is_text_file_name(source) and is_text_file_name(destination)):
+            return False
+        sources.add(source.lower())
+        destinations.add(destination.lower())
+    return len(sources) == len(value) and len(destinations) == len(value) and not sources & destinations
+
+
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
 Rule = tuple[str, ...] | Callable[[object], bool]
@@ -92,6 +112,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "write_clipboard": {"text": is_typed_text},
     "list_windows": {},
     "list_services": {},
+    "organize_files": {"moves": is_move_plan},
     "run_diagnostic": {"diagnostic": ("network", "wifi", "time")},
     "admin_service": {
         "service": is_service_name,

@@ -93,7 +93,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 24] = [
+pub const MANIFESTS: [ToolManifest; 25] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -435,6 +435,21 @@ pub const MANIFESTS: [ToolManifest; 24] = [
         reversibility: R::NoEffect,
         timeout_ms: 15_000,
         capabilities: &[C::Diagnostic],
+    },
+    ToolManifest {
+        action: AgentAction::OrganizeFiles,
+        tool: "organize_files",
+        version: 1,
+        // Up to 20 renames approved together: always shown as one previewed plan.
+        risk: Risk::High,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Reversible,
+        timeout_ms: 60_000,
+        capabilities: &[C::FileMove],
     },
 ];
 

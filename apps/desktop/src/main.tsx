@@ -55,6 +55,7 @@ type ApprovalAction =
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
   | { kind: "listServices" }
+  | { kind: "organizeFiles"; moves: [string, string][] }
   | { kind: "runDiagnostic"; diagnostic: string }
   | { kind: "remember"; text: string }
   | { kind: "recall" }
@@ -140,6 +141,13 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: "L’agent demande un diagnostic Windows",
       detail: `Action : lancer le diagnostic en lecture seule « ${action.diagnostic} ». Rien n’est modifié.`,
+    };
+  }
+  if (action.kind === "organizeFiles") {
+    return {
+      title: `L’agent propose de ranger ${action.moves.length} fichier(s)`,
+      detail: "Plan complet, approuvé en une fois. Aucun fichier existant ne sera remplacé :",
+      quote: action.moves.map(([source, destination]) => `${source} → ${destination}`).join("\n"),
     };
   }
   if (action.kind === "listServices") {

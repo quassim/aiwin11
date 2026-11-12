@@ -146,6 +146,10 @@ pub enum ApprovalAction {
         text: String,
         characters: usize,
     },
+    /// The whole plan is shown and approved at once.
+    OrganizeFiles {
+        moves: Vec<(String, String)>,
+    },
     /// Read-only; allowed in every profile by the default matrix.
     ListServices,
     RunDiagnostic {
@@ -240,6 +244,7 @@ enum PlannedAction {
     Remember(String),
     Recall,
     SearchMemory(String),
+    OrganizeFiles(Vec<(String, String)>),
     RunDiagnostic(Diagnostic),
     AdminService {
         service: String,
@@ -697,6 +702,12 @@ impl TaskSlot {
                 ("click_control", json!({ "control": number }), self.click_control(run, number, None)?)
             }
             PlannedAction::Recall => ("recall", json!({}), self.recall(run, None)?),
+            PlannedAction::OrganizeFiles(moves) => {
+                let arguments = json!({ "moves": moves.iter().map(|(source, destination)| {
+                    json!({ "source": source, "destination": destination })
+                }).collect::<Vec<_>>() });
+                ("organize_files", arguments, self.organize_files(run, &moves)?)
+            }
             PlannedAction::RunDiagnostic(diagnostic) => {
                 let observation = self.run_diagnostic(run, diagnostic)?;
                 ("run_diagnostic", json!({ "diagnostic": diagnostic_code(diagnostic) }), observation)
@@ -982,6 +993,54 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    /// Previews every rename (readable source, free destination), asks once for the whole
+    /// plan, then renames one by one and stops at the first failure.
+    fn organize_files<F: Fn(TaskUpdate)>(
+        &self,
+        run: &mut Run<'_, F>,
+        moves: &[(String, String)],
+    ) -> Result<String, &'static str> {
+        let action = AgentAction::OrganizeFiles;
+        let summary = format!("Ranger le dossier : {} renommage(s)", moves.len());
+        let effect = match self.decide(run, action, &summary)? {
+            Err(observation) => return Ok(observation),
+            Ok(effect) => effect,
+        };
+        let Some(files) = run.files else {
+            run.report(action, &summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
+            return Ok("Rangement impossible : FILE_UNAVAILABLE. Rien n’a été modifié.".into());
+        };
+        let reads = Policy::granting(&[Capability::FileRead]);
+        for (source, destination) in moves {
+            if let Err(code) = files.agent_copy_preview(&mut *lock(run.core)?, run.task, reads, source, destination) {
+                run.report(action, &summary, ActionStatus::Failed, Some(code));
+                return Ok(format!(
+                    "Plan refusé avant toute action : « {source} » → « {destination} » : {code}. Rien n’a été modifié."
+                ));
+            }
+        }
+        let approval = ApprovalAction::OrganizeFiles { moves: moves.to_vec() };
+        let grant = match self.authorize(run, effect, action, &summary, Capability::FileMove, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let mut done = 0;
+        for (source, destination) in moves {
+            let result = self.dispatching(run.core, run.task, || -> Result<(), &'static str> {
+                files.agent_move(&mut *lock(run.core)?, run.task, grant, source, destination)
+            })?;
+            if let Err(code) = result {
+                run.report(action, &summary, ActionStatus::Partial, Some(code));
+                return Ok(format!(
+                    "{done} renommage(s) faits, puis arrêt sur « {source} » : {code}. Les suivants n’ont pas été faits."
+                ));
+            }
+            done += 1;
+        }
+        run.report(action, &summary, ActionStatus::Done, None);
+        Ok(format!("Rangement terminé : {done} fichier(s) renommé(s), aucun fichier remplacé."))
     }
 
     fn run_diagnostic<F: Fn(TaskUpdate)>(
@@ -2044,6 +2103,29 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
             Ok(PlannedAction::ListServices)
         }
         ("tool", Some("recall"), Some(arguments), None) if arguments.is_empty() => Ok(PlannedAction::Recall),
+        ("tool", Some("organize_files"), Some(arguments), None) if arguments.len() == 1 => {
+            let moves: Option<Vec<(String, String)>> = arguments
+                .get("moves")
+                .and_then(Value::as_array)
+                .filter(|moves| (1..=20).contains(&moves.len()))
+                .and_then(|moves| {
+                    moves
+                        .iter()
+                        .map(|entry| {
+                            let entry = entry.as_object().filter(|entry| entry.len() == 2)?;
+                            Some((file_argument(entry, "source")?, file_argument(entry, "destination")?))
+                        })
+                        .collect()
+                });
+            let moves = moves.ok_or("AGENT_REJECTED")?;
+            let mut names: Vec<String> = moves.iter().flat_map(|(a, b)| [a.to_lowercase(), b.to_lowercase()]).collect();
+            names.sort();
+            names.dedup();
+            if names.len() != moves.len() * 2 {
+                return Err("AGENT_REJECTED");
+            }
+            Ok(PlannedAction::OrganizeFiles(moves))
+        }
         ("tool", Some("run_diagnostic"), Some(arguments), None) if arguments.len() == 1 => {
             match arguments.get("diagnostic").and_then(Value::as_str) {
                 Some("network") => Ok(PlannedAction::RunDiagnostic(Diagnostic::Network)),

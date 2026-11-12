@@ -206,7 +206,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|---|
 | — | « Ouvre le Bloc-notes » | ✅ Réel |
 | — | « Résume cette fenêtre » | ✅ Réel (structure et description locale) |
-| — | « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées | 🟡 Actions une à une avec approbation ; pas de plan global prévisualisé ni d’approbation groupée — R2 |
+| — | « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées | ✅ `organize_files` : plan de renommages vérifié, montré en entier, approuvé en une fois (non testé en réel) |
 | — | « Utilise mon modèle local » : aucun appel cloud | ✅ |
 | — | « Stoppe toutes les tâches » | ✅ Arrêt global (tests unitaires ; réel non testé) |
 | — | Provider indisponible : bascule autorisée ou erreur compréhensible | 🟡 Erreur ✅, bascule ❌ — R3 |

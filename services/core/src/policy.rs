@@ -94,10 +94,11 @@ pub enum AgentAction {
     Recall,
     SearchMemory,
     RunDiagnostic,
+    OrganizeFiles,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -122,6 +123,7 @@ impl AgentAction {
         Self::Recall,
         Self::SearchMemory,
         Self::RunDiagnostic,
+        Self::OrganizeFiles,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -154,6 +156,7 @@ impl AgentAction {
             Self::Recall => "recall",
             Self::SearchMemory => "search_memory",
             Self::RunDiagnostic => "run_diagnostic",
+            Self::OrganizeFiles => "organize_files",
         }
     }
 
@@ -210,7 +213,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 24] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 25] = [
+    (A::OrganizeFiles, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::RunDiagnostic, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::SearchMemory, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::Recall, [E::Allow, E::Allow, E::Allow, E::Allow]),
