@@ -11,7 +11,8 @@ use std::{
 };
 
 use aiwin11_contracts::v1::{
-    command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, MoveLocalText, PreviewLocalText, TrashLocalText,
+    command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, ListTrash, MoveLocalText, PreviewLocalText,
+    RestoreLocalText, TrashLocalText,
 };
 use windows_sys::Wdk::{
     Foundation::OBJECT_ATTRIBUTES,
@@ -177,6 +178,7 @@ impl LocalFiles {
     fn trash_text(&self, name: &str) -> Result<PathBuf, &'static str> {
         let root = self.open_root()?;
         let source = self.open_for_mutation(&root, name)?;
+        let _trash = open_checked_directory(&self.trash)?;
         let folder = self.trash.join(uuid::Uuid::new_v4().to_string());
         fs::create_dir(&folder).map_err(|_| "FILE_TRASH_FAILED")?;
         let result = open_checked_directory(&folder)
@@ -210,7 +212,7 @@ impl LocalFiles {
     pub fn agent_list(&self, core: &mut Core, task: &str, policy: Policy) -> Result<Vec<String>, &'static str> {
         let command =
             core.agent_command(task, Operation::ListLocalText(ListLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
-        self.observe(core, &command, policy, "file.list", || self.list_names())
+        self.observe(core, &command, policy, "file.list", || self.list_names(""))
     }
 
     /// Agent tool: reads one text file of the dedicated folder for `task`.
@@ -289,17 +291,26 @@ impl LocalFiles {
         result
     }
 
-    /// Valid `.txt` names of regular files directly in the folder, sorted, at most `MAX_LISTED`.
-    fn list_names(&self) -> Result<Vec<String>, &'static str> {
+    /// Supported text files directly in the folder, sorted, at most `MAX_LISTED`.
+    fn list_names(&self, query: &str) -> Result<Vec<String>, &'static str> {
+        if query.len() > MAX_NAME || !query.bytes().all(|byte| byte.is_ascii_alphanumeric() || b" -_.".contains(&byte))
+        {
+            return Err("INVALID_FILE_SEARCH");
+        }
+        let query = query.trim().to_ascii_lowercase();
         // Checks that the folder itself is the expected, non-redirected directory.
-        drop(self.open_root()?);
+        let _root = self.open_root()?;
         let mut names = Vec::new();
         for entry in fs::read_dir(&self.root).map_err(|_| "FILE_UNAVAILABLE")? {
             let entry = entry.map_err(|_| "FILE_UNAVAILABLE")?;
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
             // DirEntry metadata does not follow links on Windows.
             let Ok(meta) = entry.metadata() else { continue };
-            if valid_name(&name) && meta.is_file() && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+            if valid_name(&name)
+                && name.to_ascii_lowercase().contains(&query)
+                && meta.is_file()
+                && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+            {
                 names.push(name);
             }
         }
@@ -316,6 +327,69 @@ impl LocalFiles {
         self.mutate(core, Operation::MoveLocalText(MoveLocalText {}), "file.move", || self.move_text(name, destination))
     }
 
+    pub fn trash_file(&self, core: &mut Core, name: &str) -> Result<(), &'static str> {
+        self.mutate(core, Operation::TrashLocalText(TrashLocalText {}), "file.trash", || {
+            self.trash_text(name).map(|_| ())
+        })
+    }
+
+    pub fn list_files(&self, core: &mut Core, query: &str) -> Result<Vec<String>, &'static str> {
+        self.mutate(core, Operation::ListLocalText(ListLocalText {}), "file.list", || self.list_names(query))
+    }
+
+    pub fn list_trash(&self, core: &mut Core) -> Result<Vec<(String, String)>, &'static str> {
+        self.mutate(core, Operation::ListTrash(ListTrash {}), "file.trash.list", || {
+            let _trash = open_checked_directory(&self.trash)?;
+            let mut entries = Vec::new();
+            for folder in fs::read_dir(&self.trash).map_err(|_| "FILE_UNAVAILABLE")? {
+                let Ok(folder) = folder else { continue };
+                let Ok(id) = folder.file_name().into_string() else { continue };
+                if !valid_trash_id(&id) {
+                    continue;
+                }
+                let path = folder.path();
+                let Ok(_directory) = open_checked_directory(&path) else { continue };
+                let Ok(files) = fs::read_dir(path) else { continue };
+                for entry in files.flatten() {
+                    let Ok(name) = entry.file_name().into_string() else { continue };
+                    let Ok(metadata) = entry.metadata() else { continue };
+                    if valid_name(&name)
+                        && metadata.is_file()
+                        && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+                    {
+                        entries.push((id.clone(), name));
+                        if entries.len() == MAX_LISTED {
+                            break;
+                        }
+                    }
+                }
+                if entries.len() == MAX_LISTED {
+                    break;
+                }
+            }
+            entries.sort_by_key(|(_, name)| name.to_ascii_lowercase());
+            Ok(entries)
+        })
+    }
+
+    pub fn restore(&self, core: &mut Core, id: &str, name: &str) -> Result<(), &'static str> {
+        self.mutate(core, Operation::RestoreLocalText(RestoreLocalText {}), "file.restore", || {
+            if !valid_trash_id(id) || !valid_name(name) {
+                return Err("INVALID_FILE_NAME");
+            }
+            let root = self.open_root()?;
+            let _trash = open_checked_directory(&self.trash)?;
+            let path = self.trash.join(id);
+            let directory = open_checked_directory(&path)?;
+            let source = open_relative(&directory, name, FILE_GENERIC_READ | DELETE, FILE_OPEN)
+                .map_err(|_| "FILE_UNAVAILABLE")?;
+            read_checked_in(&source, &path, name)?;
+            rename_in_directory(&source, &root, name, "FILE_RESTORE_FAILED")?;
+            // Keep the empty entry directory rather than removing it by a reopened path.
+            Ok(())
+        })
+    }
+
     pub fn delete(&self, core: &mut Core, name: &str, confirmed: bool) -> Result<(), &'static str> {
         self.mutate(core, Operation::DeleteLocalText(DeleteLocalText { confirmed }), "file.delete", || {
             let root = self.open_root()?;
@@ -324,13 +398,13 @@ impl LocalFiles {
         })
     }
 
-    fn mutate(
+    fn mutate<T>(
         &self,
         core: &mut Core,
         operation: Operation,
         event: &str,
-        execute: impl FnOnce() -> Result<(), &'static str>,
-    ) -> Result<(), &'static str> {
+        execute: impl FnOnce() -> Result<T, &'static str>,
+    ) -> Result<T, &'static str> {
         let command = core.desktop_command(operation).map_err(|_| "FILE_UNAVAILABLE")?;
         let task =
             core.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command).map_err(
@@ -340,9 +414,9 @@ impl LocalFiles {
                 },
             )?;
         let result = execute();
-        let (suffix, code) = match result {
-            Ok(()) => ("completed", "success"),
-            Err(code) => ("failed", code),
+        let (suffix, code) = match &result {
+            Ok(_) => ("completed", "success"),
+            Err(code) => ("failed", *code),
         };
         core.audit(task.as_deref(), &format!("{event}.{suffix}"), code).map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
         result
@@ -413,31 +487,41 @@ impl LocalFiles {
     }
 
     fn read_checked(&self, file: &File, name: &str) -> Result<String, &'static str> {
-        let mut info = BY_HANDLE_FILE_INFORMATION::default();
-        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-            return Err("FILE_UNAVAILABLE");
-        }
-        if info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0
-            || info.nNumberOfLinks != 1
-            || !self.matches_scope(&final_path(file)?, name)
-        {
-            return Err("FILE_OUTSIDE_SCOPE");
-        }
-        let size = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
-        if size > MAX_BYTES as u64 {
-            return Err("FILE_TOO_LARGE");
-        }
-
-        let mut bytes = Vec::new();
-        file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|_| "FILE_UNAVAILABLE")?;
-        if bytes.len() > MAX_BYTES {
-            return Err("FILE_TOO_LARGE");
-        }
-        if bytes.contains(&0) {
-            return Err("FILE_NOT_UTF8");
-        }
-        String::from_utf8(bytes).map_err(|_| "FILE_NOT_UTF8")
+        read_checked_in(file, &self.root, name)
     }
+}
+
+fn valid_trash_id(id: &str) -> bool {
+    uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id)
+}
+
+fn read_checked_in(file: &File, directory: &Path, name: &str) -> Result<String, &'static str> {
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err("FILE_UNAVAILABLE");
+    }
+    let path = final_path(file)?;
+    if info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0
+        || info.nNumberOfLinks != 1
+        || path.parent() != Some(directory)
+        || !path.file_name().and_then(|leaf| leaf.to_str()).is_some_and(|leaf| leaf.eq_ignore_ascii_case(name))
+    {
+        return Err("FILE_OUTSIDE_SCOPE");
+    }
+    let size = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
+    if size > MAX_BYTES as u64 {
+        return Err("FILE_TOO_LARGE");
+    }
+
+    let mut bytes = Vec::new();
+    file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|_| "FILE_UNAVAILABLE")?;
+    if bytes.len() > MAX_BYTES {
+        return Err("FILE_TOO_LARGE");
+    }
+    if bytes.contains(&0) {
+        return Err("FILE_NOT_UTF8");
+    }
+    String::from_utf8(bytes).map_err(|_| "FILE_NOT_UTF8")
 }
 
 /// Opens a directory by handle and checks that it is a real directory (no junction or link)
@@ -562,7 +646,7 @@ fn valid_name(name: &str) -> bool {
             && (uppercase.starts_with("COM") || uppercase.starts_with("LPT"))
             && uppercase.as_bytes()[3].is_ascii_digit());
     name.len() <= MAX_NAME
-        && extension.eq_ignore_ascii_case("txt")
+        && ["txt", "md", "csv"].iter().any(|supported| extension.eq_ignore_ascii_case(supported))
         && !stem.is_empty()
         && stem == stem.trim()
         && !reserved
@@ -593,6 +677,8 @@ mod tests {
     #[test]
     fn accepts_only_flat_plain_text_names() {
         assert!(valid_name("Notes 1.TXT"));
+        assert!(valid_name("Notes 1.MD"));
+        assert!(valid_name("Tableau.CSV"));
         for name in ["../x.txt", "C:\\x.txt", "x.txt:stream", "dir/x.txt", "NUL.txt", "COM1.txt", "x.txt ", "x..txt"] {
             assert!(!valid_name(name), "{name}");
         }
@@ -604,17 +690,17 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let files = LocalFiles::open(&directory).unwrap();
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
-        let source = files.root().join("source.txt");
-        let destination = files.root().join("copie.txt");
+        let source = files.root().join("source.md");
+        let destination = files.root().join("copie.md");
         let original = "\u{feff}Bonjour\r\n".as_bytes();
         fs::write(&source, original).unwrap();
-        assert_eq!(files.copy(&mut core, "source.txt", "copie.txt"), Ok(()));
+        assert_eq!(files.copy(&mut core, "source.md", "copie.md"), Ok(()));
         assert_eq!(fs::read(&destination).unwrap(), original);
         assert_eq!(fs::read(&source).unwrap(), original);
         fs::write(&destination, "À garder").unwrap();
-        assert_eq!(files.copy(&mut core, "source.txt", "copie.txt"), Err("FILE_DESTINATION_EXISTS"));
+        assert_eq!(files.copy(&mut core, "source.md", "copie.md"), Err("FILE_DESTINATION_EXISTS"));
         assert_eq!(fs::read_to_string(&destination).unwrap(), "À garder");
-        assert_eq!(files.copy(&mut core, "source.txt", "../hors.txt"), Err("INVALID_FILE_NAME"));
+        assert_eq!(files.copy(&mut core, "source.md", "../hors.md"), Err("INVALID_FILE_NAME"));
         assert!(!directory.join("hors.txt").exists());
         assert_eq!(fs::read_dir(files.root()).unwrap().count(), 2);
         let events = core.activity().unwrap();
@@ -635,6 +721,7 @@ mod tests {
         let task = Uuid::new_v4().to_string();
         fs::write(files.root().join("b note.txt"), "\u{feff}Deuxième").unwrap();
         fs::write(files.root().join("A.txt"), "Premier").unwrap();
+        fs::write(files.root().join("budget.csv"), "poste,montant\r\ntrain,25").unwrap();
         fs::write(files.root().join("image.png"), "x").unwrap();
         fs::write(files.root().join(".aiwin11-staging.tmp"), "x").unwrap();
         fs::create_dir(files.root().join("dossier.txt")).unwrap();
@@ -646,12 +733,15 @@ mod tests {
         assert_eq!(files.agent_read(&mut core, &task, denied, "A.txt"), Err("FILE_ACCESS_DENIED"));
 
         let reads = Policy::granting(&[Capability::FileRead]);
+        assert_eq!(files.list_files(&mut core, "NOTE"), Ok(vec!["b note.txt".into()]));
+        assert_eq!(files.list_files(&mut core, "../outside"), Err("INVALID_FILE_SEARCH"));
         // Hard links are listed by name but refused when read, like in the preview.
         assert_eq!(
             files.agent_list(&mut core, &task, reads),
-            Ok(vec!["A.txt".into(), "b note.txt".into(), "lien.txt".into()])
+            Ok(vec!["A.txt".into(), "b note.txt".into(), "budget.csv".into(), "lien.txt".into()])
         );
         assert_eq!(files.agent_read(&mut core, &task, reads, "b note.txt"), Ok("Deuxième".into()));
+        assert_eq!(files.preview(&mut core, "budget.csv"), Ok("poste,montant\r\ntrain,25".into()));
         assert_eq!(files.agent_read(&mut core, &task, reads, "lien.txt"), Err("FILE_OUTSIDE_SCOPE"));
         assert_eq!(files.agent_read(&mut core, &task, reads, "../outside.txt"), Err("INVALID_FILE_NAME"));
         let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
@@ -743,6 +833,17 @@ mod tests {
         assert_eq!(fs::read_to_string(folder.join("final.txt")).unwrap(), "Texte", "trashed, not deleted");
         assert_eq!(files.agent_trash(&mut core, &task, trashes, "absent.txt"), Err("FILE_UNAVAILABLE"));
         assert_eq!(fs::read_dir(files.trash()).unwrap().count(), 1, "a failed trash leaves no empty folder");
+        let id = folder.file_name().unwrap().to_str().unwrap();
+        assert_eq!(files.list_trash(&mut core).unwrap(), vec![(id.to_owned(), "final.txt".to_owned())]);
+        let destination = files.root().join("final.txt");
+        fs::write(&destination, "garder").unwrap();
+        assert_eq!(files.restore(&mut core, id, "final.txt"), Err("FILE_DESTINATION_EXISTS"));
+        assert_eq!(fs::read_to_string(&destination).unwrap(), "garder");
+        assert_eq!(fs::read_to_string(folder.join("final.txt")).unwrap(), "Texte");
+        fs::remove_file(&destination).unwrap();
+        assert_eq!(files.restore(&mut core, id, "final.txt"), Ok(()));
+        assert_eq!(fs::read_to_string(destination).unwrap(), "Texte");
+        assert!(files.list_trash(&mut core).unwrap().is_empty());
         let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
         assert!(
             kinds.contains(&"file.trash.completed".to_owned()) && kinds.contains(&"file.move.completed".to_owned())

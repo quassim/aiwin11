@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Runs every AiWin11 check locally (the repository is local only, so this replaces CI).
+  Runs the AiWin11 checks locally, with optional interactive tests and a release build.
 
 .PARAMETER Live
   Also runs the live tests (Ollama, the published bridge and agent, an interactive desktop).

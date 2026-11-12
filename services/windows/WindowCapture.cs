@@ -13,6 +13,34 @@ internal static class WindowCapture
     private const int MaxJpegBytes = 256 * 1024;
     private const uint RenderFullContent = 2;
     private const uint Blackness = 0x00000042;
+    private const uint SourceCopy = 0x00CC0020;
+
+    internal static Protocol.WindowCapture? ReadDisplay(Protocol.DisplayInfo display, long deadline)
+    {
+        if (display.Width == 0 || display.Height == 0 || (ulong)display.Width * display.Height > 36_000_000)
+            return null;
+        nint previousDpi = SetThreadDpiAwarenessContext(-4);
+        if (previousDpi == 0)
+            return null;
+        try
+        {
+            bool StillPresent() => Displays.Read()?.Displays.Contains(display) == true;
+            if (!StillPresent())
+                return null;
+            nint screen = GetDC(0);
+            if (screen == 0)
+                return null;
+            try
+            {
+                int width = (int)display.Width;
+                int height = (int)display.Height;
+                return Render(screen, width, height, deadline, StillPresent,
+                    memory => BitBlt(memory, 0, 0, width, height, screen, display.X, display.Y, SourceCopy));
+            }
+            finally { ReleaseDC(0, screen); }
+        }
+        finally { SetThreadDpiAwarenessContext(previousDpi); }
+    }
 
     /// <summary>Foreground window, for the desktop Inspector page.</summary>
     internal static Protocol.WindowCapture? Read(long deadline)
@@ -51,7 +79,12 @@ internal static class WindowCapture
             if (screen == 0)
                 return null;
 
-            try { return Render(window, screen, width, height, deadline, stillValid); }
+            bool CanCapture() => stillValid() && GetWindowDisplayAffinity(window, out uint current) && current == 0;
+            try
+            {
+                return Render(screen, width, height, deadline, CanCapture,
+                    memory => PrintWindow(window, memory, RenderFullContent));
+            }
             finally { ReleaseDC(0, screen); }
         }
         finally
@@ -61,7 +94,7 @@ internal static class WindowCapture
     }
 
     private static Protocol.WindowCapture? Render(
-        nint window, nint screen, int width, int height, long deadline, Func<bool> stillValid)
+        nint screen, int width, int height, long deadline, Func<bool> stillValid, Func<nint, bool> copy)
     {
         nint memory = CreateCompatibleDC(screen);
         if (memory == 0) return null;
@@ -75,9 +108,7 @@ internal static class WindowCapture
             if (original == 0 || original == -1 || !PatBlt(memory, 0, 0, width, height, Blackness))
                 return null;
             if (!stillValid() || DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= deadline
-                || !PrintWindow(window, memory, RenderFullContent)
-                || !stillValid()
-                || !GetWindowDisplayAffinity(window, out uint affinity) || affinity != 0)
+                || !copy(memory) || !stillValid())
                 return null;
 
             SelectObject(memory, original);
@@ -130,4 +161,6 @@ internal static class WindowCapture
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint obj);
     [DllImport("gdi32.dll")] private static extern bool DeleteDC(nint dc);
     [DllImport("gdi32.dll")] private static extern bool PatBlt(nint dc, int x, int y, int width, int height, uint operation);
+    [DllImport("gdi32.dll")] private static extern bool BitBlt(nint target, int x, int y, int width, int height,
+        nint source, int sourceX, int sourceY, uint operation);
 }

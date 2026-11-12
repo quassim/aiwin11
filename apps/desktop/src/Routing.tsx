@@ -9,14 +9,23 @@ const tasks: { name: string; status: string }[] = [
   { name: "Synthèse vocale", status: "Voix Windows locale (français si installée)" },
   { name: "Reconnaissance vocale", status: "Moteur Windows local (SAPI), bouton Dicter de l’Accueil" },
   { name: "Génération d’images", status: "Moteur Stable Diffusion local (configuré ci-dessous)" },
-  { name: "Génération vidéo", status: "Pas encore disponible (phase R7)" },
+  { name: "Génération vidéo", status: "ComfyUI local, dans la page Vidéo" },
 ];
 
 const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
 
 /** Model per task, routing strategy and resources used by local models (Models page). */
-export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: boolean) => void }) {
+export function Routing({
+  onFallbackChange,
+  adaptive,
+  onAdaptiveChange,
+}: {
+  onFallbackChange: (enabled: boolean) => void;
+  adaptive: boolean | undefined;
+  onAdaptiveChange: (enabled: boolean) => void;
+}) {
   const [fallback, setFallback] = useState<boolean>();
+  const [routingStatus, setRoutingStatus] = useState("");
   const [loaded, setLoaded] = useState<LoadedModel[]>();
   const [status, setStatus] = useState("");
   const [budget, setBudget] = useState<number>();
@@ -79,8 +88,28 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
       <label className="approval">
         <input
           type="checkbox"
+          checked={adaptive ?? false}
+          disabled={adaptive === undefined}
+          onChange={(event) => {
+            const enabled = event.target.checked;
+            setRoutingStatus("");
+            void invoke("set_adaptive_routing", { enabled }).then(
+              () => onAdaptiveChange(enabled),
+              () => setRoutingStatus("Le réglage du routage n’a pas pu être enregistré."),
+            );
+          }}
+        />
+        <span>
+          <strong>Routage adaptatif local</strong> · préfère un modèle déjà chargé sur le GPU si son appel d’outil est
+          vérifié. Sinon, utilise le modèle Ollama configuré. Ce mode reste local.
+        </span>
+      </label>
+      <p role="status">{routingStatus}</p>
+      <label className="approval">
+        <input
+          type="checkbox"
           checked={fallback ?? false}
-          disabled={fallback === undefined}
+          disabled={fallback === undefined || adaptive}
           onChange={(event) => {
             const next = event.target.checked;
             void invoke("set_cloud_fallback", { enabled: next }).then(() => {

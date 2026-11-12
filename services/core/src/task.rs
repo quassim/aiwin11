@@ -214,12 +214,24 @@ pub enum ApprovalAction {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TaskUpdate {
     /// A persisted lifecycle event (same name as the journal entry).
-    Stage { stage: &'static str },
+    Stage {
+        stage: &'static str,
+    },
     /// Unvalidated model text, for display only. The final reply replaces it.
-    Delta { text: String },
+    Delta {
+        text: String,
+    },
+    ModelSelected {
+        model: String,
+        reason: &'static str,
+    },
     /// The agent proposed a validated action; the task waits for the user's decision.
     #[serde(rename_all = "camelCase")]
-    ApprovalRequired { approval_id: String, action: ApprovalAction, expires_in_ms: u64 },
+    ApprovalRequired {
+        approval_id: String,
+        action: ApprovalAction,
+        expires_in_ms: u64,
+    },
 }
 
 impl TaskUpdate {
@@ -292,6 +304,7 @@ const PLANNING: u8 = 1;
 const CANCELLED: u8 = 2;
 const DISPATCHING: u8 = 3;
 const AWAITING_APPROVAL: u8 = 4;
+const MAINTENANCE: u8 = 5;
 pub const MAX_PROMPT_CHARS: usize = 2000;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Model proposals per task, observations included.
@@ -334,6 +347,8 @@ struct Run<'a, F: Fn(TaskUpdate)> {
     files: Option<&'a LocalFiles>,
     task: &'a str,
     progress: &'a F,
+    started: Instant,
+    fail_fast: bool,
     settings: PolicySettings,
     context: ActionContext,
     actions: Vec<ActionReport>,
@@ -425,7 +440,7 @@ impl TaskSlot {
             self.stop_after_dispatch.store(true, Ordering::Release);
             match self.phase.load(Ordering::Acquire) {
                 DISPATCHING => return StopStatus::Requested,
-                IDLE | CANCELLED => {
+                IDLE | CANCELLED | MAINTENANCE => {
                     self.stop_after_dispatch.store(false, Ordering::Release);
                     return StopStatus::Idle;
                 }
@@ -438,6 +453,13 @@ impl TaskSlot {
     /// True while a task is running (any phase but idle).
     pub fn is_running(&self) -> bool {
         self.phase.load(Ordering::Acquire) != IDLE
+    }
+
+    /// Reserve the slot while maintenance requires the app to stay idle.
+    pub fn while_idle<T>(&self, action: impl FnOnce() -> T) -> Option<T> {
+        self.phase.compare_exchange(IDLE, MAINTENANCE, Ordering::AcqRel, Ordering::Acquire).ok()?;
+        let _reset = ResetSlot(self);
+        Some(action())
     }
 
     /// Requests cancellation. Succeeds while the model is planning or while an approval is
@@ -512,6 +534,10 @@ impl TaskSlot {
         progress: impl Fn(TaskUpdate),
     ) -> Result<TaskOutcome, &'static str> {
         let prompt = validate_prompt(&request.prompt)?;
+        let workflow = workflow_steps(prompt)?;
+        if workflow.is_some() && !matches!(request.provider, Provider::Ollama) {
+            return Err("WORKFLOW_LOCAL_ONLY");
+        }
         if request.model.is_empty() || request.model.len() > 256 {
             return Err("MODEL_REQUIRED");
         }
@@ -526,13 +552,42 @@ impl TaskSlot {
         lock(core)?.task_created(&task).map_err(|_| "AUDIT_UNAVAILABLE")?;
         record(core, &task, "task.created")?;
         progress(TaskUpdate::stage("task.created"));
-        let outcome = self.plan_and_execute(core, files, &task, prompt, request, &progress);
+        let started = Instant::now();
+        let is_workflow = workflow.is_some();
+        let outcome = (|| {
+            let mut routed = request.clone();
+            if matches!(routed.provider, Provider::Ollama) && !routed.scheduled && lock(core)?.adaptive_local_routing()
+            {
+                routed.cloud_fallback_model = None;
+                progress(TaskUpdate::stage("model.routing"));
+                let candidate = Ollama::connect().and_then(|ollama| ollama.adaptive_model(&routed.model));
+                let reason = if let Ok(Some(model)) = candidate {
+                    routed.model = model;
+                    "gpu_verified"
+                } else {
+                    "configured_local"
+                };
+                if self.phase.load(Ordering::Acquire) == CANCELLED {
+                    return Err("TASK_CANCELLED");
+                }
+                record_code(core, &task, "model.selected", reason)?;
+                progress(TaskUpdate::ModelSelected { model: routed.model.clone(), reason });
+            }
+            if let Some(steps) = workflow {
+                self.run_workflow(core, files, &task, steps, &routed, &progress, started)
+            } else {
+                self.plan_and_execute(core, files, &task, prompt, &routed, &progress, started, false)
+            }
+        })();
         // Arbitrate cancellation even when the provider or agent returns an error.
         let outcome = match self.phase.compare_exchange(PLANNING, DISPATCHING, Ordering::AcqRel, Ordering::Acquire) {
             Err(CANCELLED) => Err("TASK_CANCELLED"),
             _ => outcome,
         };
         let (kind, state, code) = match outcome {
+            Ok(ref result) if is_workflow && result.actions.iter().any(action_failed) => {
+                ("task.failed", "failed", "WORKFLOW_STEP_FAILED")
+            }
             Ok(_) => ("task.completed", "completed", "ok"),
             Err("TASK_CANCELLED") => ("task.cancelled", "cancelled", "TASK_CANCELLED"),
             Err(code) => ("task.failed", "failed", code),
@@ -542,8 +597,71 @@ impl TaskSlot {
         outcome
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn run_workflow<F: Fn(TaskUpdate)>(
+        &self,
+        core: &Mutex<Core>,
+        files: Option<&LocalFiles>,
+        task: &str,
+        steps: Vec<WorkflowStep<'_>>,
+        request: &TaskRequest,
+        progress: &F,
+        started: Instant,
+    ) -> Result<TaskOutcome, &'static str> {
+        let local = TaskRequest { cloud_approved: false, cloud_fallback_model: None, ..request.clone() };
+        let mut workflow = TaskOutcome { reply: String::new(), actions: Vec::new() };
+        let total = steps.len();
+        let mut previous_passed = true;
+        for (index, step) in steps.into_iter().enumerate() {
+            if self.phase.load(Ordering::Acquire) == CANCELLED {
+                return Err("TASK_CANCELLED");
+            }
+            let number = index + 1;
+            let code = format!("step:{number}/{total}");
+            if step.on_failure && previous_passed {
+                record_code(core, task, "workflow.step.skipped", &code)?;
+                continue;
+            }
+            if !step.on_failure && !previous_passed {
+                workflow.reply.push_str("\n\nWorkflow arrêté après une action refusée, échouée ou non vérifiée.");
+                break;
+            }
+            record_code(core, task, "workflow.step.started", &code)?;
+            progress(TaskUpdate::stage("workflow.step.started"));
+            let result = self.plan_and_execute(core, files, task, step.prompt, &local, progress, started, true);
+            let outcome = match result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    record_code(core, task, "workflow.step.failed", &code)?;
+                    return Err(error);
+                }
+            };
+            let passed = !outcome.actions.iter().any(action_failed);
+            let blocked = outcome.actions.iter().any(|action| {
+                matches!(action.status, ActionStatus::Declined | ActionStatus::Expired | ActionStatus::Denied)
+            });
+            if !workflow.reply.is_empty() {
+                workflow.reply.push_str("\n\n");
+            }
+            workflow.reply.push_str(&format!("Étape {number}/{total}\n{}", outcome.reply));
+            workflow.actions.extend(outcome.actions);
+            if !passed {
+                record_code(core, task, "workflow.step.failed", &code)?;
+                if blocked {
+                    workflow.reply.push_str("\n\nWorkflow arrêté après un refus ou une approbation expirée.");
+                    break;
+                }
+            } else {
+                record_code(core, task, "workflow.step.completed", &code)?;
+            }
+            previous_passed = passed;
+        }
+        Ok(workflow)
+    }
+
     /// The agent loop: propose, validate, gate each action through the policy engine, run it,
     /// feed the observation back, until the model replies or `MAX_AGENT_STEPS` is reached.
+    #[allow(clippy::too_many_arguments)]
     fn plan_and_execute<F: Fn(TaskUpdate)>(
         &self,
         core: &Mutex<Core>,
@@ -552,6 +670,8 @@ impl TaskSlot {
         prompt: &str,
         request: &TaskRequest,
         progress: &F,
+        started: Instant,
+        fail_fast: bool,
     ) -> Result<TaskOutcome, &'static str> {
         set_state(core, task, "planning", None)?;
         let provider_code = match request.provider {
@@ -593,6 +713,8 @@ impl TaskSlot {
             files,
             task,
             progress,
+            started,
+            fail_fast,
             settings,
             context: ActionContext { local_model: local, temporary_grant: false, profile: request.agent },
             actions: Vec::new(),
@@ -616,7 +738,6 @@ impl TaskSlot {
         };
         let mut cloud_tokens: u64 = 0;
         let mut history: Vec<StepRecord> = Vec::new();
-        let started = Instant::now();
         for step in 1..=MAX_AGENT_STEPS {
             if started.elapsed() > MAX_TASK_RUNTIME {
                 record_code(core, task, "task.limit.reached", "runtime")?;
@@ -710,6 +831,9 @@ impl TaskSlot {
             };
             record(core, task, "agent.observation")?;
             progress(TaskUpdate::stage("agent.observation"));
+            if fail_fast && run.actions.iter().any(action_failed) {
+                return Ok(TaskOutcome { reply: observation, actions: run.actions });
+            }
             history.push(StepRecord { tool, arguments, call_id, observation });
         }
         Err("AGENT_STEP_LIMIT")
@@ -1081,7 +1205,16 @@ impl TaskSlot {
         }
         record_code(run.core, run.task, "agent.delegated", agent.code())?;
         let sub = TaskRequest { agent, prompt: request.to_owned(), ..run.request.clone() };
-        let outcome = self.plan_and_execute(run.core, run.files, run.task, request, &sub, run.progress);
+        let outcome = self.plan_and_execute(
+            run.core,
+            run.files,
+            run.task,
+            request,
+            &sub,
+            run.progress,
+            run.started,
+            run.fail_fast,
+        );
         Ok(match outcome {
             Ok(outcome) => {
                 run.actions.extend(outcome.actions);
@@ -2182,10 +2315,12 @@ fn describe_window(target: &WindowTarget, nodes: &[NamedNode], truncated: bool) 
 /// Model-facing summary of a listing. Names come from the local folder only.
 fn describe_list(result: Result<Vec<String>, &'static str>) -> String {
     match result {
-        Ok(names) if names.is_empty() => "Le dossier de fichiers d’AiWin11 ne contient aucun fichier .txt.".into(),
+        Ok(names) if names.is_empty() => {
+            "Le dossier de fichiers d’AiWin11 ne contient aucun fichier .txt, .md ou .csv.".into()
+        }
         Ok(names) => {
             let lines: Vec<_> = names.iter().map(|name| format!("- {name}")).collect();
-            format!("Fichiers .txt du dossier d’AiWin11 ({}) :\n{}", names.len(), lines.join("\n"))
+            format!("Fichiers texte du dossier d’AiWin11 ({}) :\n{}", names.len(), lines.join("\n"))
         }
         Err(code) => format!("Échec de l’outil : {code}. Rien n’a été modifié."),
     }
@@ -2217,6 +2352,57 @@ fn validate_prompt(prompt: &str) -> Result<&str, &'static str> {
         return Err("PROMPT_INVALID");
     }
     Ok(prompt)
+}
+
+fn action_failed(action: &ActionReport) -> bool {
+    !matches!(action.status, ActionStatus::Done | ActionStatus::Simulated)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WorkflowStep<'a> {
+    prompt: &'a str,
+    on_failure: bool,
+}
+
+fn workflow_steps(prompt: &str) -> Result<Option<Vec<WorkflowStep<'_>>>, &'static str> {
+    const HEADER: &str = "Exécute ces étapes dans l’ordre. Si une étape échoue, arrête-toi et explique pourquoi.";
+    let Some(body) = prompt.strip_prefix(HEADER).and_then(|rest| rest.strip_prefix('\n')) else {
+        return Ok(None);
+    };
+    let mut steps = Vec::new();
+    for (index, line) in body.lines().enumerate() {
+        if index >= 8 {
+            return Err("WORKFLOW_INVALID");
+        }
+        let step = line.strip_prefix(&format!("{}. ", index + 1)).ok_or("WORKFLOW_INVALID")?;
+        let fallback = step.strip_prefix("[si échec] ");
+        if index == 0 && fallback.is_some() {
+            return Err("WORKFLOW_INVALID");
+        }
+        let prompt = validate_prompt(fallback.unwrap_or(step)).map_err(|_| "WORKFLOW_INVALID")?;
+        steps.push(WorkflowStep { prompt, on_failure: fallback.is_some() });
+    }
+    if steps.is_empty() {
+        return Err("WORKFLOW_INVALID");
+    }
+    Ok(Some(steps))
+}
+
+#[cfg(test)]
+#[test]
+fn workflow_validates_all_steps_before_execution() {
+    let header = "Exécute ces étapes dans l’ordre. Si une étape échoue, arrête-toi et explique pourquoi.";
+    let valid = format!("{header}\n1. Liste les fichiers\n2. [si échec] Lis notes.txt");
+    assert_eq!(
+        workflow_steps(&valid),
+        Ok(Some(vec![
+            WorkflowStep { prompt: "Liste les fichiers", on_failure: false },
+            WorkflowStep { prompt: "Lis notes.txt", on_failure: true },
+        ]))
+    );
+    let malformed = format!("{header}\n1. Liste les fichiers\n3. Lis notes.txt");
+    assert_eq!(workflow_steps(&malformed), Err("WORKFLOW_INVALID"));
+    assert_eq!(workflow_steps("Ouvre le Bloc-notes"), Ok(None));
 }
 
 struct ResetSlot<'a>(&'a TaskSlot);
@@ -2510,18 +2696,27 @@ fn run_agent(proposal: &Proposal) -> Result<PlannedAction, &'static str> {
     invoke_agent(python.as_path(), &script, directory, proposal)
 }
 
-/// The Python interpreter for the agent: `AIWIN11_PYTHON` if set, otherwise the first real
-/// `python.exe` on the PATH (the Microsoft Store alias in `WindowsApps` is skipped: it is a
-/// stub that may open the Store instead of running a script).
+/// Finds an explicit, bundled or PATH interpreter, in that order.
+/// The WindowsApps alias may open the Microsoft Store and is skipped.
 fn python_interpreter() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("AIWIN11_PYTHON").map(PathBuf::from) {
         return (path.is_absolute() && path.is_file()).then_some(path);
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        let bundled = executable.with_file_name("python").join("python.exe");
+        if bundled.is_file() {
+            return Some(bundled);
+        }
     }
     std::env::split_paths(&std::env::var_os("PATH")?)
         .filter(|directory| directory.is_absolute())
         .filter(|directory| !directory.to_string_lossy().to_ascii_lowercase().contains("windowsapps"))
         .map(|directory| directory.join("python.exe"))
         .find(|candidate| candidate.is_file())
+}
+
+pub fn python_available() -> bool {
+    python_interpreter().is_some()
 }
 
 fn invoke_agent(
@@ -2952,7 +3147,7 @@ mod tests {
         task.run(core, files, &live_request(prompt), |update| match update {
             TaskUpdate::Stage { stage } => stages.lock().unwrap().push(stage),
             TaskUpdate::ApprovalRequired { approval_id, .. } => task.resolve_approval(&approval_id, approve).unwrap(),
-            TaskUpdate::Delta { .. } => {}
+            TaskUpdate::Delta { .. } | TaskUpdate::ModelSelected { .. } => {}
         })
     }
 

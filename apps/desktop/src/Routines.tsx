@@ -2,6 +2,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
 type Routine = { id: string; text: string; createdAt: string; schedule?: string };
+type WorkflowStep = { text: string; onFailure: boolean };
+const workflowHeader = "Exécute ces étapes dans l’ordre. Si une étape échoue, arrête-toi et explique pourquoi.";
+const failurePrefix = "[si échec] ";
+const maxRoutineChars = 1000;
+const everyDay = "0123456";
+const weekdays = [
+  ["1", "Lun."],
+  ["2", "Mar."],
+  ["3", "Mer."],
+  ["4", "Jeu."],
+  ["5", "Ven."],
+  ["6", "Sam."],
+  ["0", "Dim."],
+] as const;
+
+function formatWorkflow(steps: WorkflowStep[]) {
+  return [
+    workflowHeader,
+    ...steps.map((step, index) => `${index + 1}. ${step.onFailure ? failurePrefix : ""}${step.text.trim()}`),
+  ].join("\n");
+}
 
 /**
  * Saved requests (encrypted). One click puts one back in the request field. A daily time makes
@@ -11,7 +32,21 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [reports, setReports] = useState<Routine[]>([]);
   const [times, setTimes] = useState<Record<string, string>>({});
+  const [days, setDays] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
+  const [steps, setSteps] = useState<WorkflowStep[]>();
+  const [editing, setEditing] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const workflowText = steps ? formatWorkflow(steps) : "";
+  const workflowLength = Array.from(workflowText).length;
+  const canSaveWorkflow =
+    steps?.every(
+      (step, index) =>
+        (index > 0 || !step.onFailure) &&
+        step.text.trim() &&
+        !step.text.trim().startsWith(failurePrefix) &&
+        !/[\r\n\0]/.test(step.text),
+    ) && workflowLength <= maxRoutineChars;
 
   async function load() {
     try {
@@ -36,22 +71,70 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
     }
   }
 
+  function editWorkflow(routine: Routine) {
+    setEditing(routine.id);
+    setSteps(
+      routine.text
+        .split("\n")
+        .slice(1)
+        .map((line) => {
+          const text = line.replace(/^\d+\. /, "");
+          const onFailure = text.startsWith(failurePrefix);
+          return { text: onFailure ? text.slice(failurePrefix.length) : text, onFailure };
+        }),
+    );
+    setStatus("");
+  }
+
+  async function saveWorkflow() {
+    if (!canSaveWorkflow || saving) return;
+    setSaving(true);
+    try {
+      if (editing) {
+        await invoke("update_routine", { id: editing, text: workflowText });
+      } else {
+        await invoke("save_routine", { text: workflowText });
+      }
+      setSteps(undefined);
+      setEditing(undefined);
+      setStatus("Workflow enregistré.");
+      await load();
+    } catch {
+      setStatus("Le workflow n’a pas pu être enregistré.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function moveStep(index: number, offset: number) {
+    setSteps((current) => {
+      if (!current) return current;
+      const next = [...current];
+      const target = index + offset;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function remove(id: string) {
     await invoke("delete_memory", { id }).catch(() => undefined);
     await load();
   }
 
-  async function schedule(id: string, time: string | null) {
+  async function schedule(id: string, time: string | null, selected = everyDay) {
     try {
-      await invoke("set_routine_schedule", { id, schedule: time });
+      const value = time && time !== "startup" && selected !== everyDay ? `${time}@${selected}` : time;
+      await invoke("set_routine_schedule", { id, schedule: value });
       setStatus(
-        time
-          ? `Planifiée chaque jour à ${time} (modèle local, lecture seule, AiWin11 doit être ouvert).`
-          : "Planification retirée.",
+        time === "startup"
+          ? "Au prochain démarrage d’AiWin11, au plus une fois par jour (modèle local, lecture seule)."
+          : time
+            ? `Planifiée à ${time} les jours sélectionnés (modèle local, lecture seule, AiWin11 doit être ouvert).`
+            : "Planification retirée.",
       );
       await load();
     } catch {
-      setStatus("Heure invalide.");
+      setStatus("Impossible d’enregistrer la planification. Vérifie l’heure et les jours choisis.");
     }
   }
 
@@ -62,39 +145,177 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
         <button type="button" disabled={!prompt.trim()} onClick={() => void save()}>
           Enregistrer la demande
         </button>
+        <button
+          type="button"
+          disabled={!!steps}
+          onClick={() => {
+            setEditing(undefined);
+            setSteps([{ text: "", onFailure: false }]);
+          }}
+        >
+          Créer un workflow
+        </button>
       </div>
-      {routines.length > 0 && (
-        <ul>
-          {routines.map((routine) => (
-            <li key={routine.id}>
-              <button type="button" className="link-button" onClick={() => onPick(routine.text)}>
-                {routine.text}
-              </button>
-              <span>
-                <input
-                  type="time"
-                  aria-label="Heure quotidienne"
-                  value={times[routine.id] ?? routine.schedule ?? ""}
-                  onChange={(event) => setTimes({ ...times, [routine.id]: event.target.value })}
-                />
-                <button
-                  type="button"
-                  disabled={!(times[routine.id] ?? routine.schedule)}
-                  onClick={() => void schedule(routine.id, times[routine.id] ?? routine.schedule ?? null)}
-                >
-                  Planifier
+      {steps && (
+        <fieldset className="task-form" disabled={saving}>
+          <legend>{editing ? "Modifier le workflow" : "Nouveau workflow"}</legend>
+          <p>Les étapes s’exécutent avec Ollama. Ajoute une étape « Si échec » juste après l’action à traiter.</p>
+          {steps.map((step, index) => (
+            <div key={index} className="task-form">
+              <label htmlFor={`workflow-step-${index}`}>Étape {index + 1}</label>
+              <input
+                id={`workflow-step-${index}`}
+                value={step.text}
+                maxLength={maxRoutineChars}
+                onChange={(event) =>
+                  setSteps(
+                    steps.map((value, position) =>
+                      position === index ? { ...value, text: event.target.value } : value,
+                    ),
+                  )
+                }
+              />
+              {(index > 0 || step.onFailure) && (
+                <label className="approval">
+                  <input
+                    type="checkbox"
+                    checked={step.onFailure}
+                    disabled={index === 0 && !step.onFailure}
+                    onChange={(event) =>
+                      setSteps(
+                        steps.map((value, position) =>
+                          position === index ? { ...value, onFailure: event.target.checked } : value,
+                        ),
+                      )
+                    }
+                  />
+                  <span>Si échec de la dernière étape exécutée</span>
+                </label>
+              )}
+              <div>
+                <button type="button" disabled={index === 0} onClick={() => moveStep(index, -1)}>
+                  Monter
                 </button>
-                {routine.schedule && (
-                  <button type="button" onClick={() => void schedule(routine.id, null)}>
-                    Déplanifier
+                <button type="button" disabled={index === steps.length - 1} onClick={() => moveStep(index, 1)}>
+                  Descendre
+                </button>
+                {editing && index > 0 && (
+                  <button
+                    type="button"
+                    disabled={!canSaveWorkflow || step.onFailure}
+                    onClick={() => {
+                      onPick(formatWorkflow(steps.slice(index)));
+                      setStatus(`Reprise préparée depuis l’étape ${index + 1}. Vérifie la demande avant de l’envoyer.`);
+                    }}
+                  >
+                    Préparer la reprise ici
                   </button>
                 )}
-                <button type="button" aria-label="Supprimer cette demande" onClick={() => void remove(routine.id)}>
-                  Supprimer
+                <button
+                  type="button"
+                  disabled={steps.length === 1}
+                  onClick={() => setSteps(steps.filter((_, position) => position !== index))}
+                >
+                  Retirer
                 </button>
-              </span>
-            </li>
+              </div>
+            </div>
           ))}
+          <p>
+            {workflowLength} / {maxRoutineChars} caractères
+          </p>
+          <div className="section-header">
+            <button
+              type="button"
+              disabled={steps.length >= 8}
+              onClick={() => setSteps([...steps, { text: "", onFailure: false }])}
+            >
+              Ajouter une étape
+            </button>
+            <button type="button" disabled={!canSaveWorkflow} onClick={() => void saveWorkflow()}>
+              Enregistrer le workflow
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSteps(undefined);
+                setEditing(undefined);
+              }}
+            >
+              Annuler
+            </button>
+          </div>
+        </fieldset>
+      )}
+      {routines.length > 0 && (
+        <ul>
+          {routines.map((routine) => {
+            const atStartup = routine.schedule === "startup";
+            const [savedTime, savedDays = everyDay] = (atStartup ? "" : (routine.schedule ?? "")).split("@");
+            const time = times[routine.id] ?? savedTime;
+            const selected = days[routine.id] ?? savedDays;
+            return (
+              <li key={routine.id}>
+                <button type="button" className="link-button" onClick={() => onPick(routine.text)}>
+                  {routine.text.startsWith(workflowHeader + "\n")
+                    ? routine.text.split("\n").slice(1).join(" · ")
+                    : routine.text}
+                </button>
+                <div>
+                  {routine.text.startsWith(workflowHeader + "\n") && (
+                    <button type="button" disabled={!!steps} onClick={() => editWorkflow(routine)}>
+                      Modifier
+                    </button>
+                  )}
+                  <input
+                    type="time"
+                    aria-label="Heure locale d’exécution"
+                    value={time}
+                    onChange={(event) => setTimes({ ...times, [routine.id]: event.target.value })}
+                  />
+                  <fieldset>
+                    <legend>Jours d’exécution</legend>
+                    {weekdays.map(([day, label]) => (
+                      <label key={day}>
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(day)}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? Array.from(selected + day)
+                                  .sort()
+                                  .join("")
+                              : selected.replace(day, "");
+                            setDays((current) => ({ ...current, [routine.id]: next }));
+                          }}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </fieldset>
+                  <button
+                    type="button"
+                    disabled={!time || !selected}
+                    onClick={() => void schedule(routine.id, time, selected)}
+                  >
+                    Planifier
+                  </button>
+                  <button type="button" disabled={atStartup} onClick={() => void schedule(routine.id, "startup")}>
+                    Au démarrage
+                  </button>
+                  {atStartup && <p>Prévu au démarrage d’AiWin11.</p>}
+                  {routine.schedule && (
+                    <button type="button" onClick={() => void schedule(routine.id, null)}>
+                      Déplanifier
+                    </button>
+                  )}
+                  <button type="button" aria-label="Supprimer cette demande" onClick={() => void remove(routine.id)}>
+                    Supprimer
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
       {reports.length > 0 && (

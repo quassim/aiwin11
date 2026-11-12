@@ -25,6 +25,14 @@ EvaluateAction, RequestApproval, GrantCapability, RevokeCapability, ExecuteAutho
 WindowService.List/Focus/Resize/Minimize/Close; ApplicationService.Discover/Launch/GetStatus; FileService.List/Read/Copy/Move/Delete/Search; ProcessService.List/Inspect/Terminate; DesktopService.CaptureScreen/GetDisplays/GetActiveWindow; UIAutomationService.InspectTree/FindElement/Invoke/SetValue; InputService.MovePointer/Click/Type/Hotkey; ShellService.ExecuteApprovedCommand; SystemService.GetHardwareInfo/GetSystemMetrics.
 
 ## Supporting services
+
+The adaptive Ollama setting is opt-in. For an interactive local task, the core compares the fraction of each loaded model held in VRAM. Ties favor the configured model. A different model must pass the existing synthetic tool-call probe before use. On failure the configured local model is retained. Adaptive tasks disable cloud fallback. The requesting window receives a `modelSelected` update with the model identifier and reason. The journal records only the reason code.
+
+Local video uses `start_video` and `video_status`. Only the main desktop can authorize `GenerateLocalVideo`. A bounded ComfyUI API graph must use the local node allowlist, one text placeholder and one `SaveVideo` output. The host submits to the configured loopback port with proxies and redirects disabled, then polls the returned job ID. The generated file stays in ComfyUI's output directory. The audit records the operation and outcome codes.
+
+Signed desktop updates use Tauri Updater with a public key embedded at packaging time. `check_update` consults the AiWin11 GitHub release manifest over HTTPS and returns an available version. `install_update` takes that version, rechecks the release and verifies the downloaded installer signature before installation. The task slot must be idle at installation and stays reserved until the installer starts. An ordinary development build reports that updates are unavailable. Packaging generates the NSIS installer, its signature and the release manifest.
+
+Saved workflows use the existing encrypted routine storage. A workflow created by the editor carries a fixed header and one to eight consecutive numbered lines. The core validates the entire sequence before dispatch, runs each step as a separate Ollama agent loop inside one cancellable task, and disables cloud fallback for that task. Scheduled workflows retain the Observation policy. Step events carry the ordinal and outcome. A line prefixed with `[si échec]` runs after a failed or unverified action in the preceding executed step. A refusal or expired approval stops the sequence. Manual resume prepares a new workflow from the selected step. Later steps do not inherit tool references or conversation history from earlier steps.
 MemoryService: Add/Query/Delete/Export and indexing scope. WorkflowService: Create/Validate/Run/Pause/Resume/Cancel. Speech/Image/Video services: provider-neutral asynchronous job status, capabilities and transfer/privacy controls. PluginService: discover MCP tools, permissions, execute through broker. TelemetryService: local metrics and audited traces.
 
 ## Storage
@@ -65,6 +73,12 @@ The main window exposes `inspect_foreground` through the Inspector page. Its thr
 
 ## Foreground window capture
 
+The Inspector can list the current desktop displays through the broker's desktop-only `ListDisplays` operation. The Windows bridge uses a per-monitor DPI-aware thread context and returns up to 32 rectangles in virtual desktop pixels, with one primary monitor. The audit records the outcome code.
+
+`CaptureDisplay` accepts one complete display descriptor from that list. The desktop-only operation checks that the descriptor still matches an active display before and after copying its pixels. It returns the same bounded JPEG preview as foreground-window capture. The image stays in memory. The journal records the outcome without the captured pixels.
+
+The Inspector can submit the captured JPEG to `transcribe_capture`. The broker restricts the v1 `TranscribeCapture` operation to the desktop role. The existing Ollama image path requires a local vision model and disabled cloud features. The model receives a fixed transcription instruction with no tools. The text is rendered in the WebView and the audit records only the outcome.
+
 The Inspector page invokes `capture_foreground` after the same countdown. The broker authorizes the v1 `CaptureForeground` operation for the desktop inspector role. The bridge requests rendering of the selected HWND with Win32 PrintWindow. It rejects windows with display-affinity restrictions and discards the image if the foreground window changes during the operation.
 
 `WindowCapture` carries a JPEG of at most 256 KiB with dimensions capped at 1024 px per side. The Rust host drains the pipe during execution and caps the full capture reply at 257 KiB. The image stays in memory and is displayed in the calling WebView. SQLite receives the decision and outcome codes.
@@ -85,7 +99,11 @@ The Inspector page submits `enter_character_map_digit` after explicit user actio
 
 ## Local text preview and copy
 
-The Files page submits `preview_local_text` with one file name. The broker authorizes the v1 `PreviewLocalText` operation for the desktop inspector role. The core resolves the candidate under the dedicated local app-data `files` folder and validates the opened handle's final path, file attributes and link count before reading. It accepts flat ASCII `.txt` names and UTF-8 content up to 64 KiB. The result is displayed as plain text in the requesting window. SQLite records the operation and outcome codes. The filename and text stay out of the audit event and model gateways.
+The desktop and local agent share the same flat ASCII filename rules for `.txt`, `.md` and `.csv`. All three formats are treated as UTF-8 text. Preview renders plain text and copy preserves the source bytes.
+
+The main desktop window can call `move_local_text`, `trash_local_text`, `list_trash` and `restore_local_text`. Restore accepts the canonical UUID of a trash entry and its flat text filename. It opens the source and destination directories by handle and restores the original filename into the active workspace without replacement. The broker restricts listing and restoring trash to the desktop role. Audit events contain outcome codes.
+
+The Files page submits `preview_local_text` with one file name. The broker authorizes the v1 `PreviewLocalText` operation for the desktop inspector role. The core resolves the candidate under the active workspace and validates the opened handle's final path, file attributes and link count before reading. It accepts flat ASCII `.txt`, `.md` and `.csv` names and UTF-8 content up to 64 KiB. The result is displayed as plain text in the requesting window. SQLite records the operation and outcome codes. The filename and text stay out of the audit event and model gateways.
 
 `copy_local_text` takes the source and destination names and requires the separate v1 `CopyLocalText` permission. Both names follow the preview rules. The core validates the source and opens the destination directory by handle. It writes and flushes a staging file before publishing it by a same-directory rename with replacement disabled. The copied bytes preserve the source BOM and line endings. A failed write or rename triggers cleanup by file handle. An abrupt process termination can leave a staging file. SQLite records the operation and outcome codes without the names or contents.
 
@@ -126,7 +144,7 @@ Observations are untrusted data: file contents, window trees and descriptions ar
 | `describe_window` | — | describeWindow | WindowLookup, then WindowCapture | yes, and only with a chosen vision model |
 | `type_in_notepad` | `text` (1–2000 chars) | typeText | TypeText | yes |
 
-File names are flat ASCII `.txt` names (letters, digits, space, `-`, `_`; no reserved device names; at most 128 bytes); source and destination must differ ignoring case. No tool takes a path, a window handle, a process ID or a command line: the host decides every target. Local-only tools are not offered to cloud models and are denied by the policy engine if proposed anyway.
+File names are flat ASCII names in `.txt`, `.md` or `.csv`. The stem accepts letters, digits, spaces, `-` and `_`, excluding reserved device names. The full name is at most 128 bytes. Source and destination must differ ignoring case. No tool takes a path, a window handle, a process ID or a command line: the host decides every target. Local-only tools are not offered to cloud models and are denied by the policy engine if proposed anyway.
 
 ## Policy engine
 
@@ -188,7 +206,7 @@ When the decision is `Ask`, the host:
 
 All file tools cover the dedicated `files` folder under the app's local data directory, with the rules of the Files page: handle-verified paths, no links (hard links refused when read), 64 KiB maximum, UTF-8. Audit events hold codes only (`file.list.*`, `file.preview.*`, `file.copy.*`, `file.move.*`, `file.trash.*`).
 
-- `list_text_files`: at most 100 sorted names of regular `.txt` files. `read_text_file`: the text without BOM, at most 16 000 characters passed to the model.
+- `list_text_files` returns up to 100 sorted names of regular `.txt`, `.md` and `.csv` files. `read_text_file` passes up to 16 000 characters of text to the model after removing the BOM.
 - `copy_text_file`: staging file, flush, same-folder rename with replacement disabled, cleanup on failure.
 - `move_text_file`: rename of the handle-opened file inside the folder, replacement disabled.
 - `trash_text_file`: the file is moved, by handle-anchored rename, into a new subfolder of AiWin11's own `trash` folder (next to `files`), keeping its name. Nothing is deleted; it can be restored by moving it back. A failed trash leaves no empty folder.
@@ -324,6 +342,10 @@ Speech (R7, window only): replies can be read aloud with `speechSynthesis`, rest
 Saved requests (migration 005, `memory_entries.kind = 'routine'`, same DPAPI encryption): `save_routine { text }`, `get_routines`, deletion with `delete_memory { id }` (clearing all notes keeps routines). Picking one only fills the request field: it never runs without the user sending it.
 
 Scheduling (R8, migration 006: `schedule` "HH:MM" local time, `last_run` local day): `set_routine_schedule { id, schedule? }` (journaled `routine.schedule.changed`). While AiWin11 is open, a scheduler thread checks every 30 s and runs each due request once a day, only when no task is running, with `TaskRequest.scheduled = true`: local provider required (`SCHEDULED_LOCAL_ONLY`), Observation profile forced (`task.scheduled`), so every side effect is refused; anything that would still ask (screen, clipboard, window list) is denied with rule `unattended`, as nobody can approve. The reply (or error code) is stored encrypted as a `report` (50 kept), listed by `get_reports`.
+
+A schedule may include a weekday suffix, such as `07:30@12345` for Monday to Friday. The weekday digits are sorted and unique, from Sunday (`0`) to Saturday (`6`). A time alone still runs daily. Updating the schedule preserves the date of the last execution.
+
+The schedule value `startup` selects the first scheduler cycle after AiWin11 starts and has a configured local model. The same once-per-local-day execution marker applies. Startup routines use the same Observation profile as timed routines.
 
 ## Storage invariant: nothing sensitive in SQLite
 

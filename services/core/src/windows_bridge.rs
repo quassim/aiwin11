@@ -18,7 +18,7 @@ use aiwin11_contracts::{
     },
     Message, SCHEMA_VERSION,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 
@@ -34,6 +34,15 @@ const REPLY_GRACE: Duration = Duration::from_secs(2);
 /// Upper bound on any wait, whatever deadline the command carries.
 const MAX_BRIDGE_WAIT: Duration = Duration::from_secs(25);
 const MAX_MESSAGE_BYTES: usize = 1024;
+
+#[derive(Deserialize, Serialize)]
+pub struct Display {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    primary: bool,
+}
 const MAX_JPEG_BYTES: usize = 256 * 1024;
 /// Deadline of agent tool commands (see `Core::agent_command`).
 const AGENT_DEADLINE_MS: i64 = 15_000;
@@ -124,24 +133,46 @@ impl Core {
     }
 
     pub fn analyze_capture(core: &Mutex<Self>, model: &str, jpeg: &[u8]) -> Result<String, &'static str> {
+        Self::process_capture(core, model, jpeg, Operation::AnalyzeCapture(AnalyzeCapture {}))
+    }
+
+    pub fn transcribe_capture(core: &Mutex<Self>, model: &str, jpeg: &[u8]) -> Result<String, &'static str> {
+        Self::process_capture(core, model, jpeg, Operation::TranscribeCapture(Default::default()))
+    }
+
+    fn process_capture(
+        core: &Mutex<Self>,
+        model: &str,
+        jpeg: &[u8],
+        operation: Operation,
+    ) -> Result<String, &'static str> {
         if !valid_jpeg(jpeg) {
             return Err("INVALID_CAPTURE");
         }
         if model.is_empty() || model.len() > 256 {
             return Err("VISION_MODEL_REQUIRED");
         }
+        let transcribe = matches!(&operation, Operation::TranscribeCapture(_));
         let task = {
             let mut core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
-            let command =
-                core.desktop_command(Operation::AnalyzeCapture(AnalyzeCapture {})).map_err(|_| "VISION_UNAVAILABLE")?;
+            let command = core.desktop_command(operation).map_err(|_| "VISION_UNAVAILABLE")?;
             core.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
                 .map_err(|_| "VISION_NOT_AUTHORIZED")?
         };
-        let result = Ollama::connect().and_then(|provider| provider.describe_capture(model, jpeg));
-        let (kind, code) = match &result {
-            Ok(_) => ("vision.completed", "success"),
-            Err(error) => ("vision.failed", error.vision_code()),
+        let result = Ollama::connect().and_then(|provider| {
+            if transcribe {
+                provider.transcribe_capture(model, jpeg)
+            } else {
+                provider.describe_capture(model, jpeg)
+            }
+        });
+        let kind = match (transcribe, result.is_ok()) {
+            (true, true) => "ocr.completed",
+            (true, false) => "ocr.failed",
+            (false, true) => "vision.completed",
+            (false, false) => "vision.failed",
         };
+        let code = result.as_ref().err().map_or("success", GatewayError::vision_code);
         core.lock()
             .map_err(|_| "CORE_UNAVAILABLE")?
             .audit(task.as_deref(), kind, code)
@@ -545,7 +576,24 @@ impl Core {
     }
 
     pub fn capture_foreground(&mut self) -> Result<Capture, ExecutionError> {
-        let command = self.desktop_command(Operation::CaptureForeground(CaptureForeground {}))?;
+        self.capture_desktop(Operation::CaptureForeground(CaptureForeground {}))
+    }
+
+    pub fn capture_display(&mut self, display: Display) -> Result<Capture, ExecutionError> {
+        self.capture_desktop(Operation::CaptureDisplay(aiwin11_contracts::v1::CaptureDisplay {
+            display: Some(aiwin11_contracts::v1::DisplayInfo {
+                x: display.x,
+                y: display.y,
+                width: display.width,
+                height: display.height,
+                primary: display.primary,
+            }),
+        }))
+    }
+
+    fn capture_desktop(&mut self, operation: Operation) -> Result<Capture, ExecutionError> {
+        let display = matches!(&operation, Operation::CaptureDisplay(_));
+        let command = self.desktop_command(operation)?;
         let task = self.authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)?;
         let capture = dispatch(&command).and_then(|reply| {
             if reply.status() != Status::Success
@@ -561,13 +609,58 @@ impl Core {
             }
             Some(Capture { jpeg: frame.jpeg, width: frame.width, height: frame.height })
         });
-        let (kind, code) = if capture.is_some() {
-            ("capture.completed", "success")
-        } else {
-            ("capture.failed", "capture_unavailable")
+        let kind = match (display, capture.is_some()) {
+            (true, true) => "display.capture.completed",
+            (true, false) => "display.capture.failed",
+            (false, true) => "capture.completed",
+            (false, false) => "capture.failed",
         };
+        let code = if capture.is_some() { "success" } else { "capture_unavailable" };
         self.audit(task.as_deref(), kind, code).map_err(|_| ExecutionError::OutcomeUnrecorded)?;
         capture.ok_or(ExecutionError::ExecutionFailed)
+    }
+
+    pub fn list_displays(&mut self) -> Result<Vec<Display>, &'static str> {
+        let command =
+            self.desktop_command(Operation::ListDisplays(Default::default())).map_err(|_| "DISPLAYS_UNAVAILABLE")?;
+        let task = self
+            .authorize_dispatch(Policy::default(), Peer::DesktopInspector, &command)
+            .map_err(|_| "DISPLAYS_NOT_AUTHORIZED")?;
+        let displays = dispatch(&command).and_then(|reply| {
+            if reply.status() != Status::Success || reply.error.is_some() {
+                return None;
+            }
+            let list = reply.display_list?.displays;
+            if !(1..=32).contains(&list.len())
+                || list.iter().filter(|display| display.primary).count() != 1
+                || list.iter().any(|display| {
+                    display.width == 0
+                        || display.height == 0
+                        || i32::try_from(display.width).ok().and_then(|width| display.x.checked_add(width)).is_none()
+                        || i32::try_from(display.height).ok().and_then(|height| display.y.checked_add(height)).is_none()
+                })
+            {
+                return None;
+            }
+            Some(
+                list.into_iter()
+                    .map(|display| Display {
+                        x: display.x,
+                        y: display.y,
+                        width: display.width,
+                        height: display.height,
+                        primary: display.primary,
+                    })
+                    .collect(),
+            )
+        });
+        let (kind, code) = if displays.is_some() {
+            ("displays.completed", "success")
+        } else {
+            ("displays.failed", "displays_unavailable")
+        };
+        self.audit(task.as_deref(), kind, code).map_err(|_| "DISPLAYS_AUDIT_UNAVAILABLE")?;
+        displays.ok_or("DISPLAYS_UNAVAILABLE")
     }
 
     pub fn inspect_foreground(&mut self) -> Result<Inspection, ExecutionError> {
@@ -906,7 +999,9 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     // Close the writer to delimit the frame.
     let wrote = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(&bytes).is_ok());
     let limit = match command.operation {
-        Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
+        Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_) | Operation::CaptureDisplay(_)) => {
+            MAX_JPEG_BYTES + MAX_MESSAGE_BYTES
+        }
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
         Some(Operation::ReadClipboard(_) | Operation::RunDiagnostic(_) | Operation::Dictate(_)) => {
@@ -981,6 +1076,24 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn lists_displays_through_the_broker_and_bridge() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let command = core.desktop_command(Operation::ListDisplays(Default::default())).unwrap();
+        assert!(matches!(
+            core.authorize_dispatch(Policy::default(), Peer::Agent, &command),
+            Err(ExecutionError::Denied(_))
+        ));
+        let displays = core.list_displays().unwrap();
+        assert_eq!(displays.iter().filter(|display| display.primary).count(), 1);
+        assert!(displays.iter().all(|display| display.width > 0 && display.height > 0));
+        assert!(core.activity().unwrap().iter().any(|event| event.kind == "displays.completed"));
+        let stale = Display { x: i32::MAX, y: i32::MAX, width: 1, height: 1, primary: false };
+        assert!(matches!(core.capture_display(stale), Err(ExecutionError::ExecutionFailed)));
+        assert!(core.activity().unwrap().iter().any(|event| event.kind == "display.capture.failed"));
+    }
 
     /// Reads the clipboard; with AIWIN11_TEST_CLIPBOARD=1, also writes and reads back a test text,
     /// then restores the previous plain text.

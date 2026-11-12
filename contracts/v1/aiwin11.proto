@@ -42,6 +42,12 @@ message Command {
     Dictate dictate = 37;
     McpRequest mcp_request = 38;
     GenerateImage generate_image = 39;
+    ListTrash list_trash = 40;
+    RestoreLocalText restore_local_text = 41;
+    TranscribeCapture transcribe_capture = 42;
+    GenerateLocalVideo generate_local_video = 43;
+    ListDisplays list_displays = 44;
+    CaptureDisplay capture_display = 45;
   }
 }
 
@@ -59,6 +65,9 @@ message TypeInNotepad {
 
 // Moves one text file of the dedicated folder to AiWin11's own trash folder.
 message TrashLocalText {}
+message ListTrash {}
+message RestoreLocalText {}
+message GenerateLocalVideo {}
 
 message ListLocalText {}
 
@@ -266,6 +275,17 @@ message WindowInfo {
 message InspectForeground {}
 message CaptureForeground {}
 message AnalyzeCapture {}
+message TranscribeCapture {}
+message ListDisplays {}
+message CaptureDisplay { DisplayInfo display = 1; }
+message DisplayInfo {
+  sint32 x = 1;
+  sint32 y = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  bool primary = 5;
+}
+message DisplayList { repeated DisplayInfo displays = 1; }
 message PreviewLocalText {}
 message CopyLocalText {}
 message MoveLocalText {}
@@ -331,6 +351,7 @@ message Result {
   ServiceList service_list = 14;
   CommandOutput command_output = 15;
   DictationResult dictation = 16;
+  DisplayList display_list = 17;
 }
 
 message Error {

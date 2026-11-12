@@ -32,9 +32,35 @@ La description de fenêtre et l’analyse d’image exigent qu’Ollama confirme
 
 ## Installer AiWin11 (sans environnement de développement)
 
+Pour produire une version avec **Mises à jour**, génère une paire de clés avec le signataire Tauri, fournis la clé privée au processus de build via `TAURI_SIGNING_PRIVATE_KEY` et passe `-UpdatePublicKeyFile <clé-publique>` à `scripts\package.ps1`. Le script produit l’installateur, sa signature et `latest.json`. Publie ces fichiers sur la release GitHub `v<version>` du dépôt AiWin11. Dans le centre de contrôle, la recherche et l’installation sont déclenchées séparément. [Documentation Tauri Updater](https://v2.tauri.app/plugin/updater/)
+
 Double-clique sur `Installateur.cmd` (ou `scripts\package.ps1`) : il produit `target\release\bundle\nsis\AiWin11_0.1.0_x64-setup.exe`. Cet installateur s’installe pour l’utilisateur courant, sans droits administrateur, dans `%LOCALAPPDATA%\AiWin11`, avec le pont Windows, l’assistant administrateur et l’agent. Il faut encore installer séparément Python 3.13 (dans le `PATH`), le runtime .NET 10 et Ollama. AiWin11 trouve Python tout seul (`AIWIN11_PYTHON` reste possible pour forcer un interpréteur). Sans certificat, l’installateur n’est pas signé et Windows SmartScreen peut demander une confirmation. Avec un certificat de signature de code installé dans ton magasin personnel, définis `AIWIN11_SIGN_THUMBPRINT` (empreinte SHA-1 du certificat) avant `Installateur.cmd` : le pont, l’assistant administrateur et l’installateur sont alors signés (signtool du SDK Windows requis).
 
 ## Utiliser l’assistant
+
+Pour embarquer Python dans l’installateur, exécute `scripts\package.ps1 -PythonRuntimeZip <archive-embeddable-python-3.13-x64.zip>`. L’agent utilise cet interpréteur avant de chercher dans le `PATH`. Le runtime .NET 10 et Ollama s’installent séparément.
+
+Dans **Accueil → Demandes enregistrées**, **Créer un workflow** permet de composer jusqu’à huit étapes et de les réordonner. Lance-le dans l’Assistant avec Ollama, ou planifie-le en lecture seule aux jours choisis. Une étape **Si échec** traite une action échouée ou dont le résultat reste non vérifié. Un refus ou une approbation expirée arrête le workflow. **Préparer la reprise ici** charge les étapes restantes dans le champ de demande pour les relire avant l’envoi. Formule chaque étape de façon autonome.
+
+Le **Centre de contrôle** affiche l’état de l’assistant, le profil de sécurité, le mode privé et les modèles chargés par Ollama. Dans **Modèles**, **Tester le modèle local** vérifie un appel d’outil synthétique et affiche la durée du test ainsi que la capacité de vision annoncée par Ollama.
+
+Dans **Modèles**, **Routage adaptatif local** privilégie, pour une demande Ollama interactive, le modèle dont la part chargée en VRAM est la plus élevée. AiWin11 teste l’appel d’outil avant d’utiliser un modèle différent. En cas d’échec du test, il conserve le modèle local configuré. L’interface affiche la raison du choix.
+
+Le centre de contrôle affiche aussi les composants détectés et les jetons cloud journalisés sur les 30 derniers jours. Tu peux saisir un tarif moyen par million de jetons pour obtenir une estimation.
+
+Dans **Modèles → Importer ou exporter les choix de modèles**, le JSON v1 contient le mode local ou cloud et les identifiants de modèles. Les clés, les accords d’envoi et le fournisseur cloud sélectionné restent propres à chaque installation.
+
+**Au démarrage** lance une demande enregistrée au premier passage du planificateur après l’ouverture d’AiWin11 et la disponibilité d’un modèle local configuré. Ce déclencheur s’exécute en lecture seule, au plus une fois par jour.
+
+Dans **Fichiers**, tu peux rechercher un fichier texte par une partie de son nom, le renommer, le mettre à la corbeille d’AiWin11 et le restaurer dans le dossier de travail affiché. La restauration refuse les noms déjà utilisés.
+
+Dans **Inspecteur**, capture une fenêtre et sélectionne un modèle de vision Ollama pour utiliser **Transcrire le texte**. Le résultat est une transcription produite par le modèle local. Relis les passages peu lisibles.
+
+Dans la même page, **Lister les écrans** affiche leur taille en pixels et leur position dans le bureau Windows. Les coordonnées peuvent être négatives pour un écran placé à gauche ou au-dessus de l’écran principal.
+
+**Capturer l’écran entier** prend un instantané de l’écran choisi après trois secondes. L’image apparaît dans l’Inspecteur et peut être analysée explicitement avec Ollama local. L’aperçu est redimensionné à 1 024 pixels sur son côté le plus long.
+
+Dans **Vidéo**, démarre ComfyUI en local avec les modèles vidéo installés. Exporte un workflow texte vers vidéo au format API JSON avec des nœuds natifs, un seul `SaveVideo` et `{{AIWIN11_PROMPT}}` dans le champ texte du `CLIPTextEncode` positif. Colle le JSON dans AiWin11, saisis la description et lance la génération. AiWin11 suit une tâche à la fois pendant 20 minutes. Le MP4 reste dans le sous-dossier `AiWin11` des sorties ComfyUI. [Routes de l’API ComfyUI](https://docs.comfy.org/development/comfyui-server/comms_routes)
 
 1. Dans **Modèles**, détectez les modèles Ollama et choisissez le modèle de l’agent. Facultatif : détectez les modèles de vision et choisissez-en un. Ces choix (fournisseur, modèle, modèle de vision, identifiant du modèle OpenAI) sont mémorisés et revérifiés auprès d’Ollama au démarrage suivant.
 2. Dans **Sécurité**, choisissez le profil d’autonomie (voir plus bas). **Assisté** est le profil par défaut.
@@ -48,7 +74,7 @@ Ce que l’agent peut faire :
 |---|---|
 | « Ouvre le Bloc-notes », « Ouvre Paint », « Ouvre la Table des caractères » | Ouvre une nouvelle fenêtre de l’application (liste fermée) et la vérifie |
 | « Ouvre le Bloc-notes et écris-y ma liste de courses : pain, lait » | Écrit dans le Bloc-notes qu’il vient d’ouvrir, seulement si le document est vide, puis relit le texte |
-| « Résume notes.txt », « Quels fichiers ai-je ? » | Liste et lit les fichiers `.txt` du dossier affiché dans **Fichiers** |
+| « Résume notes.md », « Quels fichiers ai-je ? » | Liste et lit les fichiers UTF-8 `.txt`, `.md` et `.csv` du dossier affiché dans **Fichiers** |
 | « Copie notes.txt vers sauvegarde.txt », « Renomme brouillon.txt en idees.txt » | Copie ou renomme dans ce dossier, sans jamais remplacer un fichier existant |
 | « Mets ancien.txt à la corbeille » | Déplace le fichier dans la corbeille d’AiWin11 (`%LOCALAPPDATA%\app.aiwin11.desktop\trash`) : rien n’est supprimé, il reste récupérable |
 | « Mon PC est lent, regarde ce qui se passe » | Lit en lecture seule la mémoire, la charge du processeur, l’espace des disques et, si besoin, les processus ; ne modifie rien |
@@ -138,11 +164,11 @@ Dis à l’agent « Souviens-toi que… » : après ton accord, l’information 
 
 ### Dossier de travail
 
-Dans **Fichiers**, tu peux remplacer le dossier dédié par un dossier de ton profil Windows (par exemple dans Documents), hors AppData. Le changement s’applique au prochain démarrage ; les mêmes règles restent valables (fichiers `.txt`, jamais de remplacement, corbeille récupérable).
+Dans **Fichiers**, tu peux remplacer le dossier dédié par un dossier de ton profil Windows (par exemple dans Documents), hors AppData. Le changement s’applique au prochain démarrage. Les fichiers `.txt`, `.md` et `.csv` peuvent être mis à la corbeille et restaurés sans écrasement.
 
 ### Pages Inspecteur et Fichiers
 
-Dans **Fichiers**, place un fichier `.txt` UTF-8 de 64 Kio maximum dans le dossier affiché, saisis son nom et clique sur **Afficher l’aperçu**, ou copie-le avec **Copier le fichier**.
+Dans **Fichiers**, place un fichier `.txt`, `.md` ou `.csv` en UTF-8 de 64 Kio maximum dans le dossier affiché. Saisis son nom, puis clique sur **Afficher l’aperçu** pour le lire en texte brut ou sur **Copier le fichier** pour le dupliquer.
 
 Dans **Inspecteur**, **Inspecter une fenêtre** et **Capturer la fenêtre** lisent la fenêtre au premier plan après un compte à rebours de trois secondes. L’aperçu de capture reste en mémoire et peut être analysé avec un modèle de vision local. Pour tester la saisie contrôlée, ouvre la Table des caractères, choisis un chiffre, clique sur **Autoriser et saisir le chiffre** et remets la Table des caractères au premier plan dans les trois secondes.
 

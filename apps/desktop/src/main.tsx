@@ -7,14 +7,27 @@ import { Extensions } from "./Extensions";
 import { History } from "./History";
 import { Memory } from "./Memory";
 import { Routines } from "./Routines";
+import { ControlCenter } from "./ControlCenter";
+import { Video } from "./Video";
+import { ModelProbe } from "./ModelProbe";
+import { ModelConfig, type ModelPreferences } from "./ModelConfig";
 import { autoSpeak, speak, SpeechControls } from "./Speech";
 import { Routing } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
 
-type Page = "Accueil" | "Modèles" | "Sécurité" | "Mémoire" | "Extensions" | "Inspecteur" | "Fichiers" | "Activité";
+type Page =
+  | "Accueil"
+  | "Centre de contrôle"
+  | "Modèles"
+  | "Sécurité"
+  | "Mémoire"
+  | "Extensions"
+  | "Inspecteur"
+  | "Vidéo"
+  | "Fichiers"
+  | "Activité";
 type Provider = "ollama" | "openai";
-type ModelPreferences = { provider: Provider; localModel: string; cloudModel: string; visionModel: string };
 type Activity = { sequence: number; kind: string; timestamp: string; taskId: string | null; code: string | null };
 type TaskEntry = { id: string; state: string; outcome: string | null; createdAt: string; updatedAt: string };
 const taskStateNames: Record<string, string> = {
@@ -78,7 +91,10 @@ const arrangementNames: Record<Arrangement, string> = {
 };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
-  { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
+  | { type: "stage"; stage: string }
+  | { type: "delta"; text: string }
+  | { type: "modelSelected"; model: string; reason: "gpu_verified" | "configured_local" }
+  | ({ type: "approvalRequired" } & PendingApproval);
 const applicationNames: Record<"notepad" | "charmap" | "paint", string> = {
   notepad: "le Bloc-notes",
   charmap: "la Table des caractères",
@@ -282,15 +298,33 @@ const dictationErrors: Record<string, string> = {
   CORE_BUSY: "AiWin11 est occupé : réessaie dans un instant.",
 };
 
-const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Mémoire", "Extensions", "Inspecteur", "Fichiers", "Activité"];
+const pages: Page[] = [
+  "Accueil",
+  "Centre de contrôle",
+  "Modèles",
+  "Sécurité",
+  "Mémoire",
+  "Extensions",
+  "Inspecteur",
+  "Vidéo",
+  "Fichiers",
+  "Activité",
+];
+const expertPages = new Set<Page>(["Mémoire", "Extensions", "Inspecteur"]);
 const activityNames: Record<string, string> = {
   "session.started": "Session ouverte",
   "task.created": "Demande reçue",
+  "workflow.step.started": "Étape du workflow en cours",
+  "workflow.step.completed": "Étape du workflow terminée",
+  "workflow.step.failed": "Échec d’une étape du workflow",
+  "workflow.step.skipped": "Étape conditionnelle ignorée",
   "task.planning": "Consultation du modèle",
   "task.started": "Demande démarrée",
   "task.progress": "Étape de l’agent",
   "tasks.stop.requested": "Arrêt global demandé",
   "model.provider.unavailable": "Fournisseur de modèles indisponible",
+  "model.routing": "Sélection d’un modèle local",
+  "model.selected": "Modèle local sélectionné",
   "settings.models.changed": "Choix des modèles modifié",
   "settings.privacy.changed": "Mode privé modifié",
   "agent.profile": "Agent choisi",
@@ -377,6 +411,14 @@ const activityNames: Record<string, string> = {
   "capture.failed": "Capture impossible",
   "vision.completed": "Capture analysée localement",
   "vision.failed": "Analyse de la capture impossible",
+  "ocr.completed": "Texte de la capture transcrit localement",
+  "ocr.failed": "Transcription de la capture impossible",
+  "displays.completed": "Disposition des écrans lue",
+  "displays.failed": "Disposition des écrans indisponible",
+  "display.capture.completed": "Écran capturé",
+  "display.capture.failed": "Capture de l’écran impossible",
+  "video.completed": "Vidéo générée localement",
+  "video.failed": "Génération vidéo interrompue ou échouée",
   "input.completed": "Saisie dans la Table des caractères vérifiée",
   "input.partial": "Saisie envoyée, champ non confirmé",
   "input.failed": "Saisie dans la Table des caractères non confirmée",
@@ -391,10 +433,16 @@ const activityNames: Record<string, string> = {
   "file.move.failed": "Échec du renommage",
   "file.trash.completed": "Fichier mis à la corbeille d’AiWin11",
   "file.trash.failed": "Échec de la mise à la corbeille",
+  "file.trash.list.completed": "Corbeille consultée",
+  "file.trash.list.failed": "Corbeille indisponible",
+  "file.restore.completed": "Fichier restauré",
+  "file.restore.failed": "Échec de la restauration",
 };
 
 const taskErrors: Record<string, string> = {
   PROMPT_INVALID: `Saisis une demande de ${MAX_PROMPT_CHARS} caractères au maximum.`,
+  WORKFLOW_INVALID: "Vérifie que le workflow contient une à huit étapes numérotées et non vides.",
+  WORKFLOW_LOCAL_ONLY: "Choisis un modèle Ollama pour exécuter ce workflow.",
   MODEL_REQUIRED: "Choisis un identifiant de modèle valide dans Modèles.",
   CLOUD_APPROVAL_REQUIRED: "Autorise la requête cloud pour cette demande.",
   CLOUD_KEY_REQUIRED: "Enregistre une clé API cloud dans Modèles.",
@@ -431,6 +479,7 @@ const taskErrors: Record<string, string> = {
 
 function App() {
   const [page, setPage] = useState<Page>("Accueil");
+  const [expert, setExpert] = useState(() => localStorage.getItem("aiwin11-expert") !== "false");
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
   const [error, setError] = useState(false);
@@ -443,6 +492,7 @@ function App() {
   const [cloudModel, setCloudModel] = useState("");
   const [cloudApproved, setCloudApproved] = useState(false);
   const [cloudFallback, setCloudFallback] = useState(false);
+  const [adaptiveRouting, setAdaptiveRouting] = useState<boolean>();
   const [dictating, setDictating] = useState(false);
   const [floating, setFloating] = useState(false);
   const [agent, setAgent] = useState<"general" | "office" | "windowsAdmin" | "readOnly">("general");
@@ -461,6 +511,7 @@ function App() {
   const [lastPrompt, setLastPrompt] = useState("");
   const [taskStatus, setTaskStatus] = useState("");
   const [taskProgress, setTaskProgress] = useState("");
+  const [routingExplanation, setRoutingExplanation] = useState("");
   const [agentReply, setAgentReply] = useState("");
   const [draftReply, setDraftReply] = useState("");
   const [actionReports, setActionReports] = useState<ActionReport[]>([]);
@@ -521,6 +572,9 @@ function App() {
   }, []);
 
   useEffect(refresh, [refresh]);
+  useEffect(() => {
+    void invoke<boolean>("get_adaptive_routing").then(setAdaptiveRouting, () => undefined);
+  }, []);
   useEffect(() => {
     void invoke<"openai" | "deepseek">("get_cloud_vendor").then(setVendor, () => undefined);
   }, []);
@@ -597,12 +651,21 @@ function App() {
     setLastPrompt(prompt);
     setTaskStatus("Demande en cours…");
     setTaskProgress("");
+    setRoutingExplanation("");
     setAgentReply("");
     setDraftReply("");
     setActionReports([]);
     setStopState("");
     setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
+      if (update.type === "modelSelected") {
+        setRoutingExplanation(
+          update.reason === "gpu_verified"
+            ? `Modèle utilisé : ${update.model}. Chargement GPU observé et appel d’outil vérifié.`
+            : `Modèle utilisé : ${update.model}. Choix local configuré.`,
+        );
+        return;
+      }
       if (update.type === "delta") {
         setDraftReply((current) => current + update.text);
         return;
@@ -615,7 +678,7 @@ function App() {
       }
       if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
       // Text streamed before a tool call is superseded by the next step.
-      if (update.stage === "agent.tool.requested") setDraftReply("");
+      if (update.stage === "agent.tool.requested" || update.stage === "workflow.step.started") setDraftReply("");
       setTaskProgress(activityNames[update.stage] ?? "");
       refresh();
     });
@@ -631,7 +694,9 @@ function App() {
           agent,
           // local_first: OpenAI only if Ollama is unreachable, with this request's approval.
           cloudFallbackModel:
-            provider === "ollama" && cloudFallback && cloudApproved && cloudModel.trim() ? cloudModel.trim() : null,
+            provider === "ollama" && !adaptiveRouting && cloudFallback && cloudApproved && cloudModel.trim()
+              ? cloudModel.trim()
+              : null,
         },
         progress,
       });
@@ -686,16 +751,32 @@ function App() {
           <span aria-hidden="true">✦</span> AiWin11
         </div>
         <nav aria-label="Navigation principale">
-          {pages.map((item) => (
-            <button key={item} aria-current={item === page ? "page" : undefined} onClick={() => setPage(item)}>
-              {item}
-            </button>
-          ))}
+          {pages
+            .filter((item) => expert || !expertPages.has(item))
+            .map((item) => (
+              <button key={item} aria-current={item === page ? "page" : undefined} onClick={() => setPage(item)}>
+                {item}
+              </button>
+            ))}
         </nav>
+        <button
+          type="button"
+          className="link-button"
+          aria-pressed={expert}
+          onClick={() => {
+            const next = !expert;
+            setExpert(next);
+            localStorage.setItem("aiwin11-expert", String(next));
+            if (!next && expertPages.has(page)) setPage("Accueil");
+          }}
+        >
+          Mode expert
+        </button>
         <div className="connection">
           <span aria-hidden="true" />
           {provider === "ollama" ? "Ollama · Local" : `${vendorName} · Cloud`}
         </div>
+        {running && <p role="status">{pendingApproval ? "En attente de ton accord" : "Assistant en cours"}</p>}
         <button
           className="link-button"
           aria-pressed={floating}
@@ -741,6 +822,7 @@ function App() {
               </button>
             </div>
             {lastPrompt && <p className="user-message">{lastPrompt}</p>}
+            {routingExplanation && <p role="status">{routingExplanation}</p>}
             {agentReply && (
               <p className="agent-message" aria-label="Réponse de l’agent">
                 {agentReply}
@@ -837,7 +919,7 @@ function App() {
                   resetApproval();
                 }}
               />
-              {provider === "ollama" && cloudFallback && cloudModel.trim() && keyConfigured && (
+              {provider === "ollama" && !adaptiveRouting && cloudFallback && cloudModel.trim() && keyConfigured && (
                 <label className="approval">
                   <input
                     type="checkbox"
@@ -901,7 +983,50 @@ function App() {
             />
           </section>
         )}
-        {page === "Modèles" && <Routing onFallbackChange={setCloudFallback} />}
+        {page === "Centre de contrôle" && (
+          <ControlCenter
+            running={running}
+            model={selectedModel}
+            provider={provider === "ollama" ? "Ollama · Local" : `${vendorName} · Cloud`}
+            agent={
+              {
+                general: "Général",
+                office: "Fichiers et bureautique",
+                windowsAdmin: "Administration Windows",
+                readOnly: "Lecture seule",
+              }[agent]
+            }
+            status={pendingApproval ? "En attente de ton accord" : running ? "En cours" : "Disponible"}
+            latestTask={tasks[0] ? (taskStateNames[tasks[0].state] ?? tasks[0].state) : undefined}
+            onModels={() => setPage("Modèles")}
+            onSecurity={() => setPage("Sécurité")}
+            onActivity={() => setPage("Activité")}
+          />
+        )}
+        {page === "Modèles" && (
+          <Routing
+            onFallbackChange={setCloudFallback}
+            adaptive={adaptiveRouting}
+            onAdaptiveChange={setAdaptiveRouting}
+          />
+        )}
+        {page === "Modèles" && (
+          <ModelConfig
+            preferences={{ provider, localModel: model, cloudModel, visionModel }}
+            disabled={running || keyBusy}
+            onImported={(imported) => {
+              setProvider(imported.provider);
+              setModel(imported.localModel);
+              setVisionModel(imported.visionModel);
+              setCloudModel(imported.cloudModel);
+              resetApproval();
+              if (imported.provider === "ollama") {
+                void discoverModels();
+                if (imported.visionModel) void discoverVisionModels();
+              }
+            }}
+          />
+        )}
         {page === "Modèles" && (
           <section className="card">
             <div className="task-form">
@@ -947,6 +1072,7 @@ function App() {
                     ))}
                   </select>
                 </div>
+                <ModelProbe key={model} model={model} disabled={running || loadingModels} />
                 <div className="section-header">
                   <button onClick={() => void discoverVisionModels()} disabled={running}>
                     Détecter les modèles de vision
@@ -1048,6 +1174,7 @@ function App() {
         {page === "Mémoire" && <Memory />}
         {page === "Extensions" && <Extensions />}
         {page === "Inspecteur" && <Inspector onFinished={refresh} />}
+        {page === "Vidéo" && <Video onFinished={refresh} />}
         {page === "Fichiers" && <LocalFiles onFinished={refresh} />}
         {page === "Activité" && (
           <>

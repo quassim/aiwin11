@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-video-status"
+description = "Enables the video_status command without any pre-configured scope."
+commands.allow = ["video_status"]
+
+[[permission]]
+identifier = "deny-video-status"
+description = "Denies the video_status command without any pre-configured scope."
+commands.deny = ["video_status"]

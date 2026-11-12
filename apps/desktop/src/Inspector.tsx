@@ -4,11 +4,18 @@ import { useEffect, useState } from "react";
 type Node = { parent: number; controlType: number; enabled: boolean; focused: boolean };
 type Inspection = { nodes: Node[]; truncated: boolean };
 type Capture = { jpeg: number[]; width: number; height: number };
-type Action = "inspect" | "capture" | "input";
-const actionLabels: Record<Action, string> = { inspect: "Inspection", capture: "Capture", input: "Saisie" };
+type Display = { x: number; y: number; width: number; height: number; primary: boolean };
+type Action = "inspect" | "capture" | "display" | "input";
+const actionLabels: Record<Action, string> = {
+  inspect: "Inspection",
+  capture: "Capture",
+  display: "Capture de l’écran entier",
+  input: "Saisie",
+};
 const actionErrors: Record<Action, string> = {
   inspect: "Impossible d’inspecter cette fenêtre. Réessaie en la gardant au premier plan.",
   capture: "Capture indisponible pour cette fenêtre. Garde-la au premier plan et réessaie.",
+  display: "Impossible de capturer cet écran. Actualise la liste des écrans et réessaie.",
   input: "La saisie n’a pas pu être confirmée. Vérifie la Table des caractères avant de réessayer.",
 };
 
@@ -55,6 +62,22 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
   const [action, setAction] = useState<Action>("inspect");
   const [digit, setDigit] = useState("");
   const [message, setMessage] = useState("");
+  const [displays, setDisplays] = useState<Display[]>();
+  const [selectedDisplay, setSelectedDisplay] = useState<Display>();
+
+  async function listDisplays() {
+    setBusy(true);
+    try {
+      setDisplays(await invoke<Display[]>("list_displays"));
+      setMessage("");
+    } catch {
+      setDisplays(undefined);
+      setMessage("Impossible de lire la disposition des écrans.");
+    } finally {
+      setBusy(false);
+      onFinished();
+    }
+  }
 
   useEffect(() => {
     if (count === 0) return;
@@ -72,8 +95,11 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
                   : "Saisie envoyée. La valeur du champ n’a pas pu être confirmée.",
               );
             })
-          : action === "capture"
-            ? invoke<Capture>("capture_foreground").then((frame) => {
+          : action === "capture" || action === "display"
+            ? (action === "display"
+                ? invoke<Capture>("capture_display", { display: selectedDisplay })
+                : invoke<Capture>("capture_foreground")
+              ).then((frame) => {
                 setCapture(frame);
                 setMessage("");
               })
@@ -95,7 +121,7 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
         });
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [action, count, digit, onFinished]);
+  }, [action, count, digit, onFinished, selectedDisplay]);
 
   function start(nextAction: Action) {
     setResult(undefined);
@@ -129,6 +155,9 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
         <button disabled={busy || count > 0} onClick={() => start("capture")}>
           Capturer la fenêtre
         </button>
+        <button type="button" disabled={busy || count > 0} onClick={() => void listDisplays()}>
+          {displays ? "Actualiser les écrans" : "Lister les écrans"}
+        </button>
         {count > 0 && <button onClick={() => setCount(0)}>Annuler</button>}
       </div>
       <div className="task-form">
@@ -151,12 +180,45 @@ export function Inspector({ onFinished }: { onFinished: () => void }) {
         </div>
       </div>
       <p role="status">{count > 0 ? `${actionLabels[action]} dans ${count} s…` : message}</p>
+      {displays && (
+        <ul aria-label="Disposition des écrans">
+          {displays.map((display, index) => {
+            const { x, y, width, height, primary } = display;
+            return (
+              <li key={index}>
+                <span>{primary ? "Écran principal" : `Écran ${index + 1}`}</span>
+                <span>
+                  {width} × {height} px · position ({x}, {y})
+                </span>
+                <button
+                  type="button"
+                  disabled={busy || count > 0}
+                  aria-label={primary ? "Capturer l’écran principal entier" : `Capturer l’écran ${index + 1} entier`}
+                  onClick={() => {
+                    setSelectedDisplay(display);
+                    start("display");
+                  }}
+                >
+                  Capturer l’écran entier
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {result && (
         <ul className="inspection-tree" aria-label="Structure de la fenêtre">
           {renderChildren(0)}
         </ul>
       )}
-      {capture && <CapturePreview capture={capture} onClear={() => setCapture(undefined)} onFinished={onFinished} />}
+      {capture && (
+        <CapturePreview
+          capture={capture}
+          fullDisplay={action === "display"}
+          onClear={() => setCapture(undefined)}
+          onFinished={onFinished}
+        />
+      )}
     </section>
   );
 }
@@ -169,10 +231,12 @@ const visionErrors: Record<string, string> = {
 
 function CapturePreview({
   capture,
+  fullDisplay,
   onClear,
   onFinished,
 }: {
   capture: Capture;
+  fullDisplay: boolean;
   onClear: () => void;
   onFinished: () => void;
 }) {
@@ -206,12 +270,14 @@ function CapturePreview({
     }
   }
 
-  async function analyze() {
+  async function analyze(transcribe: boolean) {
     setBusy(true);
     setDescription("");
-    setMessage("Analyse de la capture…");
+    setMessage(transcribe ? "Transcription de la capture…" : "Analyse de la capture…");
     try {
-      setDescription(await invoke<string>("analyze_capture", { model, jpeg: capture.jpeg }));
+      setDescription(
+        await invoke<string>(transcribe ? "transcribe_capture" : "analyze_capture", { model, jpeg: capture.jpeg }),
+      );
       setMessage("");
     } catch (error) {
       setMessage(visionErrors[String(error)] ?? "Le modèle Ollama n’a pas pu analyser la capture.");
@@ -229,7 +295,13 @@ function CapturePreview({
         </p>
         <button onClick={onClear}>Effacer l’aperçu</button>
       </div>
-      {url && <img className="capture-preview" src={url} alt="Capture de la fenêtre au premier plan" />}
+      {url && (
+        <img
+          className="capture-preview"
+          src={url}
+          alt={fullDisplay ? "Capture de l’écran sélectionné" : "Capture de la fenêtre au premier plan"}
+        />
+      )}
       <div className="task-form">
         <label htmlFor="vision-model">Modèle de vision Ollama</label>
         <select
@@ -250,11 +322,14 @@ function CapturePreview({
           <button disabled={busy} onClick={() => void discover()}>
             Détecter les modèles
           </button>
-          <button disabled={busy || !model} onClick={() => void analyze()}>
+          <button disabled={busy || !model} onClick={() => void analyze(false)}>
             Analyser avec Ollama
           </button>
+          <button disabled={busy || !model} onClick={() => void analyze(true)}>
+            Transcrire le texte
+          </button>
         </div>
-        <div role="status">{description || message}</div>
+        <div role="status">{description ? <pre className="file-preview">{description}</pre> : message}</div>
       </div>
     </section>
   );

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-local-text"
+description = "Enables the list_local_text command without any pre-configured scope."
+commands.allow = ["list_local_text"]
+
+[[permission]]
+identifier = "deny-list-local-text"
+description = "Denies the list_local_text command without any pre-configured scope."
+commands.deny = ["list_local_text"]

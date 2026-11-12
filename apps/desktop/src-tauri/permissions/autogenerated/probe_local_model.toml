@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-probe-local-model"
+description = "Enables the probe_local_model command without any pre-configured scope."
+commands.allow = ["probe_local_model"]
+
+[[permission]]
+identifier = "deny-probe-local-model"
+description = "Denies the probe_local_model command without any pre-configured scope."
+commands.deny = ["probe_local_model"]

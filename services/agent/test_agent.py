@@ -48,6 +48,8 @@ class AgentProtocolTest(unittest.TestCase):
         for proposal, arguments in [
             (call("list_text_files", {}), {}),
             (call("read_text_file", {"name": "Notes 1.TXT"}), {"name": "Notes 1.TXT"}),
+            (call("read_text_file", {"name": "Notes 1.MD"}), {"name": "Notes 1.MD"}),
+            (call("read_text_file", {"name": "budget.csv"}), {"name": "budget.csv"}),
         ]:
             with self.subTest(proposal=proposal):
                 result = self.invoke({"version": 2, "proposal": {"calls": [proposal]}})
@@ -57,6 +59,8 @@ class AgentProtocolTest(unittest.TestCase):
             "../x.txt",
             "C:\\x.txt",
             "x.txt:stream",
+            "x.md:stream",
+            "../x.csv",
             "dir/x.txt",
             "NUL.txt",
             "COM1.txt",

@@ -39,6 +39,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
         && command.InvokeControl is null && command.RunDiagnostic is null && command.Dictate is null
+        && command.ListDisplays is null && command.CaptureDisplay is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -209,6 +210,17 @@ else if (command.WriteClipboard is { } writing)
         }
     }
 }
+else if (command.ListDisplays is not null)
+{
+    var displays = Displays.Read();
+    if (displays is null)
+        Reject(Protocol.Result.Types.Status.Failed, "displays_unavailable", "Display information is unavailable.");
+    else
+    {
+        result.DisplayList = displays;
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
 else if (command.GetSystemStatus is not null)
 {
     var status = SystemStatusReader.Read(command.DeadlineMs);
@@ -251,13 +263,15 @@ else if (command.InspectWindow is { } target)
         Reject(Protocol.Result.Types.Status.Failed, "inspection_failed", "Windows could not inspect the window.");
     }
 }
-else if (command.CaptureForeground is not null)
+else if (command.CaptureForeground is not null || command.CaptureDisplay is not null)
 {
     try
     {
-        var capture = WindowCapture.Read(command.DeadlineMs);
+        var capture = command.CaptureDisplay is { } requested
+            ? requested.Display is { } display ? WindowCapture.ReadDisplay(display, command.DeadlineMs) : null
+            : WindowCapture.Read(command.DeadlineMs);
         if (capture is null)
-            Reject(Protocol.Result.Types.Status.Failed, "capture_unavailable", "The foreground window could not be captured.");
+            Reject(Protocol.Result.Types.Status.Failed, "capture_unavailable", "The requested capture is unavailable.");
         else
         {
             result.WindowCapture = capture;
@@ -267,7 +281,7 @@ else if (command.CaptureForeground is not null)
     catch (Exception error) when (error is Win32Exception or IOException or ArgumentException
         or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
     {
-        Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the foreground window.");
+        Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the requested area.");
     }
 }
 else if (command.InspectForeground is not null)

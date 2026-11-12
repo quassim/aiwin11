@@ -27,19 +27,35 @@ pub struct MemoryEntry {
     pub id: String,
     pub created_at: String,
     pub text: String,
-    /// Daily local time "HH:MM" for a scheduled saved request.
+    /// Local time "HH:MM", optionally followed by "@12345" for selected weekdays.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
 }
 
-/// "HH:MM", 24-hour clock.
 pub fn valid_schedule(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 5
+    value == "startup" || schedule_parts(value).is_some()
+}
+
+/// SQLite weekday digits run from Sunday (0) through Saturday (6).
+fn schedule_parts(value: &str) -> Option<(&str, &str)> {
+    let (time, days) = value.split_once('@').unwrap_or((value, "0123456"));
+    if days.is_empty()
+        || !days.bytes().all(|day| (b'0'..=b'6').contains(&day))
+        || !days.as_bytes().windows(2).all(|pair| pair[0] < pair[1])
+    {
+        return None;
+    }
+    let bytes = time.as_bytes();
+    (bytes.len() == 5
         && bytes[2] == b':'
-        && value[..2].parse::<u8>().is_ok_and(|hours| hours < 24)
-        && value[3..].parse::<u8>().is_ok_and(|minutes| minutes < 60)
         && bytes.iter().enumerate().all(|(index, byte)| index == 2 || byte.is_ascii_digit())
+        && time[..2].parse::<u8>().is_ok_and(|hours| hours < 24)
+        && time[3..].parse::<u8>().is_ok_and(|minutes| minutes < 60))
+    .then_some((time, days))
+}
+
+fn schedule_due(value: &str, now: &str, weekday: &str) -> bool {
+    schedule_parts(value).is_some_and(|(time, days)| time <= now && days.contains(weekday))
 }
 
 fn blob(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {
@@ -185,6 +201,28 @@ impl Core {
         self.store(text, "routine")
     }
 
+    pub fn update_routine(&mut self, id: &str, text: &str) -> Result<(), &'static str> {
+        if !valid_note(text) {
+            return Err("MEMORY_INVALID");
+        }
+        let cipher = protect(text.trim().as_bytes()).ok_or("MEMORY_UNAVAILABLE")?;
+        let transaction = self.db.transaction().map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let changed = transaction
+            .execute("UPDATE memory_entries SET content = ?2 WHERE id = ?1 AND kind = 'routine'", params![id, cipher])
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        if changed == 0 {
+            return Err("MEMORY_NOT_FOUND");
+        }
+        transaction
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+             VALUES (?1, ?2, 'memory.updated', 'core', 'routine')",
+                params![Uuid::new_v4().to_string(), self.session_id],
+            )
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        transaction.commit().map_err(|_| "MEMORY_UNAVAILABLE")
+    }
+
     fn store(&mut self, text: &str, kind: &'static str) -> Result<String, &'static str> {
         if !valid_note(text) {
             return Err("MEMORY_INVALID");
@@ -240,7 +278,7 @@ impl Core {
         self.store(if valid_note(&text) { &text } else { "(résultat vide)" }, "report")
     }
 
-    /// Sets or removes (`None`) the daily time of a saved request.
+    /// Sets or removes the local time and weekdays of a saved request.
     pub fn set_routine_schedule(&mut self, id: &str, schedule: Option<&str>) -> Result<(), &'static str> {
         if schedule.is_some_and(|value| !valid_schedule(value)) {
             return Err("SCHEDULE_INVALID");
@@ -248,7 +286,7 @@ impl Core {
         let changed = self
             .db
             .execute(
-                "UPDATE memory_entries SET schedule = ?2, last_run = NULL WHERE id = ?1 AND kind = 'routine'",
+                "UPDATE memory_entries SET schedule = ?2 WHERE id = ?1 AND kind = 'routine'",
                 params![id, schedule],
             )
             .map_err(|_| "MEMORY_UNAVAILABLE")?;
@@ -260,19 +298,25 @@ impl Core {
     }
 
     /// Saved requests due now (local time), not yet run today; marks them as run.
-    pub fn take_due_routines(&mut self) -> Result<Vec<MemoryEntry>, &'static str> {
-        let (today, now): (String, String) = self
+    pub fn take_due_routines(&mut self, startup: bool) -> Result<Vec<MemoryEntry>, &'static str> {
+        let (today, now, weekday): (String, String, String) = self
             .db
             .query_row(
-                "SELECT strftime('%Y-%m-%d', 'now', 'localtime'), strftime('%H:%M', 'now', 'localtime')",
+                "SELECT strftime('%Y-%m-%d', 'now', 'localtime'), strftime('%H:%M', 'now', 'localtime'),
+                        strftime('%w', 'now', 'localtime')",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(|_| "MEMORY_UNAVAILABLE")?;
         let due: Vec<MemoryEntry> = self
             .entries("routine")?
             .into_iter()
-            .filter(|routine| routine.schedule.as_deref().is_some_and(|time| time <= now.as_str()))
+            .filter(|routine| {
+                routine
+                    .schedule
+                    .as_deref()
+                    .is_some_and(|value| (startup && value == "startup") || schedule_due(value, &now, &weekday))
+            })
             .collect();
         let mut taken = Vec::new();
         for routine in due {
@@ -378,15 +422,32 @@ mod tests {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let id = core.save_routine("Quel est l'état du PC ?").unwrap();
         assert_eq!(core.set_routine_schedule(&id, Some("25:00")), Err("SCHEDULE_INVALID"));
-        assert!(core.take_due_routines().unwrap().is_empty(), "not scheduled");
+        assert!(core.take_due_routines(false).unwrap().is_empty(), "not scheduled");
         core.set_routine_schedule(&id, Some("00:00")).unwrap();
         assert_eq!(core.routines().unwrap()[0].schedule.as_deref(), Some("00:00"));
-        assert_eq!(core.take_due_routines().unwrap().len(), 1);
-        assert!(core.take_due_routines().unwrap().is_empty(), "once per day");
+        assert_eq!(core.take_due_routines(false).unwrap().len(), 1);
+        core.update_routine(&id, "Lis le rapport du PC.").unwrap();
+        let updated = &core.routines().unwrap()[0];
+        assert_eq!(updated.text, "Lis le rapport du PC.");
+        assert_eq!(updated.schedule.as_deref(), Some("00:00"));
+        assert!(core.take_due_routines(false).unwrap().is_empty(), "once per day");
+        core.set_routine_schedule(&id, Some("00:00@0123456")).unwrap();
+        assert!(core.take_due_routines(false).unwrap().is_empty(), "editing keeps today's execution");
+        let startup = core.save_routine("Vérifie l’état du PC").unwrap();
+        core.set_routine_schedule(&startup, Some("startup")).unwrap();
+        assert!(core.take_due_routines(false).unwrap().is_empty());
+        assert_eq!(core.take_due_routines(true).unwrap()[0].id, startup);
+        assert!(core.take_due_routines(true).unwrap().is_empty());
         core.save_report("Tout va bien").unwrap();
         assert_eq!(core.reports().unwrap()[0].text, "Tout va bien");
-        assert!(core.memories().unwrap().is_empty() && core.routines().unwrap().len() == 1);
+        assert!(core.memories().unwrap().is_empty() && core.routines().unwrap().len() == 2);
         assert!(valid_schedule("07:30") && !valid_schedule("7:30") && !valid_schedule("07:60"));
+        assert!(schedule_due("07:30@15", "07:30", "1"));
+        assert!(!schedule_due("07:30@15", "07:30", "2"));
+        assert!(!schedule_due("07:30@15", "07:29", "1"));
+        for invalid in ["07:30@", "07:30@11", "07:30@7", "07:30@51", "07:30@1@2"] {
+            assert!(!valid_schedule(invalid));
+        }
     }
 
     #[test]

@@ -20,14 +20,14 @@ _RESERVED = {"CON", "PRN", "AUX", "NUL"}
 
 
 def is_text_file_name(value: object) -> bool:
-    """Flat ASCII `.txt` name, as accepted by the host's local file store."""
+    """Flat ASCII text file name, as accepted by the host's local file store."""
     if not isinstance(value, str) or len(value) > MAX_FILE_NAME or "." not in value:
         return False
     stem, extension = value.rsplit(".", 1)
     upper = stem.upper()
     reserved = upper in _RESERVED or (len(upper) == 4 and upper[:3] in ("COM", "LPT") and upper[3].isdigit())
     return (
-        extension.lower() == "txt"
+        extension.lower() in ("txt", "md", "csv")
         and stem != ""
         and stem == stem.strip()
         and not reserved

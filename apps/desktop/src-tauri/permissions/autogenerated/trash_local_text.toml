@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trash-local-text"
+description = "Enables the trash_local_text command without any pre-configured scope."
+commands.allow = ["trash_local_text"]
+
+[[permission]]
+identifier = "deny-trash-local-text"
+description = "Denies the trash_local_text command without any pre-configured scope."
+commands.deny = ["trash_local_text"]

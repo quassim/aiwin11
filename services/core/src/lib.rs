@@ -16,6 +16,7 @@ pub mod openai;
 pub mod policy;
 #[cfg(windows)]
 pub mod task;
+pub mod video;
 #[cfg(windows)]
 pub mod windows_bridge;
 
@@ -103,6 +104,13 @@ pub struct Activity {
     pub task_id: Option<String>,
     /// Stable code (decision, rule or error), never user content.
     pub code: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudUsage {
+    pub tokens: u64,
+    pub tasks: u64,
 }
 
 /// One chat task as persisted, for the activity page and recovery.
@@ -269,6 +277,30 @@ impl Core {
         matches!(self.setting("routing.cloud_fallback"), Ok(Some(value)) if value == "true")
     }
 
+    pub fn adaptive_local_routing(&self) -> bool {
+        matches!(self.setting("routing.adaptive_local"), Ok(Some(value)) if value == "true")
+    }
+
+    pub fn set_adaptive_local_routing(&mut self, enabled: bool) -> Result<(), &'static str> {
+        let transaction = self.db.transaction().map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('routing.adaptive_local', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [if enabled { "true" } else { "false" }],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+             VALUES (?1, ?2, 'settings.adaptive.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), self.session_id, if enabled { "adaptive_local" } else { "manual" }],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        transaction.commit().map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     pub fn set_cloud_fallback(&mut self, enabled: bool) -> Result<(), &'static str> {
         let session = self.session_id.clone();
         let write = |db: &mut Connection| -> rusqlite::Result<()> {
@@ -348,6 +380,23 @@ impl Core {
             .and_then(|value| value.parse().ok())
             .filter(|budget| (1_000..=2_000_000).contains(budget))
             .unwrap_or(50_000)
+    }
+
+    /// Retained cumulative cloud counters, counted once per task across sessions.
+    pub fn cloud_usage(&self) -> rusqlite::Result<CloudUsage> {
+        self.db.query_row(
+            "SELECT COALESCE(SUM(tokens), 0), COUNT(*) FROM (
+                SELECT MAX(CAST(substr(code, 8) AS INTEGER)) AS tokens
+                FROM events
+                WHERE kind = 'model.usage' AND task_id IS NOT NULL
+                    AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+                    AND code GLOB 'tokens:[0-9]*'
+                    AND substr(code, 8) NOT GLOB '*[^0-9]*'
+                GROUP BY task_id
+            )",
+            [],
+            |row| Ok(CloudUsage { tokens: row.get(0)?, tasks: row.get(1)? }),
+        )
     }
 
     pub fn set_cloud_token_budget(&mut self, budget: u64) -> Result<(), &'static str> {
@@ -639,6 +688,28 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "session.started");
         assert!(events[0].timestamp.ends_with('Z'));
+    }
+
+    #[test]
+    fn cloud_usage_counts_each_task_once_and_excludes_old_or_invalid_counters() {
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        for (task, code, days) in [
+            ("a", "tokens:100", 0),
+            ("a", "tokens:400", -1),
+            ("b", "tokens:200", 0),
+            ("c", "tokens:900", -31),
+            ("d", "tokens:900garbage", 0),
+        ] {
+            core.db
+                .execute(
+                    "INSERT INTO events (id, session_id, task_id, kind, source, code, timestamp)
+                 VALUES (?1, ?2, ?3, 'model.usage', 'core', ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?5))",
+                    params![Uuid::new_v4().to_string(), core.session_id, task, code, format!("{days} days")],
+                )
+                .unwrap();
+        }
+        let usage = core.cloud_usage().unwrap();
+        assert_eq!((usage.tokens, usage.tasks), (600, 2));
     }
 
     #[test]
