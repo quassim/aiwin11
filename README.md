@@ -112,7 +112,7 @@ La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque,
 
 ### Modèles par tâche et secours cloud
 
-**Modèles** affiche le modèle de chaque tâche et les modèles chargés par Ollama (mémoire GPU). L’option **Local d’abord, OpenAI en secours** permet, si Ollama ne répond pas, de continuer la demande avec OpenAI : seulement si tu coches l’envoi pour cette demande, avant toute action, et jamais en mode privé.
+**Modèles** affiche le modèle de chaque tâche et les modèles chargés par Ollama (mémoire GPU). L’option **Local d’abord, OpenAI en secours** permet, si Ollama ne répond pas, de continuer la demande avec OpenAI : seulement si tu coches l’envoi pour cette demande, avant toute action, et jamais en mode privé. Le **Modèle local de secours** sert une seule fois si le modèle choisi échoue avant la première étape (modèle supprimé ou défaillant) : AiWin11 teste d’abord son appel d’outil, et ne bascule jamais vers le cloud pour cela.
 
 ### Mode flottant
 

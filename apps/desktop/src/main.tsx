@@ -51,6 +51,7 @@ const routingReasons: Record<string, string> = {
   quality_first: "Plus gros modèle local capable d’appeler des outils, appel d’outil vérifié.",
   cost_optimized: "Modèle déjà chargé en mémoire, le plus léger, appel d’outil vérifié.",
   configured_local: "Choix local configuré.",
+  local_fallback: "Modèle local de secours : le modèle choisi a échoué, appel d’outil vérifié.",
 };
 
 const statusNames: Record<ActionStatus, string> = {
@@ -106,7 +107,7 @@ type TaskUpdate =
   | {
       type: "modelSelected";
       model: string;
-      reason: "gpu_verified" | "quality_first" | "cost_optimized" | "configured_local";
+      reason: "gpu_verified" | "quality_first" | "cost_optimized" | "configured_local" | "local_fallback";
     }
   | ({ type: "approvalRequired" } & PendingApproval);
 const applicationNames: Record<"notepad" | "charmap" | "paint", string> = {
@@ -355,6 +356,7 @@ const activityNames: Record<string, string> = {
   "settings.budget.changed": "Budget cloud modifié",
   "model.fallback.cloud": "Bascule vers le cloud (Ollama indisponible, autorisée)",
   "model.cloud.request": "Envoi de la demande au cloud",
+  "model.fallback.local": "Bascule vers le modèle local de secours",
   "settings.retention.changed": "Durée de conservation modifiée",
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
@@ -1092,7 +1094,13 @@ function App() {
           />
         )}
         {page === "Modèles" && (
-          <Routing onFallbackChange={setCloudFallback} strategy={localStrategy} onStrategyChange={setLocalStrategy} />
+          <Routing
+            models={models}
+            currentModel={model}
+            onFallbackChange={setCloudFallback}
+            strategy={localStrategy}
+            onStrategyChange={setLocalStrategy}
+          />
         )}
         {page === "Modèles" && (
           <ModelConfig

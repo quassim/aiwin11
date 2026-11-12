@@ -514,6 +514,36 @@ impl Core {
         write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
+    /// Local model to use when the chosen local model fails on the first step (T-009). `None`
+    /// when unset or invalid. Local to local only: never a cloud model.
+    pub fn local_fallback_model(&self) -> Option<String> {
+        self.setting("routing.local_fallback_model").ok().flatten().filter(|name| valid_model_name(name))
+    }
+
+    /// Sets or clears (empty name) the local fallback model.
+    pub fn set_local_fallback_model(&mut self, name: &str) -> Result<(), &'static str> {
+        if !name.is_empty() && !valid_model_name(name) {
+            return Err("MODEL_REQUIRED");
+        }
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('routing.local_fallback_model', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [name],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.routing.fallback.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, if name.is_empty() { "none" } else { "local" }],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// The cloud provider used for cloud tasks (default OpenAI).
     #[cfg(windows)]
     pub fn cloud_vendor(&self) -> openai::Vendor {
@@ -1221,6 +1251,19 @@ mod tests {
         assert!(core.cloud_fallback_enabled());
         core.db.execute("DROP TABLE settings", []).unwrap();
         assert!(!core.cloud_fallback_enabled(), "an unreadable setting never allows the cloud");
+    }
+
+    #[test]
+    fn local_fallback_model_is_a_valid_identifier_or_nothing() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert_eq!(core.local_fallback_model(), None);
+        core.set_local_fallback_model("qwen3:4b").unwrap();
+        assert_eq!(core.local_fallback_model().as_deref(), Some("qwen3:4b"));
+        assert_eq!(core.activity().unwrap()[0].code.as_deref(), Some("local"));
+        assert_eq!(core.set_local_fallback_model("a b"), Err("MODEL_REQUIRED"));
+        assert_eq!(core.local_fallback_model().as_deref(), Some("qwen3:4b"), "unchanged after a refusal");
+        core.set_local_fallback_model("").unwrap();
+        assert_eq!(core.local_fallback_model(), None);
     }
 
     #[test]

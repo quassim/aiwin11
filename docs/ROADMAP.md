@@ -228,7 +228,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | T-006 | Action non autorisée refusée et journalisée | ✅ |
 | T-007 | Aucune exécution avant approbation | ✅ |
 | T-008 | Annulation | ✅ Unitaires ; réel ❌ — R1 |
-| T-009 | Panne du modèle | 🟡 Erreur contrôlée ; pas de repli — R3 |
+| T-009 | Panne du modèle | 🟡 Erreur contrôlée ; modèle local de secours configurable, utilisé une fois si le modèle choisi échoue avant la première étape (après un appel d’outil de test réussi) ; non testé avec Ollama réel — R3 |
 | T-010 | Injection de prompt | 🟡 Fichiers ✅ ; suite complète AW-024 — R1 |
 | T-011 | Mode privé : aucun transfert réseau cloud | 🟡 Garanti par conception ; pas de test réseau ni de mode privé explicite — R3 |
 | T-012 | Reprise après crash | ✅ |

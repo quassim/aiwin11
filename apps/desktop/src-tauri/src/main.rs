@@ -634,6 +634,16 @@ fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), 
 }
 
 #[tauri::command]
+fn get_local_fallback_model(state: State<'_, Arc<AppState>>) -> Option<String> {
+    lock_core(&state.core).local_fallback_model()
+}
+
+#[tauri::command]
+fn set_local_fallback_model(state: State<'_, Arc<AppState>>, model: String) -> Result<(), &'static str> {
+    lock_core(&state.core).set_local_fallback_model(&model)
+}
+
+#[tauri::command]
 fn get_cloud_cost(state: State<'_, Arc<AppState>>) -> CloudCost {
     lock_core(&state.core).cloud_cost()
 }
@@ -1053,6 +1063,7 @@ fn main() {
             set_cloud_vendor,
             get_cloud_budget,
             get_cloud_cost,
+            get_local_fallback_model,
             get_cloud_usage,
             get_runtime_status,
             video_status,
@@ -1062,6 +1073,7 @@ fn main() {
             install_update,
             set_cloud_budget,
             set_cloud_cost,
+            set_local_fallback_model,
             set_cloud_fallback,
             get_model_resources,
             probe_local_model,

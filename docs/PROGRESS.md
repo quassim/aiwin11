@@ -26,6 +26,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Indicateur de transfert sous l’état de l’agent : traitement sur ce PC ou données envoyées au cloud (nouvelle étape `model.cloud.request` avant chaque appel cloud), puis rappel pour la dernière demande. Vérifié par `verify.ps1` (Vitest) ; pas de test Rust de l’étape (aucun faux fournisseur cloud), non testé avec une vraie clé.
 
+- Modèle local de secours (T-009) dans **Modèles** : utilisé une seule fois si le modèle choisi échoue avant la première étape, après un appel d’outil de test réussi ; jamais vers le cloud. Vérifié par `verify.ps1` (réglage), bascule non testée avec Ollama réel.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { CloudCostSettings } from "./CloudCost";
+import { LocalFallback } from "./LocalFallback";
 import { placementAdvice, placementLabel, type LoadedModel } from "./placement";
 
 const tasks: { name: string; status: string }[] = [
@@ -40,7 +41,11 @@ export function Routing({
   onFallbackChange,
   strategy,
   onStrategyChange,
+  models,
+  currentModel,
 }: {
+  models: string[];
+  currentModel: string;
   onFallbackChange: (enabled: boolean) => void;
   strategy: LocalStrategy | undefined;
   onStrategyChange: (strategy: LocalStrategy) => void;
@@ -171,6 +176,7 @@ export function Routing({
           ))}
         </select>
       </div>
+      <LocalFallback models={models} current={currentModel} />
       <CloudCostSettings />
       <div className="task-form">
         <label htmlFor="image-endpoint">Moteur d’images local (API AUTOMATIC1111, sur ce PC uniquement)</label>

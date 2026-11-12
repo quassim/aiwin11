@@ -843,6 +843,9 @@ impl TaskSlot {
             .as_deref()
             .filter(|model| local && request.cloud_approved && !model.is_empty() && model.len() <= 256);
         let mut cloud_model: Option<&str> = (!local).then_some(request.model.as_str());
+        // Replaced at most once, by the local fallback model, if the chosen one fails on step 1.
+        let mut local_model = request.model.clone();
+        let local_fallback = if local { lock(core)?.local_fallback_model() } else { None };
         // Checked before each cloud call: a task never starts a call once its budget is spent.
         let (budget, cost, vendor) = {
             let core = lock(core)?;
@@ -877,7 +880,7 @@ impl TaskSlot {
                     );
                     Ollama::connect()
                         .and_then(|provider| {
-                            provider.propose(&request.model, &ollama_messages(prompt, &history), tools, &mut sink)
+                            provider.propose(&local_model, &ollama_messages(prompt, &history), tools, &mut sink)
                         })
                         .map_err(|error| match error {
                             GatewayError::Cancelled => "TASK_CANCELLED",
@@ -928,6 +931,30 @@ impl TaskSlot {
                     cloud_model = fallback;
                     run.context.local_model = false;
                     run.vision_model = None;
+                    continue;
+                }
+                // T-009: the chosen local model failed before any step ran (missing, removed or
+                // broken). Switch once to the fallback model the user configured, if it is not the
+                // same one, is not marked unusable and passes the tool-call probe. Local only.
+                Err("MODEL_UNAVAILABLE_OR_INVALID")
+                    if cloud_model.is_none() && history.is_empty() && local_model == request.model =>
+                {
+                    let candidate = local_fallback.as_deref().filter(|model| *model != request.model);
+                    let usable = match candidate {
+                        Some(model) if !lock(core)?.unusable_local_models().iter().any(|name| name == model) => {
+                            Ollama::connect()
+                                .and_then(|ollama| ollama.probe_measured(model))
+                                .is_ok_and(|(verified, _)| verified)
+                        }
+                        _ => false,
+                    };
+                    let Some(model) = candidate.filter(|_| usable) else {
+                        return Err("MODEL_UNAVAILABLE_OR_INVALID");
+                    };
+                    record_code(core, task, "model.fallback.local", "probe_verified")?;
+                    progress(TaskUpdate::stage("model.fallback.local"));
+                    progress(TaskUpdate::ModelSelected { model: model.to_owned(), reason: "local_fallback" });
+                    local_model = model.to_owned();
                     continue;
                 }
                 Err(code @ ("MODEL_PROVIDER_UNAVAILABLE" | "CLOUD_REQUEST_FAILED")) => {
