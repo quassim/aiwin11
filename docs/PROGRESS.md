@@ -26,6 +26,14 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 - `6b877d5` Presse-papiers : `read_clipboard` (règle `private_data`, toujours demandé) et `write_clipboard` (critique, irréversible). Lecture réelle testée ; **écriture réelle non testée** (test opt-in `AIWIN11_TEST_CLIPBOARD=1`, pour ne pas écraser le presse-papiers de l’utilisateur).
 - `5b29b07` Fenêtres : `list_windows` (données d’écran, toujours demandé) et `arrange_window` (premier plan, réduire, restaurer, agrandir une fenêtre de la liste de la même demande ; jamais fermer). Tests réels OK sur une Table des caractères ouverte par le test.
 
+- `93edbed` Outil `list_services` (lecture seule, services automatiques arrêtés d’abord) ; NuGet `System.ServiceProcess.ServiceController` 10.0.2 épinglé.
+
+**Vérification finale de la session** (`scripts/verify.ps1 -Live -Tauri`, machine de référence, Ollama portable `qwen3:8b` + `gemma3:4b`) : tout passe — ruff, mypy strict, ESLint, Prettier, build de l’interface, `cargo fmt --check`, pont .NET, 80 tests Rust, clippy, **19/19 tests réels**, build Tauri release. Aucun Bloc-notes de l’utilisateur n’était ouvert ; aucune application de l’utilisateur n’a été fermée ni modifiée (les tests de fenêtres agissent sur une Table des caractères qu’ils ouvrent eux-mêmes).
+
+**Toujours non vérifié** : interface jamais testée à la main (arrêt global, Historique, autorisations temporaires, fiches d’outils, nouvelles approbations) ; écriture réelle du presse-papiers (opt-in) ; OpenAI réel (T-003) ; lecteur d’écran.
+
+**Problèmes connus** : le premier appel au pont après `dotnet publish` peut dépasser le délai (démarrage à froid) — relancer ; un test de vision a échoué une fois par non-déterminisme du modèle ; `cargo fmt` reformate les imports, donc les scripts de modification doivent viser des ancres stables.
+
 **Prochaine étape** : voir l’entrée suivante (en haut) ou, si aucune : R2, politiques par ressource (dossiers autorisés au-delà du dossier dédié, applications autorisées), ApplicationService (liste fermée d’applications), lecture des services Windows, PowerShell approuvé (liste fermée), puis l’assistant élevé (option B) — à faire **avec l’utilisateur présent** : il exige une revue explicite (AGENTS.md) et l’invite UAC ne peut pas être validée sans lui.
 
 ## 2026-11-12, 01h15 — préparation du travail autonome
