@@ -528,6 +528,29 @@ impl Ollama {
     }
 }
 
+/// A model loaded by Ollama, with the memory it uses (from `/api/ps`).
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct LoadedModel {
+    pub name: String,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub size_vram: u64,
+}
+
+#[derive(Deserialize)]
+struct Running {
+    models: Vec<LoadedModel>,
+}
+
+impl Ollama {
+    /// Models currently loaded and their RAM/VRAM footprint, as reported by Ollama.
+    pub fn loaded_models(&self) -> Result<Vec<LoadedModel>, GatewayError> {
+        let running: Running = Self::receive(self.client.get(format!("{OLLAMA}/api/ps")))?;
+        Ok(running.models.into_iter().take(16).collect())
+    }
+}
+
 impl LocalModelProvider for Ollama {
     fn discover(&self) -> Result<Vec<String>, GatewayError> {
         let catalog: Catalog = Self::receive(self.client.get(format!("{OLLAMA}/api/tags")))?;

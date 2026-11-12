@@ -293,6 +293,26 @@ fn create_grant(state: State<'_, Arc<AppState>>, action: AgentAction, minutes: u
 }
 
 #[tauri::command]
+fn get_cloud_fallback(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.cloud_fallback_enabled())
+}
+
+#[tauri::command]
+fn set_cloud_fallback(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_fallback(enabled)
+}
+
+/// Models loaded by Ollama and their RAM/VRAM use.
+#[tauri::command]
+async fn get_model_resources() -> Result<Vec<aiwin11_core::model_gateway::LoadedModel>, &'static str> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Ollama::connect().and_then(|provider| provider.loaded_models()).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")
+    })
+    .await
+    .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?
+}
+
+#[tauri::command]
 fn get_privacy(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
     Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.private_mode())
 }
@@ -467,6 +487,9 @@ fn main() {
             get_grants,
             get_admin_helper,
             get_privacy,
+            get_cloud_fallback,
+            set_cloud_fallback,
+            get_model_resources,
             set_privacy,
             set_admin_helper,
             create_grant,

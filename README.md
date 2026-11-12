@@ -75,6 +75,10 @@ Toujours dans **Sécurité**, **Autorisations temporaires** permet de laisser un
 
 La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque, possibilité d’annuler, simulation, usage local uniquement et délai maximal. Un outil **critique** demande toujours ton accord.
 
+### Modèles par tâche et secours cloud
+
+**Modèles** affiche le modèle de chaque tâche et les modèles chargés par Ollama (mémoire GPU). L’option **Local d’abord, OpenAI en secours** permet, si Ollama ne répond pas, de continuer la demande avec OpenAI : seulement si tu coches l’envoi pour cette demande, avant toute action, et jamais en mode privé.
+
 ### Mode privé, zone de notification et raccourci
 
 **Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord. AiWin11 a une icône dans la zone de notification (Ouvrir, Stoppe toutes les tâches, Quitter) et **Ctrl+Alt+Espace** le ramène au premier plan depuis n’importe quelle application, directement sur le champ de demande (palette de commandes).

@@ -50,6 +50,9 @@ pub struct TaskRequest {
     /// Local Ollama vision model for `describe_window`; the tool is offered only when set.
     #[serde(default)]
     pub vision_model: Option<String>,
+    /// OpenAI model for the `local_first` fallback (see `Core::cloud_fallback_enabled`).
+    #[serde(default)]
+    pub cloud_fallback_model: Option<String>,
 }
 
 /// What actually happened to one action the agent asked for.
@@ -536,6 +539,13 @@ impl TaskSlot {
             inspected: None,
             vision_model: request.vision_model.as_deref().filter(|_| local),
         };
+        // Explicit local_first fallback: setting on, private mode off, cloud approved for this
+        // request, and a cloud model chosen. Checked again when it would apply.
+        let fallback = request
+            .cloud_fallback_model
+            .as_deref()
+            .filter(|model| local && request.cloud_approved && !model.is_empty() && model.len() <= 256);
+        let mut cloud_model: Option<&str> = (!local).then_some(request.model.as_str());
         let mut history: Vec<StepRecord> = Vec::new();
         for step in 1..=MAX_AGENT_STEPS {
             if self.phase.load(Ordering::Acquire) == CANCELLED {
@@ -550,8 +560,8 @@ impl TaskSlot {
                 }
                 self.phase.load(Ordering::Acquire) != CANCELLED
             };
-            let proposal = match request.provider {
-                Provider::Ollama => {
+            let proposal = match cloud_model {
+                None => {
                     let tools = tool_catalog(false, local && files.is_some(), local, run.vision_model.is_some());
                     Ollama::connect()
                         .and_then(|provider| {
@@ -563,10 +573,29 @@ impl TaskSlot {
                             _ => "MODEL_UNAVAILABLE_OR_INVALID",
                         })
                 }
-                Provider::OpenAi => openai::propose(&request.model, &openai_messages(prompt, &history), &mut sink),
+                Some(model) => openai::propose(model, &openai_messages(prompt, &history), &mut sink),
             };
             let proposal = match proposal {
                 Ok(proposal) => proposal,
+                // Only before any step: no local observation (file, screen) may reach the cloud.
+                Err("MODEL_PROVIDER_UNAVAILABLE")
+                    if cloud_model.is_none() && history.is_empty() && fallback.is_some() =>
+                {
+                    record_code(core, task, "model.provider.unavailable", "ollama")?;
+                    let allowed = {
+                        let core = lock(core)?;
+                        core.cloud_fallback_enabled() && !core.private_mode()
+                    };
+                    if !allowed {
+                        return Err("MODEL_UNAVAILABLE_OR_INVALID");
+                    }
+                    record_code(core, task, "model.fallback.cloud", "openai")?;
+                    progress(TaskUpdate::stage("model.fallback.cloud"));
+                    cloud_model = fallback;
+                    run.context.local_model = false;
+                    run.vision_model = None;
+                    continue;
+                }
                 Err(code @ ("MODEL_PROVIDER_UNAVAILABLE" | "CLOUD_REQUEST_FAILED")) => {
                     record_code(core, task, "model.provider.unavailable", provider_code)?;
                     return Err(if code == "CLOUD_REQUEST_FAILED" { code } else { "MODEL_UNAVAILABLE_OR_INVALID" });
@@ -2356,6 +2385,7 @@ mod tests {
             model: std::env::var("AIWIN11_TEST_MODEL").expect("set AIWIN11_TEST_MODEL"),
             cloud_approved: false,
             vision_model: std::env::var("AIWIN11_TEST_VISION_MODEL").ok(),
+            cloud_fallback_model: None,
         }
     }
 

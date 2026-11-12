@@ -33,6 +33,9 @@ fn main() {
         "set_model_preferences",
         "get_privacy",
         "set_privacy",
+        "get_cloud_fallback",
+        "set_cloud_fallback",
+        "get_model_resources",
     ])))
     .expect("failed to build the Tauri application");
 }

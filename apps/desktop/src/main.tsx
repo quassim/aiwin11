@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
 import { History } from "./History";
+import { Routing } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
 
@@ -225,6 +226,8 @@ const activityNames: Record<string, string> = {
   "model.provider.unavailable": "Fournisseur de modèles indisponible",
   "settings.models.changed": "Choix des modèles modifié",
   "settings.privacy.changed": "Mode privé modifié",
+  "settings.routing.changed": "Routage des modèles modifié",
+  "model.fallback.cloud": "Bascule vers OpenAI (Ollama indisponible, autorisée)",
   "settings.retention.changed": "Durée de conservation modifiée",
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
@@ -354,6 +357,7 @@ function App() {
   const [provider, setProvider] = useState<Provider>("ollama");
   const [cloudModel, setCloudModel] = useState("");
   const [cloudApproved, setCloudApproved] = useState(false);
+  const [cloudFallback, setCloudFallback] = useState(false);
   const [keyConfigured, setKeyConfigured] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyStatus, setKeyStatus] = useState("");
@@ -530,6 +534,9 @@ function App() {
           cloudApproved,
           // Vision stays local: only sent for Ollama tasks.
           visionModel: provider === "ollama" && visionModel ? visionModel : null,
+          // local_first: OpenAI only if Ollama is unreachable, with this request's approval.
+          cloudFallbackModel:
+            provider === "ollama" && cloudFallback && cloudApproved && cloudModel.trim() ? cloudModel.trim() : null,
         },
         progress,
       });
@@ -708,6 +715,17 @@ function App() {
                   resetApproval();
                 }}
               />
+              {provider === "ollama" && cloudFallback && cloudModel.trim() && keyConfigured && (
+                <label className="approval">
+                  <input
+                    type="checkbox"
+                    checked={cloudApproved}
+                    disabled={running}
+                    onChange={(event) => setCloudApproved(event.target.checked)}
+                  />
+                  Si Ollama est indisponible, envoyer cette demande à OpenAI ({cloudModel.trim()})
+                </label>
+              )}
               {provider === "openai" && (
                 <label className="approval">
                   <input
@@ -732,6 +750,7 @@ function App() {
             </form>
           </section>
         )}
+        {page === "Modèles" && <Routing onFallbackChange={setCloudFallback} />}
         {page === "Modèles" && (
           <section className="card">
             <div className="task-form">

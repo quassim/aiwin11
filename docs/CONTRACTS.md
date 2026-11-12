@@ -197,6 +197,10 @@ The desktop Inspector page is unchanged: it still reads the foreground window's 
 
 `launch_application { application: notepad|charmap|paint }` keeps one policy action. Notepad needs `Capability::LaunchNotepad`; Character Map and Paint need `Capability::LaunchAllowedApp` (`APPLICATION_CHARACTER_MAP`, `APPLICATION_PAINT`). The bridge starts the fixed System32 executable (`charmap.exe`, `mspaint.exe`) without arguments nor handle inheritance and verifies a new window of the expected process (`charmap`, `mspaint`) for up to 6 s. Only a Notepad window launched this way can then receive `type_in_notepad`.
 
+## Model routing (R3)
+
+Strategies: `manual` (default: the chosen model, nothing else) and `local_first` (`routing.cloud_fallback`, `get_cloud_fallback` / `set_cloud_fallback`, journaled `settings.routing.changed`). With `local_first`, `TaskRequest.cloudFallbackModel` names the OpenAI model; the window sends it only when the user ticked the cloud approval for this request. If Ollama is unreachable on the **first** step (no local observation exists yet), the core re-checks the setting and private mode, journals `model.provider.unavailable` then `model.fallback.cloud`, and continues with OpenAI, local-only tools removed (the policy engine sees a cloud model). Otherwise the task fails as before. `get_model_resources` returns Ollama's loaded models (`/api/ps`: name, size, size_vram). The Models page lists each task type with its model; voice, image and video show "not yet available" (no engine).
+
 ## Private mode and desktop surfaces
 
 `privacy.strict` (`get_privacy` / `set_privacy`, journaled `settings.privacy.changed` `strict|hybrid`): when on, an OpenAI task fails with `PRIVATE_MODE` before anything is sent (`model.cloud.denied`, code `private_mode`); an unreadable setting counts as on. The tray icon (menu: open, stop all tasks, quit) and the global shortcut Ctrl+Alt+Space only show the main window or stop tasks; they never start an action. Every Tauri command is declared in `build.rs` and allowed for the main window in `capabilities/`.
