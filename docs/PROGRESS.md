@@ -6,6 +6,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 **Fait** : mémoire durable chiffrée (DPAPI) : outils `remember` / `recall` via le broker, page **Mémoire**, migration 004. Vérifié par `verify.ps1` (87 tests Rust, dont le contrôle qu’aucun texte en clair n’est dans le fichier SQLite). Non testé avec un modèle réel.
 
+- `bffc8b6` Demandes enregistrées (chiffrées, migration 005), rejouées seulement par l’utilisateur.
+
 **Prochaine étape** : recherche sémantique (embeddings locaux Ollama) sur la mémoire et un dossier choisi ; client MCP ; R7 voix ; R8 workflows ; R4.
 
 ## 2026-11-12, DeepSeek et distribution
