@@ -116,6 +116,11 @@ const activityNames: Record<string, string> = {
   "session.started": "Session ouverte",
   "task.created": "Demande reçue",
   "task.planning": "Consultation du modèle",
+  "task.started": "Demande démarrée",
+  "task.progress": "Étape de l’agent",
+  "tasks.stop.requested": "Arrêt global demandé",
+  "model.provider.unavailable": "Fournisseur de modèles indisponible",
+  "settings.models.changed": "Choix des modèles modifié",
   "model.cloud.authorized": "Requête OpenAI autorisée",
   "model.cloud.denied": "Requête OpenAI refusée",
   "agent.tool.requested": "Action demandée par l’agent",
@@ -230,6 +235,7 @@ function App() {
   const [agentReply, setAgentReply] = useState("");
   const [draftReply, setDraftReply] = useState("");
   const [actionReports, setActionReports] = useState<ActionReport[]>([]);
+  const [stopState, setStopState] = useState<"" | "idle" | "stopped" | "requested" | "confirmed" | "failed">("");
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
   const canSend = !running && !!selectedModel && !!prompt.trim()
     && (provider === "ollama" || (cloudApproved && keyConfigured && !keyBusy));
@@ -344,6 +350,7 @@ function App() {
     setAgentReply("");
     setDraftReply("");
     setActionReports([]);
+    setStopState("");
     setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "delta") {
@@ -382,8 +389,19 @@ function App() {
       setDraftReply("");
       setPendingApproval(undefined);
       setRunning(false);
+      setStopState((current) => current === "requested" ? "confirmed" : current);
       refresh();
     }
+  }
+
+  async function stopAll() {
+    try {
+      const status = await invoke<"idle" | "stopped" | "requested">("stop_all_tasks");
+      setStopState(status);
+    } catch {
+      setStopState("failed");
+    }
+    refresh();
   }
 
   async function cancelTask() {
@@ -408,6 +426,16 @@ function App() {
           ))}
         </nav>
         <div className="connection"><span aria-hidden="true" />{provider === "ollama" ? "Ollama · Local" : "OpenAI · Cloud"}</div>
+        <button className="stop-all" onClick={() => void stopAll()}
+          aria-describedby="stop-status">Stoppe toutes les tâches</button>
+        <p id="stop-status" role="status" className="stop-status">{{
+          "": "",
+          idle: "Aucune tâche en cours.",
+          stopped: "Arrêt confirmé : la tâche est annulée.",
+          requested: "Arrêt demandé : l’action en cours se termine, puis la tâche s’arrête.",
+          confirmed: "Arrêt confirmé : aucune autre action n’a été lancée.",
+          failed: "Le cœur local n’a pas pu traiter l’arrêt.",
+        }[stopState]}</p>
       </aside>
       <main>
         <h1>{page === "Accueil" ? "Espace de travail" : page}</h1>

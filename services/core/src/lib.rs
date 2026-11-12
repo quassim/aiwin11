@@ -163,6 +163,15 @@ impl Core {
         rows.collect()
     }
 
+    /// Journals a session-level event. Kind and code are static codes, never user content.
+    pub fn journal(&self, kind: &'static str, code: Option<&'static str>) -> rusqlite::Result<()> {
+        self.db.execute(
+            "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, ?3, 'core', ?4)",
+            params![Uuid::new_v4().to_string(), self.session_id, kind, code],
+        )?;
+        Ok(())
+    }
+
     pub fn session_id(&self) -> &str {
         &self.session_id
     }

@@ -3,7 +3,7 @@ use std::{
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command as Process, Stdio},
-    sync::{atomic::{AtomicU8, Ordering}, Condvar, Mutex},
+    sync::{atomic::{AtomicBool, AtomicU8, Ordering}, Condvar, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -228,9 +228,59 @@ pub struct TaskSlot {
     phase: AtomicU8,
     approval: Mutex<ApprovalState>,
     signal: Condvar,
+    /// Set by `stop_all` while an action is dispatching: the task stops as soon as it returns.
+    stop_after_dispatch: AtomicBool,
+}
+
+/// Result of the global stop ("Stoppe toutes les tâches").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StopStatus {
+    /// Nothing was running.
+    Idle,
+    /// The task was cancelled immediately (planning or awaiting approval).
+    Stopped,
+    /// An action is executing and cannot be interrupted safely: the task stops right after it,
+    /// without any further step. Confirmed when the task ends as cancelled.
+    Requested,
+}
+
+impl StopStatus {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Stopped => "stopped",
+            Self::Requested => "requested",
+        }
+    }
 }
 
 impl TaskSlot {
+    /// Global stop: cancels the running task now if possible, otherwise as soon as the action
+    /// being executed returns. A started side effect is never interrupted midway.
+    pub fn stop_all(&self) -> StopStatus {
+        loop {
+            if self.cancel() {
+                return StopStatus::Stopped;
+            }
+            self.stop_after_dispatch.store(true, Ordering::Release);
+            match self.phase.load(Ordering::Acquire) {
+                DISPATCHING => return StopStatus::Requested,
+                IDLE | CANCELLED => {
+                    self.stop_after_dispatch.store(false, Ordering::Release);
+                    return StopStatus::Idle;
+                }
+                // The action returned in between: cancel the planning phase on the next turn.
+                _ => continue,
+            }
+        }
+    }
+
+    /// True while a task is running (any phase but idle).
+    pub fn is_running(&self) -> bool {
+        self.phase.load(Ordering::Acquire) != IDLE
+    }
+
     /// Requests cancellation. Succeeds while the model is planning or while an approval is
     /// pending; once dispatch started, the action is no longer cancellable.
     pub fn cancel(&self) -> bool {
@@ -348,6 +398,8 @@ impl TaskSlot {
         progress: &F,
     ) -> Result<TaskOutcome, &'static str> {
         set_state(core, task, "planning", None)?;
+        let provider_code = match request.provider { Provider::Ollama => "ollama", Provider::OpenAi => "openai" };
+        record_code(core, task, "task.started", provider_code)?;
         record(core, task, "task.planning")?;
         progress(TaskUpdate::stage("task.planning"));
         if let Provider::OpenAi = request.provider {
@@ -371,10 +423,12 @@ impl TaskSlot {
             vision_model: request.vision_model.as_deref().filter(|_| local),
         };
         let mut history: Vec<StepRecord> = Vec::new();
-        for _ in 0..MAX_AGENT_STEPS {
+        for step in 1..=MAX_AGENT_STEPS {
             if self.phase.load(Ordering::Acquire) == CANCELLED {
                 return Err("TASK_CANCELLED");
             }
+            // Payload: step number only, never content.
+            record_code(core, task, "task.progress", &format!("step:{step}/{MAX_AGENT_STEPS}"))?;
             // Forward text as it streams in; stop reading as soon as the task is cancelled.
             let mut sink = |delta: Option<&str>| {
                 if let Some(text) = delta {
@@ -391,10 +445,19 @@ impl TaskSlot {
                         })
                         .map_err(|error| match error {
                             GatewayError::Cancelled => "TASK_CANCELLED",
+                            GatewayError::Unavailable => "MODEL_PROVIDER_UNAVAILABLE",
                             _ => "MODEL_UNAVAILABLE_OR_INVALID",
-                        })?
+                        })
                 }
-                Provider::OpenAi => openai::propose(&request.model, &openai_messages(prompt, &history), &mut sink)?,
+                Provider::OpenAi => openai::propose(&request.model, &openai_messages(prompt, &history), &mut sink),
+            };
+            let proposal = match proposal {
+                Ok(proposal) => proposal,
+                Err(code @ ("MODEL_PROVIDER_UNAVAILABLE" | "CLOUD_REQUEST_FAILED")) => {
+                    record_code(core, task, "model.provider.unavailable", provider_code)?;
+                    return Err(if code == "CLOUD_REQUEST_FAILED" { code } else { "MODEL_UNAVAILABLE_OR_INVALID" });
+                }
+                Err(code) => return Err(code),
             };
             if self.phase.load(Ordering::Acquire) == CANCELLED {
                 return Err("TASK_CANCELLED");
@@ -635,7 +698,8 @@ impl TaskSlot {
             return Err(error);
         }
         let result = effect();
-        let _ = self.phase.compare_exchange(DISPATCHING, PLANNING, Ordering::AcqRel, Ordering::Acquire);
+        let next = if self.stop_after_dispatch.swap(false, Ordering::AcqRel) { CANCELLED } else { PLANNING };
+        let _ = self.phase.compare_exchange(DISPATCHING, next, Ordering::AcqRel, Ordering::Acquire);
         set_state(core, task, "planning", None)?;
         Ok(result)
     }
@@ -1039,6 +1103,7 @@ impl Drop for ResetSlot<'_> {
         if let Ok(mut state) = self.0.approval.lock() {
             *state = ApprovalState::Idle;
         }
+        self.0.stop_after_dispatch.store(false, Ordering::Release);
         self.0.phase.store(IDLE, Ordering::Release);
     }
 }
@@ -1431,6 +1496,27 @@ mod tests {
         });
         assert_eq!(decision, Err("TASK_CANCELLED"));
         assert!(!slot.cancel(), "a cancelled task cannot be cancelled twice");
+    }
+
+    #[test]
+    fn global_stop_cancels_now_or_right_after_the_running_action() {
+        let slot = TaskSlot::default();
+        assert_eq!(slot.stop_all(), StopStatus::Idle, "nothing to stop");
+        assert!(!slot.stop_after_dispatch.load(Ordering::Acquire), "an idle stop leaves no pending stop");
+
+        let slot = planning_slot();
+        assert_eq!(slot.stop_all(), StopStatus::Stopped);
+        assert_eq!(slot.phase.load(Ordering::Acquire), CANCELLED);
+
+        let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
+        let slot = planning_slot();
+        let ran = slot.dispatching(&core, "t", || {
+            assert_eq!(slot.stop_all(), StopStatus::Requested, "an executing action is not interrupted");
+            "effect done"
+        });
+        assert_eq!(ran, Ok("effect done"));
+        assert_eq!(slot.phase.load(Ordering::Acquire), CANCELLED, "no further step after the action");
+        assert_eq!(slot.dispatching(&core, "t", || ()), Err("TASK_CANCELLED"));
     }
 
     #[test]

@@ -190,6 +190,12 @@ At startup, tasks still in a non-final state were interrupted by a crash or a fo
 
 `get_tasks` (main window only) returns the 30 most recent tasks across sessions. `get_snapshot` returns up to 100 events of the current session with their task ID and code.
 
+### Lifecycle events and global stop
+
+Each task journals `task.created`, then `task.started` (code: provider, `ollama` or `openai`), `task.planning`, one `task.progress` per agent step (code `step:N/8`, never content), and ends with `task.completed`, `task.failed` (error code) or `task.cancelled`. When the provider cannot be reached the task journals `model.provider.unavailable` (code: provider) and fails with `MODEL_UNAVAILABLE_OR_INVALID` (Ollama) or `CLOUD_REQUEST_FAILED` (OpenAI). There is never an automatic fallback to another provider.
+
+`stop_all_tasks` ("Stoppe toutes les tâches", a button always visible in the side bar) returns `idle` (nothing running), `stopped` (the task was planning or awaiting approval and is cancelled now) or `requested` (an action is executing: it is not interrupted midway, and the task stops right after it without any further step). It is journaled as `tasks.stop.requested` with that code; a requested stop is confirmed by `task.cancelled` when the task ends, which the window shows as "Arrêt confirmé".
+
 ## Streaming and progress (AW-011)
 
 Both providers are called with `stream: true`. The gateway folds Ollama's NDJSON chunks or OpenAI's SSE `data:` events into one proposal, with the same bounds (2 MiB body, 4000 reply characters, one tool call). Every Ollama chunk is checked for remote metadata. Tool-call fragments are assembled silently and never forwarded; OpenAI call IDs are kept for the next turn.

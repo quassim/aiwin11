@@ -61,6 +61,8 @@ Quand une action demande ton accord, un encadré la décrit exactement (fichiers
 
 Le **mode simulation** remplace toute action avec effet par une simulation : l’agent te dit ce qu’il aurait fait, rien n’est modifié. Le profil s’applique à la demande suivante. Avec OpenAI, seuls l’ouverture du Bloc-notes et les réponses texte sont possibles : aucun contenu de fichier, de fenêtre ou d’image n’est envoyé au cloud.
 
+Le bouton **Stoppe toutes les tâches**, toujours visible dans la barre latérale, arrête tout : une demande en réflexion ou en attente d’accord est annulée immédiatement (« Arrêt confirmé ») ; si une action est en cours d’exécution, elle n’est pas coupée au milieu (« Arrêt demandé ») et la demande s’arrête juste après, sans aucune autre action.
+
 ### Fournisseur cloud optionnel
 
 Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, cochez l’envoi du texte de la demande à OpenAI, pour cette demande seulement : cet accord n’est jamais mémorisé. Le fournisseur choisi est mémorisé ; Ollama est sélectionné au premier démarrage. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)

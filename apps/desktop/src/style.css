@@ -18,6 +18,9 @@ nav button { text-align: left; background: transparent; border-color: transparen
 nav button[aria-current] { background: #25403b; color: #a2f4d9; }
 .connection { display: flex; align-items: center; gap: 8px; margin: auto 10px 0; color: #b4c5c5; font-size: 14px; }
 .connection span { width: 8px; height: 8px; border-radius: 50%; background: #83e8c6; }
+.stop-all { margin: 12px 10px 0; padding: 8px 10px; border: 1px solid #ff9b8f; border-radius: 6px; background: #5a1f1a; color: #fff; font-weight: 600; cursor: pointer; }
+.stop-all:focus-visible { outline: 3px solid #ffd27a; outline-offset: 2px; }
+.stop-status { margin: 6px 10px 0; min-height: 1em; color: #e6eeee; font-size: 13px; }
 main { padding: clamp(24px, 5vw, 64px); }
 h1 { font-size: clamp(26px, 4vw, 40px); margin: 0 0 24px; letter-spacing: -.035em; }
 h2 { font-size: 19px; margin: 0; }

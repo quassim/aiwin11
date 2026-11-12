@@ -52,7 +52,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Simulations | ✅ Mode simulation | — |
 | Confirmations des opérations sensibles | ✅ | — |
 | Journal d’audit | ✅ | — |
-| Arrêt d’urgence | 🟡 Annulation de la tâche en cours ; pas d’arrêt global | R1 |
+| Arrêt d’urgence | ✅ Arrêt global « Stoppe toutes les tâches » (demandé / confirmé) | — |
 | Mécanismes de récupération | 🟡 Corbeille, reprise après plantage ; pas de sauvegardes ni points de restauration | R2 |
 | Tableau de bord | ❌ | R5 |
 | Assistant flottant | ❌ | R5 |
@@ -100,7 +100,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Approbation forte : fichiers, commande, conséquences, étendue | ✅ Pour les actions existantes | — |
 | Anti-injection : contenu = données | ✅ Fichiers et fenêtres ; pages web ❌ | R6 |
 | Secrets jamais donnés aux modèles | ✅ | — |
-| Arrêt d’urgence global, distinguer arrêt demandé / confirmé | 🟡 Annulation par tâche, « annulation demandée » affichée | R1 |
+| Arrêt d’urgence global, distinguer arrêt demandé / confirmé | ✅ `stop_all_tasks` : arrêté, demandé puis confirmé | — |
 | Récupération : points de restauration, sauvegardes ciblées, opérations réversibles 🟡 (corbeille), transactions compensatoires | 🟡 | R2 |
 | Surfaces : Control Center 🟡, Command Palette ❌, Voice Assistant (écoute explicite, indicateur) ❌, Workflow Studio ❌ | 🟡 | R5, R7, R8 |
 | UX : mode simple / mode expert | ❌ | R5 |
@@ -127,7 +127,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Enveloppe avec `payload`, identité attribuée par une couche de confiance | 🟡 Opérations typées ; identité fixée par l’hôte | R4 |
 | Réponse normalisée (statuts, erreur code/message/retryable, durée) | ✅ Contrat v1 | — |
 | Événements : `event_id`, `sequence`, `timestamp`, session, tâche, type, source ✅ ; **payload** ❌ (codes seulement) | 🟡 | R1 |
-| Types `task.started`, `task.progress`, `model.provider.unavailable` | ❌ | R1 |
+| Types `task.started`, `task.progress`, `model.provider.unavailable` | ✅ | — |
 | Ordre par tâche ✅ ; tolérance aux doublons après reconnexion | 🟡 | R4 |
 | Model Gateway : ProviderRegistry, ModelCatalog 🟡, ModelRouter (Resolve, Rank, Select, **ExplainSelection**), InferenceService (Generate, Stream ✅, Cancel 🟡), ResourceMonitor, UsageService | 🟡 | R3 |
 | Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | ❌ | R3 |
@@ -190,7 +190,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | — | « Résume cette fenêtre » | ✅ Réel (structure et description locale) |
 | — | « Range ces fichiers » : **plan prévisualisé**, puis actions contrôlées | 🟡 Actions une à une avec approbation ; pas de plan global prévisualisé ni d’approbation groupée — R2 |
 | — | « Utilise mon modèle local » : aucun appel cloud | ✅ |
-| — | « Stoppe toutes les tâches » | ❌ Arrêt global — R1 |
+| — | « Stoppe toutes les tâches » | ✅ Arrêt global (tests unitaires ; réel non testé) |
 | — | Provider indisponible : bascule autorisée ou erreur compréhensible | 🟡 Erreur ✅, bascule ❌ — R3 |
 | — | Instruction malveillante dans une page | 🟡 Fichiers ✅ ; pages web ❌ — R6 |
 | — | Redémarrage après interruption | ✅ |
@@ -234,9 +234,9 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 
 - Distribution de développement simplifiée : embarquer l’agent Python et le pont .NET, supprimer `AIWIN11_PYTHON` manuel ; script de démarrage unique (`scripts/`).
 - ✅ Réglages mémorisés : fournisseur, modèle, modèle de vision (table `settings`, événement `settings.models.changed`).
-- **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
+- ✅ **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
 - **Durée de conservation et effacement** de l’historique ; export du journal d’audit.
-- Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; payload JSON non sensible.
+- ✅ Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; charge utile = code non sensible (fournisseur, numéro d’étape). 🟡 Pas de payload JSON structuré.
 - Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`, tests de composants React, test E2E de l’application.
 - Mesures : démarrage, RAM au repos, navigation, évaluation de politique ; machine de référence documentée.
 - Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).

@@ -7,7 +7,7 @@ use aiwin11_core::{
     model_gateway::{LocalModelProvider, Ollama},
     openai,
     policy::{self, AgentAction, Effect, PolicySettings},
-    task::{TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
+    task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
     Core, ModelPreferences,
 };
@@ -206,6 +206,17 @@ fn cancel_task(state: State<'_, Arc<AppState>>) -> bool {
     state.task.cancel()
 }
 
+/// "Stoppe toutes les tâches": always available, journaled with its immediate result. The stop
+/// is confirmed when the running task ends as cancelled (`task.cancelled`).
+#[tauri::command]
+fn stop_all_tasks(state: State<'_, Arc<AppState>>) -> Result<StopStatus, &'static str> {
+    let status = state.task.stop_all();
+    if let Ok(core) = state.core.lock() {
+        let _ = core.journal("tasks.stop.requested", Some(status.code()));
+    }
+    Ok(status)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PolicyRow {
@@ -273,7 +284,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_snapshot, discover_models, run_task, cancel_task, resolve_approval,
+            get_snapshot, discover_models, run_task, cancel_task, stop_all_tasks, resolve_approval,
             get_policy_overview, set_policy_settings, get_tasks, get_model_preferences, set_model_preferences,
             openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
             capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,
