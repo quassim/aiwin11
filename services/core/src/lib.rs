@@ -50,6 +50,15 @@ pub struct AuditEntry {
     pub timestamp: String,
 }
 
+/// Journal guard: event kinds, codes and task IDs are short machine codes. Anything else
+/// (free text, a path, a prompt fragment) is replaced by `REDACTED` before it is stored, so a
+/// programming error can never write user content into the audit journal.
+pub(crate) fn journal_code(value: &str) -> &str {
+    let safe = !value.is_empty() && value.len() <= 96
+        && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:+/-".contains(&b));
+    if safe { value } else { "REDACTED" }
+}
+
 const PREFERENCE_KEYS: [&str; 4] = ["model.provider", "model.local", "model.cloud", "model.vision"];
 
 impl ModelPreferences {
@@ -301,7 +310,7 @@ impl Core {
     pub fn journal(&self, kind: &'static str, code: Option<&'static str>) -> rusqlite::Result<()> {
         self.db.execute(
             "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, ?3, 'core', ?4)",
-            params![Uuid::new_v4().to_string(), self.session_id, kind, code],
+            params![Uuid::new_v4().to_string(), self.session_id, journal_code(kind), code.map(journal_code)],
         )?;
         Ok(())
     }
@@ -528,6 +537,71 @@ mod tests {
         assert!(json["events"].as_array().unwrap().iter().any(|event| event["kind"] == "history.cleared"));
         drop(core);
         let _ = std::fs::remove_dir_all(&directory);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn journal_codes_reject_free_text() {
+        for code in ["policy.evaluated", "ask:launch_application:profile", "step:1/8", "MODEL_REQUIRED",
+            "assisted+simulate", "0b6f7c1e-0f3a-4b8e-9a51-2a3c4d5e6f70"] {
+            assert_eq!(journal_code(code), code);
+        }
+        for text in ["", "Mon mot de passe est hunter2", "C:\\Users\\x\\secret.txt", "a\nb", "é", &"a".repeat(97)] {
+            assert_eq!(journal_code(text), "REDACTED", "{text}");
+        }
+    }
+
+    /// Invariant "nothing sensitive in SQLite" (ROADMAP §6): every column is listed here with
+    /// what it holds. A new column fails this test until it is reviewed and added.
+    #[test]
+    fn the_schema_only_holds_identifiers_codes_and_timestamps() {
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let reviewed = [
+            "events.code", "events.id", "events.kind", "events.sequence", "events.session_id",
+            "events.source", "events.task_id", "events.timestamp",
+            "sessions.created_at", "sessions.id",
+            // Keys are fixed by the core; values are profile codes, booleans, retention days and
+            // public model identifiers. Secrets stay in Windows Credential Manager.
+            "settings.key", "settings.updated_at", "settings.value",
+            "tasks.created_at", "tasks.id", "tasks.outcome", "tasks.session_id", "tasks.state", "tasks.updated_at",
+            "tool_executions.idempotency_key", "tool_executions.session_id", "tool_executions.task_id",
+        ];
+        let mut columns: Vec<String> = Vec::new();
+        let tables: Vec<String> = {
+            let mut statement = core.db.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
+            let rows = statement.query_map([], |row| row.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        for table in tables {
+            let mut statement = core.db.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
+            let names: Vec<String> = statement.query_map([], |row| row.get(0)).unwrap()
+                .collect::<rusqlite::Result<_>>().unwrap();
+            columns.extend(names.into_iter().map(|name| format!("{table}.{name}")));
+        }
+        columns.sort();
+        let mut reviewed: Vec<String> = reviewed.iter().map(|column| column.to_string()).collect();
+        reviewed.sort();
+        assert_eq!(columns, reviewed);
+    }
+
+    #[test]
+    fn free_text_never_reaches_the_database_file() {
+        let path = std::env::temp_dir().join(format!("aiwin11-sensitive-{}.sqlite3", Uuid::new_v4()));
+        let secret = "Ma-carte-4970101234567890-hunter2";
+        {
+            let core = Core::open(&path).unwrap();
+            core.task_created("t").unwrap();
+            core.journal("task.started", None).unwrap();
+            // A faulty caller passing user content as a code is redacted.
+            let leaked = format!("prompt: {secret} !");
+            core.audit(Some("t"), "policy.denied", &leaked).unwrap();
+            core.export_audit().unwrap();
+        }
+        let bytes = std::fs::read(&path).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("hunter2"), "free text written to SQLite");
+        assert!(text.contains("REDACTED"));
         let _ = std::fs::remove_file(&path);
     }
 

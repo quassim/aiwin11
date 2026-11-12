@@ -1126,7 +1126,8 @@ fn record_event(core: &Mutex<Core>, task: &str, kind: &str, code: Option<&str>) 
     let core = core.lock().map_err(|_| "CORE_UNAVAILABLE")?;
     core.db.execute(
         "INSERT INTO events (id, session_id, task_id, kind, source, code) VALUES (?1, ?2, ?3, ?4, 'core', ?5)",
-        params![Uuid::new_v4().to_string(), core.session_id(), task, kind, code],
+        params![Uuid::new_v4().to_string(), core.session_id(), crate::journal_code(task),
+            crate::journal_code(kind), code.map(crate::journal_code)],
     ).map_err(|_| "AUDIT_UNAVAILABLE")?;
     Ok(())
 }

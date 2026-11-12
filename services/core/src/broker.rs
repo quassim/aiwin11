@@ -198,7 +198,8 @@ impl Core {
             .execute(
                 "INSERT INTO events (id, session_id, task_id, kind, source, code)
                  VALUES (?1, ?2, ?3, ?4, 'broker', ?5)",
-                params![Uuid::new_v4().to_string(), self.session_id, task_id, kind, code],
+                params![Uuid::new_v4().to_string(), self.session_id, task_id.as_deref().map(crate::journal_code),
+                    kind, crate::journal_code(code)],
             )
             .map_err(|_| ExecutionError::AuditUnavailable)?;
         transaction.commit().map_err(|_| ExecutionError::AuditUnavailable)?;
@@ -218,7 +219,8 @@ impl Core {
         self.db.execute(
             "INSERT INTO events (id, session_id, task_id, kind, source, code)
              VALUES (?1, ?2, ?3, ?4, 'broker', ?5)",
-            params![Uuid::new_v4().to_string(), self.session_id, task_id, kind, code],
+            params![Uuid::new_v4().to_string(), self.session_id, task_id.map(crate::journal_code),
+                crate::journal_code(kind), crate::journal_code(code)],
         )?;
         Ok(())
     }

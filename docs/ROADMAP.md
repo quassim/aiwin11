@@ -242,7 +242,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).
 - Audit d’accessibilité au lecteur d’écran (Narrateur, NVDA).
 - Script local `scripts/verify.ps1` qui remplace la CI (dépôt local) : builds, analyse statique, tests unitaires et, en option, tests réels.
-- Test qui garantit l’invariant « rien de sensible dans SQLite » (voir §6).
+- ✅ Test qui garantit l’invariant « rien de sensible dans SQLite » (voir §6) : schéma revu colonne par colonne, garde `journal_code` qui remplace tout texte libre par `REDACTED`, scan du fichier de base.
 
 ### R2 — Politiques par ressource et contrôle Windows étendu (fin du lot C, début de M02/M04)
 
@@ -336,7 +336,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 
 **Chiffrement SQLite — justification.** Aujourd’hui la base ne contient aucune donnée sensible : seulement des types d’événements, des codes de décision, des états de tâche et le profil de sécurité. Les demandes, les réponses, les noms et contenus de fichiers, les titres de fenêtres et le texte saisi n’y sont jamais écrits ; la clé API est dans le Gestionnaire d’identifiants Windows. Chiffrer la base entière (SQLCipher) ajouterait une dépendance native et une gestion de clé sans rien protéger de plus. Deux règles à la place :
 
-1. **Invariant** : rien de sensible dans SQLite tant qu’il n’existe pas de chiffrement de contenu. Tout ajout de données utilisateur à la base doit passer par la règle 2. Un test le vérifie (R1).
+1. **Invariant** : rien de sensible dans SQLite tant qu’il n’existe pas de chiffrement de contenu. Tout ajout de données utilisateur à la base doit passer par la règle 2. Des tests le vérifient (`the_schema_only_holds_identifiers_codes_and_timestamps`, `free_text_never_reaches_the_database_file`) ; toute nouvelle colonne fait échouer le premier tant qu’elle n’est pas revue.
 2. **Quand la mémoire arrivera (R6)** : les contenus mémorisés (textes, extraits, embeddings) seront chiffrés champ par champ avec une clé protégée par DPAPI pour l’utilisateur Windows courant ; les métadonnées non sensibles restent en clair pour les requêtes.
 
 Recommandation hors application : activer BitLocker sur le disque système protège la base, les fichiers et la corbeille d’AiWin11 en cas de vol du PC.

@@ -219,3 +219,7 @@ Adding a tool requires a catalog entry, an agent registry entry, a host mapping,
 The host records the cloud authorization decision (`model.cloud.authorized` / `model.cloud.denied`) before inference. OpenAI receives the selected model ID, the fixed agent instructions, the user's request, the previous steps and a catalog limited to `launch_application`, over HTTPS with `store: false`, only when `cloudApproved` is set for that request. No file content, window data or image is ever sent to it. Its response is converted to the same proposal format as Ollama and validated by the Python agent.
 
 The main window can save, remove and check the presence of the `AiWin11/OpenAI` credential. Rust stores it as a generic entry in Windows Credential Manager for the current user on the local machine. The presence command returns a boolean. The key is read in the native gateway for the OpenAI request and excluded from SQLite, agent input and error messages.
+
+## Storage invariant: nothing sensitive in SQLite
+
+Every write to `events` passes event kinds, codes and task IDs through `journal_code`: a value that is not a short machine code (ASCII letters, digits and `_.:+/-`, at most 96 bytes) is stored as `REDACTED`. The test `the_schema_only_holds_identifiers_codes_and_timestamps` lists every column of the schema with what it holds; adding a column fails it until the column is reviewed. `free_text_never_reaches_the_database_file` scans the database file for injected free text.
