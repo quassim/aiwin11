@@ -21,6 +21,25 @@ export function LocalFiles({ onFinished }: { onFinished: () => void }) {
   const [content, setContent] = useState<string>();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [workspace, setWorkspace] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState("");
+
+  async function chooseWorkspace(path: string) {
+    try {
+      const stored = await invoke<string>("set_workspace", { path });
+      setWorkspaceStatus(
+        stored
+          ? `Dossier enregistré : ${stored}. Il sera utilisé au prochain démarrage d’AiWin11.`
+          : "Le dossier dédié d’AiWin11 sera de nouveau utilisé au prochain démarrage.",
+      );
+    } catch (error) {
+      setWorkspaceStatus(
+        String(error) === "WORKSPACE_NOT_ALLOWED"
+          ? "Choisis un dossier existant dans ton profil Windows (par exemple Documents), hors AppData."
+          : "Ce dossier est introuvable.",
+      );
+    }
+  }
 
   useEffect(() => {
     void invoke<string>("local_files_root").then(setRoot, () => setMessage("Le dossier local est indisponible."));
@@ -64,6 +83,31 @@ export function LocalFiles({ onFinished }: { onFinished: () => void }) {
           Place le fichier texte dans ce dossier.<code className="file-path">{root}</code>
         </p>
       )}
+      <form
+        className="task-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void chooseWorkspace(workspace);
+        }}
+      >
+        <label htmlFor="workspace">Dossier de travail de l’agent (dans ton profil Windows)</label>
+        <input
+          id="workspace"
+          value={workspace}
+          maxLength={260}
+          placeholder="Chemin complet, par exemple dans Documents"
+          onChange={(event) => setWorkspace(event.target.value)}
+        />
+        <div className="section-header">
+          <button type="submit" disabled={!workspace.trim()}>
+            Utiliser ce dossier
+          </button>
+          <button type="button" onClick={() => void chooseWorkspace("")}>
+            Revenir au dossier dédié
+          </button>
+        </div>
+        <p role="status">{workspaceStatus}</p>
+      </form>
       <form
         className="task-form"
         onSubmit={(event) => {

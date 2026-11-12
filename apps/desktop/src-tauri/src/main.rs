@@ -358,6 +358,21 @@ fn set_embedding_model(state: State<'_, Arc<AppState>>, model: String) -> Result
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_embedding_model(&model)
 }
 
+/// Main window only: chooses the agent's folder (empty: AiWin11's dedicated folder). Applies at
+/// the next start.
+#[tauri::command]
+fn set_workspace(state: State<'_, Arc<AppState>>, path: String) -> Result<String, &'static str> {
+    let stored = if path.trim().is_empty() {
+        String::new()
+    } else {
+        let canonical = LocalFiles::validate_workspace(std::path::Path::new(path.trim()))?;
+        let text = canonical.to_string_lossy().into_owned();
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+    };
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_workspace(&stored)?;
+    Ok(stored)
+}
+
 #[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
@@ -523,9 +538,15 @@ fn main() {
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
             fs::create_dir_all(&data_dir)?;
+            let core = Core::open(&data_dir.join("aiwin11.sqlite3"))?;
+            // The user's folder if one was chosen and is still allowed; otherwise the dedicated one.
+            let files = core
+                .workspace()
+                .and_then(|workspace| LocalFiles::open_with_workspace(&data_dir, &workspace).ok())
+                .or_else(|| LocalFiles::open(&data_dir).ok());
             app.manage(Arc::new(AppState {
-                files: LocalFiles::open(&data_dir).ok(),
-                core: Mutex::new(Core::open(&data_dir.join("aiwin11.sqlite3"))?),
+                files,
+                core: Mutex::new(core),
                 task: TaskSlot::default(),
                 vision: Mutex::new(()),
             }));
@@ -547,6 +568,7 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            set_workspace,
             get_embedding_model,
             set_embedding_model,
             save_routine,

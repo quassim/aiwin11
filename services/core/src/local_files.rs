@@ -77,6 +77,37 @@ impl LocalFiles {
         Ok(Self { root, trash })
     }
 
+    /// Like `open`, but the agent works in `workspace`, a folder the user chose. It must be an
+    /// existing directory on a local disk, strictly inside the user's profile, and outside
+    /// AppData (where AiWin11 and other applications keep their data). The trash stays in
+    /// AiWin11's data folder.
+    pub fn open_with_workspace(data_dir: &Path, workspace: &Path) -> std::io::Result<Self> {
+        let mut files = Self::open(data_dir)?;
+        files.root = Self::validate_workspace(workspace)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::PermissionDenied, "workspace not allowed"))?;
+        Ok(files)
+    }
+
+    /// Canonical form of an allowed workspace folder (see `open_with_workspace`).
+    pub fn validate_workspace(workspace: &Path) -> Result<PathBuf, &'static str> {
+        let canonical = workspace.canonicalize().map_err(|_| "WORKSPACE_NOT_FOUND")?;
+        if !canonical.is_dir() {
+            return Err("WORKSPACE_NOT_FOUND");
+        }
+        let profile = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .and_then(|profile| profile.canonicalize().ok())
+            .ok_or("WORKSPACE_NOT_ALLOWED")?;
+        let inside = canonical.starts_with(&profile) && canonical != profile;
+        let app_data = canonical.starts_with(profile.join("AppData"));
+        let local_disk = matches!(canonical.components().next(), Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::VerbatimDisk(_)));
+        if !inside || app_data || !local_disk {
+            return Err("WORKSPACE_NOT_ALLOWED");
+        }
+        Ok(canonical)
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -541,6 +572,21 @@ fn valid_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_must_be_inside_the_profile_and_outside_app_data() {
+        let profile = PathBuf::from(std::env::var_os("USERPROFILE").unwrap());
+        let windows = PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        assert_eq!(LocalFiles::validate_workspace(&windows), Err("WORKSPACE_NOT_ALLOWED"));
+        assert_eq!(LocalFiles::validate_workspace(&profile), Err("WORKSPACE_NOT_ALLOWED"), "the profile root itself");
+        assert_eq!(LocalFiles::validate_workspace(&std::env::temp_dir()), Err("WORKSPACE_NOT_ALLOWED"), "AppData");
+        assert_eq!(LocalFiles::validate_workspace(&profile.join("aiwin11-missing-folder")), Err("WORKSPACE_NOT_FOUND"));
+        let folder = profile.join(format!("aiwin11-workspace-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&folder).unwrap();
+        let accepted = LocalFiles::validate_workspace(&folder);
+        let _ = std::fs::remove_dir(&folder);
+        assert!(accepted.is_ok(), "{accepted:?}");
+    }
     use rusqlite::Connection;
     use uuid::Uuid;
 

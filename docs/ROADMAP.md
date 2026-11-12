@@ -35,7 +35,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Choisir un fournisseur local ou en ligne | ✅ Ollama, OpenAI | — |
 | Choisir un modèle **par type de tâche** (voix, texte, image, vidéo, vision, développement, planification) | ❌ Un modèle d’agent + un modèle de vision | R3 |
 | Application facilement paramétrable, UI/UX soignée | 🟡 Pages Accueil, Modèles, Sécurité, Inspecteur, Fichiers, Activité | R5 |
-| Contrôle des fichiers | 🟡 Dossier dédié, `.txt` seulement | R2 |
+| Contrôle des fichiers | 🟡 Dossier dédié ou dossier choisi dans le profil (`.txt` seulement) ; plusieurs dossiers et autres formats ❌ | R2 |
 | Contrôle des logiciels (lancer, gérer) | 🟡 Bloc-notes seulement | R2 |
 | Contrôle des fenêtres | ✅ Lister, premier plan, réduire, restaurer, agrandir (jamais fermer) ; lecture de la fenêtre précédente | — |
 | Paramètres système | ❌ | R2 (lecture) / R9 (modification, composant privilégié) |

@@ -309,6 +309,26 @@ impl Core {
         write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
+    /// The folder the user chose for the agent's file tools, if any (applied at startup).
+    pub fn workspace(&self) -> Option<std::path::PathBuf> {
+        self.setting("files.workspace").ok().flatten().filter(|path| !path.is_empty()).map(Into::into)
+    }
+
+    /// Stores the agent's folder (an empty path restores AiWin11's dedicated folder). The path
+    /// must already be validated by `LocalFiles::validate_workspace`.
+    pub fn set_workspace(&mut self, path: &str) -> Result<(), &'static str> {
+        self.db
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('files.workspace', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [path],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.journal("settings.workspace.changed", Some(if path.is_empty() { "dedicated" } else { "user_folder" }))
+            .map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// Most tokens one task may spend with a cloud provider (default 50 000, 1 000 to 2 000 000).
     pub fn cloud_token_budget(&self) -> u64 {
         self.setting("routing.cloud_token_budget")

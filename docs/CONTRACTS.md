@@ -75,6 +75,10 @@ The preview offers explicit analysis with an installed Ollama vision model. The 
 
 The Inspector page submits `enter_character_map_digit` after explicit user action and a three-second countdown. The broker authorizes the v1 `CharacterMapDigit` operation for the desktop inspector role and requires one decimal digit. The bridge checks the foreground process path against the system copy of Character Map, then uses UI Automation to identify visible, editable control 104 and validate its native handle. It checks the foreground window and deadline immediately before sending a bounded WM_SETTEXT to that control, then verifies the value with WM_GETTEXT. The field value stays inside the bridge. The journal holds decision and outcome codes.
 
+## Agent workspace folder
+
+`set_workspace { path }` stores `files.workspace` (journaled `settings.workspace.changed`, `user_folder` or `dedicated`); an empty path restores the dedicated folder. `LocalFiles::validate_workspace` canonicalizes the path (links resolved) and requires an existing directory on a local disk, strictly inside the user's profile and outside `AppData`, otherwise `WORKSPACE_NOT_ALLOWED` / `WORKSPACE_NOT_FOUND`. It is applied at the next start (and re-validated then; an invalid folder falls back to the dedicated one). The same file rules apply (flat `.txt` names, handle checks, no replacement, trash in AiWin11's data folder). The settings table may therefore hold this folder path.
+
 ## Local text preview and copy
 
 The Files page submits `preview_local_text` with one file name. The broker authorizes the v1 `PreviewLocalText` operation for the desktop inspector role. The core resolves the candidate under the dedicated local app-data `files` folder and validates the opened handle's final path, file attributes and link count before reading. It accepts flat ASCII `.txt` names and UTF-8 content up to 64 KiB. The result is displayed as plain text in the requesting window. SQLite records the operation and outcome codes. The filename and text stay out of the audit event and model gateways.

@@ -116,6 +116,10 @@ Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ;
 
 Dis à l’agent « Souviens-toi que… » : après ton accord, l’information est enregistrée, chiffrée pour ton compte Windows. Il peut la relire dans les demandes suivantes (modèles locaux seulement). La page **Mémoire** liste et efface ces informations.
 
+### Dossier de travail
+
+Dans **Fichiers**, tu peux remplacer le dossier dédié par un dossier de ton profil Windows (par exemple dans Documents), hors AppData. Le changement s’applique au prochain démarrage ; les mêmes règles restent valables (fichiers `.txt`, jamais de remplacement, corbeille récupérable).
+
 ### Pages Inspecteur et Fichiers
 
 Dans **Fichiers**, place un fichier `.txt` UTF-8 de 64 Kio maximum dans le dossier affiché, saisis son nom et clique sur **Afficher l’aperçu**, ou copie-le avec **Copier le fichier**.
