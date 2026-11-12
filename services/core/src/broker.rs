@@ -42,6 +42,8 @@ pub enum Capability {
     TypeText = 1 << 8,
     /// Read a snapshot of running processes (names, IDs, memory, CPU time). Read-only.
     ProcessList = 1 << 9,
+    /// Read memory, processor load, uptime and drive space. Read-only.
+    SystemStatus = 1 << 10,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -113,6 +115,7 @@ impl Policy {
             Some(Operation::LocateWindow(_)) if agent(Capability::WindowLookup) => Ok("locate_window"),
             Some(Operation::InspectWindow(_)) if agent(Capability::WindowInspect) => Ok("inspect_window"),
             Some(Operation::CaptureWindow(_)) if agent(Capability::WindowCapture) => Ok("capture_window"),
+            Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
             Some(Operation::ListProcesses(listing))
                 if agent(Capability::ProcessList) && (1..=25).contains(&listing.limit) =>
             {
@@ -421,6 +424,20 @@ mod tests {
                 command.operation = Some(operation.clone());
                 assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
             }
+        }
+    }
+
+    #[test]
+    fn system_status_needs_its_own_agent_grant() {
+        let status = Policy::granting(&[Capability::SystemStatus]);
+        let others = Policy::granting(&[Capability::ProcessList, Capability::FileRead]);
+        for (policy, peer, expected) in
+            [(status, Peer::Agent, true), (others, Peer::Agent, false), (status, Peer::DesktopInspector, false)]
+        {
+            let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+            let mut command = request(&core);
+            command.operation = Some(Operation::GetSystemStatus(Default::default()));
+            assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{peer:?}");
         }
     }
 

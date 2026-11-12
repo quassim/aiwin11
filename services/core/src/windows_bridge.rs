@@ -11,8 +11,8 @@ use std::{
 use aiwin11_contracts::{
     v1::{
         command::Operation, result::Status, AnalyzeCapture, CaptureForeground, CaptureWindow, CharacterMapDigit,
-        Command, InspectForeground, InspectWindow, ListProcesses, LocateWindow, Result as BridgeReply, TypeInNotepad,
-        UiTree,
+        Command, GetSystemStatus, InspectForeground, InspectWindow, ListProcesses, LocateWindow, Result as BridgeReply,
+        TypeInNotepad, UiTree,
     },
     Message, SCHEMA_VERSION,
 };
@@ -202,6 +202,22 @@ impl Core {
                 return None;
             }
             accept_process_list(reply.process_list?)
+        })
+    }
+
+    /// Agent tool: read-only system metrics.
+    pub(crate) fn agent_system_status(&mut self, task: &str, policy: Policy) -> Result<SystemSnapshot, &'static str> {
+        let operation = Operation::GetSystemStatus(GetSystemStatus {});
+        self.agent_bridge_call(task, policy, operation, "system.status", |reply| {
+            if reply.ui_tree.is_some()
+                || reply.window_capture.is_some()
+                || reply.window_info.is_some()
+                || reply.process_id.is_some()
+                || reply.process_list.is_some()
+            {
+                return None;
+            }
+            accept_system_status(reply.system_status?)
         })
     }
 
@@ -491,6 +507,51 @@ fn accept_process_list(list: aiwin11_contracts::v1::ProcessList) -> Option<Proce
     })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DriveSpace {
+    pub name: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SystemSnapshot {
+    pub memory_total_bytes: u64,
+    pub memory_available_bytes: u64,
+    pub cpu_load_percent: u32,
+    pub logical_processors: u32,
+    pub uptime_seconds: u64,
+    pub drives: Vec<DriveSpace>,
+}
+
+/// Validates the bridge's metrics: coherent memory and drive figures, bounded lists.
+fn accept_system_status(status: aiwin11_contracts::v1::SystemStatus) -> Option<SystemSnapshot> {
+    let drives_ok = status.drives.len() <= 8
+        && status.drives.iter().all(|drive| {
+            !drive.name.is_empty()
+                && drive.name.chars().count() <= 8
+                && drive.name.chars().all(|c| !c.is_control())
+                && drive.free_bytes <= drive.total_bytes
+        });
+    let valid = status.memory_total_bytes > 0
+        && status.memory_available_bytes <= status.memory_total_bytes
+        && status.cpu_load_percent <= 100
+        && (1..=1024).contains(&status.logical_processors)
+        && drives_ok;
+    valid.then(|| SystemSnapshot {
+        memory_total_bytes: status.memory_total_bytes,
+        memory_available_bytes: status.memory_available_bytes,
+        cpu_load_percent: status.cpu_load_percent,
+        logical_processors: status.logical_processors,
+        uptime_seconds: status.uptime_seconds,
+        drives: status
+            .drives
+            .into_iter()
+            .map(|drive| DriveSpace { name: drive.name, total_bytes: drive.total_bytes, free_bytes: drive.free_bytes })
+            .collect(),
+    })
+}
+
 pub fn prewarm_bridge() {
     if let Ok(mut spare) = SPARE_BRIDGE.lock() {
         if spare.is_none() {
@@ -536,7 +597,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     let limit = match command.operation {
         Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
-        Some(Operation::ListProcesses(_)) => MAX_PROCESS_REPLY_BYTES,
+        Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -605,6 +666,47 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_status_from_the_bridge_is_validated() {
+        use aiwin11_contracts::v1::{DriveStatus, SystemStatus};
+        let good = SystemStatus {
+            memory_total_bytes: 32 << 30,
+            memory_available_bytes: 20 << 30,
+            cpu_load_percent: 12,
+            logical_processors: 24,
+            uptime_seconds: 3600,
+            drives: vec![DriveStatus { name: "C:\\".into(), total_bytes: 1 << 40, free_bytes: 1 << 39 }],
+        };
+        assert_eq!(accept_system_status(good.clone()).unwrap().drives[0].name, "C:\\");
+        for bad in [
+            SystemStatus { memory_available_bytes: 64 << 30, ..good.clone() },
+            SystemStatus { cpu_load_percent: 101, ..good.clone() },
+            SystemStatus { logical_processors: 0, ..good.clone() },
+            SystemStatus { memory_total_bytes: 0, memory_available_bytes: 0, ..good.clone() },
+            SystemStatus {
+                drives: vec![DriveStatus { name: "C:\\".into(), total_bytes: 1, free_bytes: 2 }],
+                ..good.clone()
+            },
+            SystemStatus {
+                drives: vec![DriveStatus { name: "".into(), total_bytes: 1, free_bytes: 1 }],
+                ..good.clone()
+            },
+        ] {
+            assert_eq!(accept_system_status(bad.clone()), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn reads_the_system_status_through_the_broker_and_the_bridge() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        assert_eq!(core.agent_system_status(&task, Policy::default()), Err("WINDOW_ACCESS_DENIED"));
+        let status =
+            core.agent_system_status(&task, Policy::granting(&[crate::broker::Capability::SystemStatus])).unwrap();
+        assert!(status.memory_available_bytes > 0 && !status.drives.is_empty(), "{status:?}");
+    }
 
     #[test]
     fn process_lists_from_the_bridge_are_validated() {

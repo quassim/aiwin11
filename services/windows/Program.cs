@@ -35,7 +35,7 @@ var elapsed = Stopwatch.StartNew();
 if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", out _)
     || (command.InspectForeground is null && command.CaptureForeground is null && command.CharacterMapDigit is null
         && command.LocateWindow is null && command.InspectWindow is null && command.TypeInNotepad is null
-        && command.CaptureWindow is null && command.ListProcesses is null
+        && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -88,6 +88,17 @@ else if (command.ListProcesses is { } listing)
     else
     {
         result.ProcessList = ProcessLister.Read(listing.Limit);
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.GetSystemStatus is not null)
+{
+    var status = SystemStatusReader.Read(command.DeadlineMs);
+    if (status is null)
+        Reject(Protocol.Result.Types.Status.Failed, "system_status_unavailable", "Windows could not report the system status.");
+    else
+    {
+        result.SystemStatus = status;
         result.Status = Protocol.Result.Types.Status.Success;
     }
 }

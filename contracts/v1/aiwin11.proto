@@ -27,6 +27,7 @@ message Command {
     TypeInNotepad type_in_notepad = 22;
     TrashLocalText trash_local_text = 23;
     ListProcesses list_processes = 24;
+    GetSystemStatus get_system_status = 25;
   }
 }
 
@@ -54,6 +55,27 @@ message ProcessList {
   repeated ProcessEntry processes = 1;
   // Number of processes seen, before the limit.
   uint32 total = 2;
+}
+
+// Read-only system metrics: memory, processor load, uptime, fixed drives.
+message GetSystemStatus {}
+
+message SystemStatus {
+  uint64 memory_total_bytes = 1;
+  uint64 memory_available_bytes = 2;
+  // Processor load sampled over 250 ms, 0 to 100.
+  uint32 cpu_load_percent = 3;
+  uint32 logical_processors = 4;
+  uint64 uptime_seconds = 5;
+  // Fixed drives, at most 8.
+  repeated DriveStatus drives = 6;
+}
+
+message DriveStatus {
+  // Root such as "C:\", at most 8 characters.
+  string name = 1;
+  uint64 total_bytes = 2;
+  uint64 free_bytes = 3;
 }
 
 message ProcessEntry {
@@ -142,6 +164,7 @@ message Result {
   WindowCapture window_capture = 8;
   WindowInfo window_info = 9;
   ProcessList process_list = 10;
+  SystemStatus system_status = 11;
 }
 
 message Error {

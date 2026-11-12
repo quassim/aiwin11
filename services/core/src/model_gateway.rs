@@ -101,6 +101,12 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
     }
     if include_windows {
         functions.push(json!({
+            "name": "get_system_status",
+            "description": "Lit, en lecture seule, l’état du PC : mémoire totale et disponible, charge du processeur, \
+        nombre de processeurs logiques, durée depuis le démarrage, espace libre des disques internes. Ne modifie rien.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
             "name": "list_processes",
             "description": "Liste, en lecture seule, les 15 processus Windows qui utilisent le plus de mémoire : \
 nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’une fenêtre. N’arrête ni ne modifie rien.",
@@ -684,6 +690,7 @@ mod tests {
                 "copy_text_file",
                 "move_text_file",
                 "trash_text_file",
+                "get_system_status",
                 "list_processes",
                 "inspect_window",
                 "type_in_notepad",
@@ -692,7 +699,7 @@ mod tests {
         );
         assert_eq!(
             names(tool_catalog(false, false, true, false)),
-            ["launch_application", "list_processes", "inspect_window", "type_in_notepad"]
+            ["launch_application", "get_system_status", "list_processes", "inspect_window", "type_in_notepad"]
         );
         let catalog = tool_catalog(true, false, false, false);
         assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));

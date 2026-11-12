@@ -66,6 +66,7 @@ const actionNames: Record<string, string> = {
   describeWindow: "Décrire une fenêtre (capture + vision locale)",
   typeText: "Écrire dans le Bloc-notes ouvert par l’agent",
   listProcesses: "Lister les processus (lecture seule)",
+  systemStatus: "Lire l’état du PC (lecture seule)",
 };
 
 const effectNames: Record<Effect, string> = {

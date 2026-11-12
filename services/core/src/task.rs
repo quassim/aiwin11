@@ -23,7 +23,7 @@ use crate::{
     model_gateway::{tool_catalog, GatewayError, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
     openai,
     policy::{self, ActionContext, AgentAction, Effect, PolicySettings},
-    windows_bridge::{NamedNode, ProcessSnapshot, WindowTarget},
+    windows_bridge::{NamedNode, ProcessSnapshot, SystemSnapshot, WindowTarget},
     Core,
 };
 
@@ -129,6 +129,8 @@ pub enum ApprovalAction {
     },
     /// Read-only; allowed in every profile by the default matrix.
     ListProcesses,
+    /// Read-only; allowed in every profile by the default matrix.
+    SystemStatus,
 }
 
 /// Live progress sent to the requesting window while a task runs.
@@ -174,6 +176,8 @@ enum PlannedAction {
     DescribeWindow,
     /// No argument: the host asks the bridge for the processes using the most memory.
     ListProcesses,
+    /// No argument: memory, processor, uptime and drive space.
+    SystemStatus,
     Reply(String),
 }
 
@@ -556,6 +560,7 @@ impl TaskSlot {
             }
             PlannedAction::InspectWindow => ("inspect_window", json!({}), self.inspect_window(run)?),
             PlannedAction::ListProcesses => ("list_processes", json!({}), self.list_processes(run)?),
+            PlannedAction::SystemStatus => ("get_system_status", json!({}), self.system_status(run)?),
             PlannedAction::TypeText(text) => {
                 let observation = self.type_text(run, &text)?;
                 ("type_in_notepad", json!({ "text": text }), observation)
@@ -808,6 +813,19 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    fn system_status<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>) -> Result<String, &'static str> {
+        let action = AgentAction::SystemStatus;
+        let summary = "Lire l’état du PC (mémoire, processeur, disques)";
+        let grant = match self.gate(run, action, summary, Capability::SystemStatus, ApprovalAction::SystemStatus)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = lock(run.core)?.agent_system_status(run.task, grant);
+        let (status, code) = status_of(&result);
+        run.report(action, summary, status, code);
+        Ok(describe_system(result))
     }
 
     fn read_file<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, name: &str) -> Result<String, &'static str> {
@@ -1176,6 +1194,36 @@ fn control_type_name(id: u32) -> &'static str {
 }
 
 /// Model-facing window tree, indented by depth and framed as untrusted data.
+/// Model-facing system metrics (numbers and drive roots only).
+fn describe_system(result: Result<SystemSnapshot, &'static str>) -> String {
+    const GB: u64 = 1024 * 1024 * 1024;
+    let gb = |bytes: u64| format!("{:.1}", bytes as f64 / GB as f64);
+    match result {
+        Ok(status) => {
+            let drives: Vec<_> = status
+                .drives
+                .iter()
+                .map(|drive| {
+                    format!("- {} : {} Go libres sur {} Go", drive.name, gb(drive.free_bytes), gb(drive.total_bytes))
+                })
+                .collect();
+            format!(
+                "État du PC (lecture seule, rien n’a été modifié) :\n- Mémoire : {} Go disponibles sur {} Go\n\
+                 - Processeur : {} % de charge, {} processeurs logiques\n- Démarré depuis : {} h {} min\n\
+                 Disques internes :\n{}",
+                gb(status.memory_available_bytes),
+                gb(status.memory_total_bytes),
+                status.cpu_load_percent,
+                status.logical_processors,
+                status.uptime_seconds / 3600,
+                status.uptime_seconds % 3600 / 60,
+                if drives.is_empty() { "- aucun".to_owned() } else { drives.join("\n") }
+            )
+        }
+        Err(code) => format!("État du PC indisponible : {code}. Rien n’a été modifié."),
+    }
+}
+
 /// Model-facing process list, framed as untrusted data (process names come from the system).
 fn describe_processes(result: Result<ProcessSnapshot, &'static str>) -> String {
     match result {
@@ -1366,6 +1414,9 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         }
         ("tool", Some("list_processes"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::ListProcesses)
+        }
+        ("tool", Some("get_system_status"), Some(arguments), None) if arguments.is_empty() => {
+            Ok(PlannedAction::SystemStatus)
         }
         ("tool", Some(tool @ ("copy_text_file" | "move_text_file")), Some(arguments), None) if arguments.len() == 2 => {
             let name = |key| file_argument(&arguments, key);
@@ -1892,6 +1943,24 @@ mod tests {
         assert!(matches!(&approvals[1], ApprovalAction::TypeText { text, .. } if text.contains("pain")));
         let kinds: Vec<_> = core.lock().unwrap().activity().unwrap().into_iter().map(|event| event.kind).collect();
         assert!(kinds.contains(&"input.notepad.completed".to_owned()), "{kinds:?}");
+    }
+
+    #[test]
+    #[ignore = "requires Ollama, the installed companions and an interactive Windows session"]
+    fn diagnoses_a_slow_pc_with_read_only_tools_only() {
+        let core = Mutex::new(Core::start(Connection::open_in_memory().unwrap()).unwrap());
+        let task = TaskSlot::default();
+        let request = live_request("Mon PC est lent. Regarde l'état de la mémoire, du processeur et des disques.");
+        let outcome = task
+            .run(&core, None, &request, |update| {
+                assert!(!matches!(update, TaskUpdate::ApprovalRequired { .. }), "reads never ask in Assisted");
+            })
+            .unwrap();
+        assert_eq!(statuses(&outcome, AgentAction::SystemStatus), [ActionStatus::Done], "{outcome:?}");
+        assert!(
+            outcome.actions.iter().all(|report| !report.action.has_side_effect()),
+            "a diagnosis changes nothing: {outcome:?}"
+        );
     }
 
     #[test]

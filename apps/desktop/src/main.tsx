@@ -45,7 +45,8 @@ type ApprovalAction =
   | { kind: "inspectWindow"; application: string; title: string }
   | { kind: "describeWindow"; application: string; title: string; model: string }
   | { kind: "typeText"; text: string; characters: number }
-  | { kind: "listProcesses" };
+  | { kind: "listProcesses" }
+  | { kind: "systemStatus" };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
@@ -66,6 +67,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "systemStatus") {
+    return {
+      title: "L’agent demande à lire l’état du PC",
+      detail: "Action : lire la mémoire, la charge du processeur et l’espace libre des disques. Rien n’est modifié.",
     };
   }
   if (action.kind === "listProcesses") {
@@ -145,6 +152,8 @@ const activityNames: Record<string, string> = {
   "history.exported": "Journal d’audit exporté",
   "process.list.completed": "Processus listés par l’agent",
   "process.list.failed": "Liste des processus impossible",
+  "system.status.completed": "État du PC lu par l’agent",
+  "system.status.failed": "État du PC indisponible",
   "grant.created": "Autorisation temporaire accordée",
   "grant.revoked": "Autorisation temporaire révoquée",
   "model.cloud.authorized": "Requête OpenAI autorisée",

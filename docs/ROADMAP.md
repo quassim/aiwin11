@@ -63,7 +63,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Éditeur visuel de workflows | ❌ | R8 |
 | Écran de routage : modèle de secours, **mode privé**, copier la configuration | ❌ | R3 |
 | Détection des modèles installés ✅, capacités 🟡, conso GPU/RAM/VRAM ❌, coûts API ❌, tests de performance ❌, modèles de secours ❌, restrictions de confidentialité 🟡 | 🟡 | R3 |
-| Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | ❌ | R2 |
+| Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques ; test réel) ; services, actions correctives et rapport ❌ | R2 |
 | Toujours protégés, même en Avancé : suppression massive, élévation de privilèges, sécurité Windows, transactions financières, transfert de données confidentielles | 🟡 Refus par défaut (aucun outil de ce type) ; règles explicites à écrire quand ces outils existeront | R2 |
 | Mémoire : SQLite + recherche vectorielle | 🟡 SQLite ; pas de vectoriel | R6 |
 | Plugins / MCP | ❌ | R6 |
@@ -150,7 +150,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | UIAutomationService (InspectTree ✅, FindElement, Invoke, SetValue) | 🟡 | R2 |
 | InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
 | ShellService (ExecuteApprovedCommand) | ❌ | R2 |
-| SystemService (GetHardwareInfo, GetSystemMetrics) | ❌ | R2, R3 |
+| SystemService (GetSystemMetrics ✅ mémoire, processeur, disques, durée de fonctionnement ; GetHardwareInfo ❌) | 🟡 | R2, R3 |
 | DPI, multi-écran, défilement, focus, références UIA périmées, dialogues modaux | ❌ Non testé | R2 |
 | Capture jamais envoyée au cloud sans politique | ✅ Vision locale seulement | — |
 | Services : Memory, Workflow, Speech, Image, Video, Plugin, Telemetry (local) | ❌ | R6–R9 |
