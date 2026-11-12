@@ -23,6 +23,8 @@
     "allow-ui-ready",
     "allow-get-local-fallback-model",
     "allow-get-protected-files",
+    "allow-get-protected-windows",
+    "allow-set-protected-windows",
     "allow-get-blocked-applications",
     "allow-set-blocked-applications",
     "allow-list-backups",

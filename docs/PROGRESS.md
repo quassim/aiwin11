@@ -42,6 +42,8 @@ Nouveau statut 🧪 dans `docs/ROADMAP.md` : terminé, tests automatiques au ver
 
 - Applications interdites à l’agent (page Sécurité, liste fermée) : refus avant toute demande d’accord et au broker à l’exécution (`resource_blocked`, audité). 🧪 Vérifié par `verify.ps1`.
 
+- Fenêtres protégées (titre ou application, page Sécurité) : absentes de la liste des fenêtres, refusées avant le pont pour la lecture, la capture, l’organisation et les clics (`WINDOW_PROTECTED`, audité). 🧪 Vérifié par `verify.ps1`.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

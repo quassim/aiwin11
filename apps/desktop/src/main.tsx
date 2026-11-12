@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { agentState, agentStateLabels, transferLabel } from "./agentState";
 import { BlockedApps } from "./BlockedApps";
-import { ProtectedFiles } from "./ProtectedFiles";
+import { ProtectedFiles, ProtectedWindows } from "./ProtectedFiles";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
@@ -499,6 +499,7 @@ const taskErrors: Record<string, string> = {
   FILE_COPY_CLEANUP_FAILED: "La copie a échoué et un fichier temporaire n’a pas pu être supprimé.",
   FILE_OUTSIDE_SCOPE: "Le fichier se trouve hors du dossier autorisé ou n’est pas un fichier simple.",
   FILE_PROTECTED: "Ce fichier est protégé par une règle de la page Sécurité : l’agent n’y a pas accès.",
+  WINDOW_PROTECTED: "Cette fenêtre est protégée par une règle de la page Sécurité : l’agent n’y a pas accès.",
   FILE_TOO_LARGE: "Le fichier dépasse 64 Kio.",
   FILE_NOT_UTF8: "Le fichier n’est pas un texte UTF-8.",
   INVALID_FILE_NAME: "Le nom de fichier n’est pas valide.",
@@ -1277,6 +1278,7 @@ function App() {
             <Security onFinished={refresh} />
             <BlockedApps />
             <ProtectedFiles />
+            <ProtectedWindows />
           </>
         )}
         {page === "Mémoire" && <Memory />}

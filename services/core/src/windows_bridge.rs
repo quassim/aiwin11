@@ -209,10 +209,26 @@ impl Core {
         Ok(command)
     }
 
+    /// True when the window matches a protected pattern (title or process name).
+    fn window_protected(&self, target: &WindowTarget) -> bool {
+        self.protected_windows().iter().any(|pattern| {
+            crate::matches_pattern(pattern, &target.title) || crate::matches_pattern(pattern, &target.process_name)
+        })
+    }
+
+    /// Refuses a protected window before anything reaches the bridge, and audits the refusal.
+    fn ensure_window_unprotected(&self, task: &str, target: &WindowTarget) -> Result<(), &'static str> {
+        if self.window_protected(target) {
+            self.audit(Some(task), "policy.denied", "window_protected").map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+            return Err("WINDOW_PROTECTED");
+        }
+        Ok(())
+    }
+
     /// Agent tool, step 1: identifies the window the user was using before AiWin11.
     pub(crate) fn agent_locate_window(&mut self, task: &str, policy: Policy) -> Result<WindowTarget, &'static str> {
         let operation = Operation::LocateWindow(LocateWindow { exclude_process_id: std::process::id() });
-        self.agent_bridge_call(task, policy, operation, "window.locate", |reply| {
+        let located = self.agent_bridge_call(task, policy, operation, "window.locate", |reply| {
             if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_id.is_some() {
                 return None;
             }
@@ -228,7 +244,10 @@ impl Core {
                 title: info.title,
                 process_name: info.process_name,
             })
-        })
+        })?;
+        // Only the title and application name were read: nothing of a protected window is used.
+        self.ensure_window_unprotected(task, &located)?;
+        Ok(located)
     }
 
     /// Agent tool: read-only snapshot of the processes using the most memory.
@@ -257,6 +276,7 @@ impl Core {
         node: &NamedNode,
         value: Option<&str>,
     ) -> Result<(), &'static str> {
+        self.ensure_window_unprotected(task, target)?;
         let operation = Operation::InvokeControl(InvokeControl {
             window: target.window,
             process_id: target.process_id,
@@ -336,6 +356,7 @@ impl Core {
             }
             accept_window_list(reply.window_list?)
         })
+        .map(|windows| windows.into_iter().filter(|window| !self.window_protected(&window.target)).collect())
     }
 
     /// Agent tool: applies one arrangement to a window the same task listed. Returns whether
@@ -347,6 +368,7 @@ impl Core {
         target: &WindowTarget,
         arrangement: Arrangement,
     ) -> Result<bool, &'static str> {
+        self.ensure_window_unprotected(task, target)?;
         let operation = Operation::ArrangeWindow(ArrangeWindow {
             window: target.window,
             process_id: target.process_id,
@@ -455,6 +477,7 @@ impl Core {
         policy: Policy,
         target: &WindowTarget,
     ) -> Result<(Vec<NamedNode>, bool), &'static str> {
+        self.ensure_window_unprotected(task, target)?;
         let operation =
             Operation::InspectWindow(InspectWindow { window: target.window, process_id: target.process_id });
         self.agent_bridge_call(task, policy, operation, "window.inspect", |reply| {
@@ -473,6 +496,7 @@ impl Core {
         policy: Policy,
         target: &WindowTarget,
     ) -> Result<Vec<u8>, &'static str> {
+        self.ensure_window_unprotected(task, target)?;
         let operation =
             Operation::CaptureWindow(CaptureWindow { window: target.window, process_id: target.process_id });
         self.agent_bridge_call(task, policy, operation, "window.capture", |reply| {
@@ -1253,6 +1277,43 @@ mod tests {
         let _ = charmap.kill();
         let _ = charmap.wait();
         assert_eq!(result, Ok((true, true)));
+    }
+
+    #[test]
+    fn protected_windows_are_refused_before_the_bridge_and_audited() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        core.set_protected_windows(&["*Bitwarden*".to_owned(), "keepass*".to_owned()]).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let window = |title: &str, process: &str| WindowTarget {
+            window: 1,
+            process_id: 2,
+            title: title.into(),
+            process_name: process.into(),
+        };
+        let vault = window("Coffre - Bitwarden", "Bitwarden");
+        let keepass = window("Base.kdbx", "KeePassXC");
+        let notes = window("Notes.txt - Bloc-notes", "notepad");
+        assert!(core.window_protected(&vault) && core.window_protected(&keepass), "title or process name");
+        assert!(!core.window_protected(&notes));
+        // Every operation on a protected window stops before any command is built or sent.
+        let all = Policy::granting(&[
+            crate::broker::Capability::WindowInspect,
+            crate::broker::Capability::WindowCapture,
+            crate::broker::Capability::WindowArrange,
+        ]);
+        assert_eq!(core.agent_inspect_window(&task, all, &vault).map(|_| ()), Err("WINDOW_PROTECTED"));
+        assert_eq!(core.agent_capture_window(&task, all, &keepass).map(|_| ()), Err("WINDOW_PROTECTED"));
+        assert_eq!(
+            core.agent_arrange_window(&task, all, &vault, Arrangement::Minimize).map(|_| ()),
+            Err("WINDOW_PROTECTED")
+        );
+        let denied = core
+            .activity()
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "policy.denied" && event.code.as_deref() == Some("window_protected"))
+            .count();
+        assert_eq!(denied, 3);
     }
 
     #[test]

@@ -701,6 +701,16 @@ fn set_blocked_applications(state: State<'_, Arc<AppState>>, applications: Vec<S
 }
 
 #[tauri::command]
+fn get_protected_windows(state: State<'_, Arc<AppState>>) -> Vec<String> {
+    lock_core(&state.core).protected_windows()
+}
+
+#[tauri::command]
+fn set_protected_windows(state: State<'_, Arc<AppState>>, patterns: Vec<String>) -> Result<(), &'static str> {
+    lock_core(&state.core).set_protected_windows(&patterns)
+}
+
+#[tauri::command]
 fn get_protected_files(state: State<'_, Arc<AppState>>) -> Vec<String> {
     lock_core(&state.core).protected_files()
 }
@@ -1155,6 +1165,8 @@ fn main() {
             get_cloud_cost,
             get_local_fallback_model,
             get_protected_files,
+            get_protected_windows,
+            set_protected_windows,
             get_blocked_applications,
             set_blocked_applications,
             list_backups,

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-protected-windows"
+description = "Enables the set_protected_windows command without any pre-configured scope."
+commands.allow = ["set_protected_windows"]
+
+[[permission]]
+identifier = "deny-set-protected-windows"
+description = "Denies the set_protected_windows command without any pre-configured scope."
+commands.deny = ["set_protected_windows"]

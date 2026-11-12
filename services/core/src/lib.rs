@@ -606,7 +606,26 @@ impl Core {
     /// File name patterns the agent may never read, list, search, copy, move or trash
     /// (ROADMAP "règles par ressource"). Checked by the file service at execution time.
     pub fn protected_files(&self) -> Vec<String> {
-        self.setting("policy.protected_files")
+        self.patterns("policy.protected_files")
+    }
+
+    /// Replaces the protected file patterns; blank entries are ignored, duplicates removed.
+    pub fn set_protected_files(&mut self, patterns: &[String]) -> Result<(), &'static str> {
+        self.set_patterns("policy.protected_files", "settings.policy.protected.changed", patterns)
+    }
+
+    /// Window patterns, matched against the window title and the application's process name:
+    /// the agent never sees, reads, captures, arranges or clicks in these windows.
+    pub fn protected_windows(&self) -> Vec<String> {
+        self.patterns("policy.protected_windows")
+    }
+
+    pub fn set_protected_windows(&mut self, patterns: &[String]) -> Result<(), &'static str> {
+        self.set_patterns("policy.protected_windows", "settings.policy.windows.changed", patterns)
+    }
+
+    fn patterns(&self, key: &str) -> Vec<String> {
+        self.setting(key)
             .ok()
             .flatten()
             .map(|value| {
@@ -620,8 +639,7 @@ impl Core {
             .unwrap_or_default()
     }
 
-    /// Replaces the protected patterns; blank entries are ignored, duplicates removed.
-    pub fn set_protected_files(&mut self, patterns: &[String]) -> Result<(), &'static str> {
+    fn set_patterns(&mut self, key: &str, kind: &str, patterns: &[String]) -> Result<(), &'static str> {
         let mut kept: Vec<String> = Vec::new();
         for pattern in patterns.iter().map(|pattern| pattern.trim()).filter(|pattern| !pattern.is_empty()) {
             if !valid_pattern(pattern) {
@@ -638,16 +656,15 @@ impl Core {
         let write = |db: &mut Connection| -> rusqlite::Result<()> {
             let transaction = db.transaction()?;
             transaction.execute(
-                "INSERT INTO settings (key, value) VALUES ('policy.protected_files', ?1)
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                [kept.join("\n")],
+                params![key, kept.join("\n")],
             )?;
             // The patterns themselves stay out of the journal: only how many there are.
             transaction.execute(
-                "INSERT INTO events (id, session_id, kind, source, code)
-                 VALUES (?1, ?2, 'settings.policy.protected.changed', 'core', ?3)",
-                params![Uuid::new_v4().to_string(), session, format!("count:{}", kept.len())],
+                "INSERT INTO events (id, session_id, kind, source, code) VALUES (?1, ?2, ?3, 'core', ?4)",
+                params![Uuid::new_v4().to_string(), session, kind, format!("count:{}", kept.len())],
             )?;
             transaction.commit()
         };
@@ -1424,6 +1441,16 @@ mod tests {
         assert!(!matches_pattern("*.md", "notes.txt"));
         assert!(matches_pattern("a*b*c", "aXXbYYc"));
         assert!(!matches_pattern("a*b*c", "aXXbYY"));
+    }
+
+    #[test]
+    fn protected_window_patterns_are_stored_apart_from_file_patterns() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        core.set_protected_windows(&["*Bitwarden*".to_owned(), "keepass*".to_owned()]).unwrap();
+        assert_eq!(core.protected_windows(), ["*Bitwarden*", "keepass*"]);
+        assert!(core.protected_files().is_empty());
+        let event = &core.activity().unwrap()[0];
+        assert_eq!((event.kind.as_str(), event.code.as_deref()), ("settings.policy.windows.changed", Some("count:2")));
     }
 
     #[test]

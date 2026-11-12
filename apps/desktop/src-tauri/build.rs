@@ -72,6 +72,8 @@ fn main() {
         "ui_ready",
         "get_local_fallback_model",
         "get_protected_files",
+        "get_protected_windows",
+        "set_protected_windows",
         "get_blocked_applications",
         "set_blocked_applications",
         "list_backups",
