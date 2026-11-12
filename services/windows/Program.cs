@@ -37,7 +37,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.LocateWindow is null && command.InspectWindow is null && command.TypeInNotepad is null
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.ReadClipboard is null && command.WriteClipboard is null
-        && command.ListWindows is null && command.ArrangeWindow is null
+        && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -90,6 +90,16 @@ else if (command.ListProcesses is { } listing)
     else
     {
         result.ProcessList = ProcessLister.Read(listing.Limit);
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.ListServices is { } listServices)
+{
+    if (listServices.Limit == 0 || listServices.Limit > ServiceLister.MaxLimit)
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_limit", "The limit must be between 1 and 25.");
+    else
+    {
+        result.ServiceList = ServiceLister.Read(listServices.Limit);
         result.Status = Protocol.Result.Types.Status.Success;
     }
 }

@@ -50,6 +50,7 @@ type ApprovalAction =
   | { kind: "readClipboard" }
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
+  | { kind: "listServices" }
   | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
 type Arrangement = "focus" | "minimize" | "restore" | "maximize";
 const arrangementNames: Record<Arrangement, string> = {
@@ -78,6 +79,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "listServices") {
+    return {
+      title: "L’agent demande à lister les services Windows",
+      detail: "Action : lire les noms et l’état des services. Rien n’est démarré ni arrêté.",
     };
   }
   if (action.kind === "listWindows") {
@@ -196,6 +203,8 @@ const activityNames: Record<string, string> = {
   "system.status.failed": "État du PC indisponible",
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
   "window.list.completed": "Fenêtres listées par l’agent",
+  "service.list.completed": "Services listés par l’agent",
+  "service.list.failed": "Liste des services impossible",
   "window.list.failed": "Liste des fenêtres impossible",
   "window.arrange.completed": "Fenêtre modifiée par l’agent",
   "window.arrange.partial": "Modification de fenêtre non vérifiée",

@@ -142,6 +142,13 @@ avec list_windows dans cette demande, désignée par son numéro. Ne ferme jamai
             }
         }));
         functions.push(json!({
+            "name": "list_services",
+            "description": "Liste, en lecture seule, les services Windows : d’abord les services automatiques \
+        arrêtés (souvent signe d’un problème), puis des services en cours d’exécution, avec les totaux. N’arrête ni ne \
+        démarre rien.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
             "name": "get_system_status",
             "description": "Lit, en lecture seule, l’état du PC : mémoire totale et disponible, charge du processeur, \
         nombre de processeurs logiques, durée depuis le démarrage, espace libre des disques internes. Ne modifie rien.",
@@ -735,6 +742,7 @@ mod tests {
                 "arrange_window",
                 "read_clipboard",
                 "write_clipboard",
+                "list_services",
                 "get_system_status",
                 "list_processes",
                 "inspect_window",
@@ -750,6 +758,7 @@ mod tests {
                 "arrange_window",
                 "read_clipboard",
                 "write_clipboard",
+                "list_services",
                 "get_system_status",
                 "list_processes",
                 "inspect_window",

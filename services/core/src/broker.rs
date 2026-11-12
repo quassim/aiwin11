@@ -52,6 +52,8 @@ pub enum Capability {
     WindowList = 1 << 13,
     /// Focus, minimize, restore or maximize one listed window.
     WindowArrange = 1 << 14,
+    /// Read a snapshot of Windows services (names, state, start mode). Read-only.
+    ServiceList = 1 << 15,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -126,6 +128,11 @@ impl Policy {
             Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
             Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
             Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
+            Some(Operation::ListServices(listing))
+                if agent(Capability::ServiceList) && (1..=25).contains(&listing.limit) =>
+            {
+                Ok("list_services")
+            }
             Some(Operation::ArrangeWindow(arrange))
                 if agent(Capability::WindowArrange)
                     && arrange.window != 0
@@ -499,6 +506,25 @@ mod tests {
             let mut command = request(&core);
             command.operation = Some(operation.clone());
             assert_eq!(core.authorize_dispatch(policy, Peer::Agent, &command).is_ok(), expected, "{operation:?}");
+        }
+    }
+
+    #[test]
+    fn service_listing_needs_its_own_grant_and_a_bounded_limit() {
+        use aiwin11_contracts::v1::ListServices;
+        let listing = Policy::granting(&[Capability::ServiceList]);
+        let others = Policy::granting(&[Capability::ProcessList, Capability::SystemStatus]);
+        for (policy, peer, limit, expected) in [
+            (listing, Peer::Agent, 20, true),
+            (listing, Peer::Agent, 0, false),
+            (listing, Peer::Agent, 26, false),
+            (others, Peer::Agent, 20, false),
+            (listing, Peer::DesktopInspector, 20, false),
+        ] {
+            let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+            let mut command = request(&core);
+            command.operation = Some(Operation::ListServices(ListServices { limit }));
+            assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{peer:?} {limit}");
         }
     }
 

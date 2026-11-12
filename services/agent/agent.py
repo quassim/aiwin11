@@ -69,6 +69,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "read_clipboard": {},
     "write_clipboard": {"text": is_typed_text},
     "list_windows": {},
+    "list_services": {},
     "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }
 

@@ -63,7 +63,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Éditeur visuel de workflows | ❌ | R8 |
 | Écran de routage : modèle de secours, **mode privé**, copier la configuration | ❌ | R3 |
 | Détection des modèles installés ✅, capacités 🟡, conso GPU/RAM/VRAM ❌, coûts API ❌, tests de performance ❌, modèles de secours ❌, restrictions de confidentialité 🟡 | 🟡 | R3 |
-| Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques ; test réel) ; services, actions correctives et rapport ❌ | R2 |
+| Scénario « PC lent » : examiner processus, mémoire, disque, services, proposer, appliquer les sûres, demander pour les autres, vérifier, rapport, historique | 🟡 Diagnostic en lecture seule ✅ (processus, mémoire, processeur, disques, services ; tests réels) ; actions correctives et rapport ❌ | R2 |
 | Toujours protégés, même en Avancé : suppression massive, élévation de privilèges, sécurité Windows, transactions financières, transfert de données confidentielles | 🟡 Refus par défaut (aucun outil de ce type) ; règles explicites à écrire quand ces outils existeront | R2 |
 | Mémoire : SQLite + recherche vectorielle | 🟡 SQLite ; pas de vectoriel | R6 |
 | Plugins / MCP | ❌ | R6 |

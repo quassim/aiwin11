@@ -32,6 +32,7 @@ message Command {
     WriteClipboard write_clipboard = 27;
     ListWindows list_windows = 28;
     ArrangeWindow arrange_window = 29;
+    ListServices list_services = 30;
   }
 }
 
@@ -90,6 +91,32 @@ message ClipboardContent {
   string text = 1;
   bool truncated = 2;
   bool has_text = 3;
+}
+
+// Read-only snapshot of Windows services: stopped automatic services first, then running ones.
+message ListServices { uint32 limit = 1; }
+
+message ServiceList {
+  repeated ServiceEntry services = 1;
+  uint32 total = 2;
+  uint32 running = 3;
+  uint32 stopped_automatic = 4;
+}
+
+message ServiceEntry {
+  enum StartMode {
+    START_MODE_UNSPECIFIED = 0;
+    START_MODE_AUTOMATIC = 1;
+    START_MODE_MANUAL = 2;
+    START_MODE_DISABLED = 3;
+    START_MODE_OTHER = 4;
+  }
+  // Service key name, at most 64 characters.
+  string name = 1;
+  // Display name, at most 120 characters.
+  string display_name = 2;
+  bool running = 3;
+  StartMode start_mode = 4;
 }
 
 // Read-only system metrics: memory, processor load, uptime, fixed drives.
@@ -204,6 +231,7 @@ message Result {
   SystemStatus system_status = 11;
   ClipboardContent clipboard_content = 12;
   WindowList window_list = 13;
+  ServiceList service_list = 14;
 }
 
 message Error {

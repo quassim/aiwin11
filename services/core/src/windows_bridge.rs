@@ -10,10 +10,10 @@ use std::{
 
 use aiwin11_contracts::{
     v1::{
-        arrange_window::Arrangement, command::Operation, result::Status, AnalyzeCapture, ArrangeWindow,
-        CaptureForeground, CaptureWindow, CharacterMapDigit, Command, GetSystemStatus, InspectForeground,
-        InspectWindow, ListProcesses, ListWindows, LocateWindow, ReadClipboard, Result as BridgeReply, TypeInNotepad,
-        UiTree, WriteClipboard,
+        arrange_window::Arrangement, command::Operation, result::Status, service_entry::StartMode, AnalyzeCapture,
+        ArrangeWindow, CaptureForeground, CaptureWindow, CharacterMapDigit, Command, GetSystemStatus,
+        InspectForeground, InspectWindow, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard,
+        Result as BridgeReply, TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -45,6 +45,8 @@ const MAX_CLIPBOARD_REPLY_BYTES: usize = 20 * 1024;
 /// 20 windows with a 120-character title and a 64-character application name.
 const MAX_WINDOW_LIST_REPLY_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_LISTED_WINDOWS: usize = 20;
+/// Services reported to the agent by `list_services`.
+pub(crate) const AGENT_SERVICE_LIMIT: u32 = 20;
 pub(crate) const MAX_CLIPBOARD_READ_CHARS: usize = 4000;
 /// Processes reported to the agent by `list_processes`.
 pub(crate) const AGENT_PROCESS_LIMIT: u32 = 15;
@@ -209,6 +211,22 @@ impl Core {
                 return None;
             }
             accept_process_list(reply.process_list?)
+        })
+    }
+
+    /// Agent tool: read-only snapshot of Windows services.
+    pub(crate) fn agent_list_services(&mut self, task: &str, policy: Policy) -> Result<ServiceSnapshot, &'static str> {
+        let operation = Operation::ListServices(ListServices { limit: AGENT_SERVICE_LIMIT });
+        self.agent_bridge_call(task, policy, operation, "service.list", |reply| {
+            if reply.ui_tree.is_some()
+                || reply.window_capture.is_some()
+                || reply.window_info.is_some()
+                || reply.process_id.is_some()
+                || reply.window_list.is_some()
+            {
+                return None;
+            }
+            accept_service_list(reply.service_list?)
         })
     }
 
@@ -623,6 +641,48 @@ fn accept_process_list(list: aiwin11_contracts::v1::ProcessList) -> Option<Proce
     })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ServiceInfo {
+    pub name: String,
+    pub display_name: String,
+    pub running: bool,
+    pub start_mode: StartMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ServiceSnapshot {
+    pub services: Vec<ServiceInfo>,
+    pub total: u32,
+    pub running: u32,
+    pub stopped_automatic: u32,
+}
+
+fn accept_service_list(list: aiwin11_contracts::v1::ServiceList) -> Option<ServiceSnapshot> {
+    let counts_ok = list.running <= list.total
+        && list.stopped_automatic <= list.total
+        && list.services.len() <= AGENT_SERVICE_LIMIT as usize
+        && list.services.len() <= list.total as usize;
+    let bounded = |text: &str, max: usize| text.chars().count() <= max && text.chars().all(|c| !c.is_control());
+    let services: Option<Vec<_>> = list
+        .services
+        .into_iter()
+        .map(|entry| {
+            let start_mode =
+                StartMode::try_from(entry.start_mode).ok().filter(|mode| *mode != StartMode::Unspecified)?;
+            (!entry.name.is_empty() && bounded(&entry.name, 64) && bounded(&entry.display_name, 120)).then_some(
+                ServiceInfo { name: entry.name, display_name: entry.display_name, running: entry.running, start_mode },
+            )
+        })
+        .collect();
+    let services = services.filter(|_| counts_ok)?;
+    Some(ServiceSnapshot {
+        services,
+        total: list.total,
+        running: list.running,
+        stopped_automatic: list.stopped_automatic,
+    })
+}
+
 /// One window of a `list_windows` result, kept by the task for `arrange_window`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ListedWindow {
@@ -752,7 +812,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
         Some(Operation::ReadClipboard(_)) => MAX_CLIPBOARD_REPLY_BYTES,
-        Some(Operation::ListWindows(_)) => MAX_WINDOW_LIST_REPLY_BYTES,
+        Some(Operation::ListWindows(_) | Operation::ListServices(_)) => MAX_WINDOW_LIST_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -846,6 +906,44 @@ mod tests {
         if !saved.text.is_empty() && !saved.truncated {
             assert_eq!(core.agent_write_clipboard(&task, write, &saved.text), Ok(true), "restore");
         }
+    }
+
+    #[test]
+    fn service_lists_from_the_bridge_are_validated() {
+        use aiwin11_contracts::v1::{ServiceEntry, ServiceList};
+        let entry = |name: &str, mode: StartMode| ServiceEntry {
+            name: name.into(),
+            display_name: "Service".into(),
+            running: false,
+            start_mode: mode as i32,
+        };
+        let good = ServiceList {
+            services: vec![entry("Spooler", StartMode::Automatic)],
+            total: 200,
+            running: 90,
+            stopped_automatic: 1,
+        };
+        assert_eq!(accept_service_list(good.clone()).unwrap().services[0].name, "Spooler");
+        for bad in [
+            ServiceList { running: 201, ..good.clone() },
+            ServiceList { services: vec![entry("", StartMode::Manual)], ..good.clone() },
+            ServiceList { services: vec![entry("a\nb", StartMode::Manual)], ..good.clone() },
+            ServiceList { services: vec![entry("x", StartMode::Unspecified)], ..good.clone() },
+            ServiceList { services: (0..21).map(|_| entry("x", StartMode::Manual)).collect(), ..good.clone() },
+        ] {
+            assert_eq!(accept_service_list(bad.clone()), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn lists_services_through_the_broker_and_the_bridge() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        assert_eq!(core.agent_list_services(&task, Policy::default()), Err("WINDOW_ACCESS_DENIED"));
+        let snapshot =
+            core.agent_list_services(&task, Policy::granting(&[crate::broker::Capability::ServiceList])).unwrap();
+        assert!(snapshot.total > 0 && snapshot.running > 0 && !snapshot.services.is_empty(), "{snapshot:?}");
     }
 
     #[test]

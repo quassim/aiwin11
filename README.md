@@ -47,6 +47,7 @@ Ce que l’agent peut faire :
 | « Mon PC est lent, regarde ce qui se passe » | Lit en lecture seule la mémoire, la charge du processeur, l’espace des disques et, si besoin, les processus ; ne modifie rien |
 | « Quelles fenêtres sont ouvertes ? », « Réduis la fenêtre du navigateur » | Liste les fenêtres (après ton accord) puis met au premier plan, réduit, restaure ou agrandit l’une d’elles ; ne ferme jamais de fenêtre |
 | « Qu’est-ce que j’ai copié ? », « Copie cette adresse dans le presse-papiers » | Lit ou remplace le texte du presse-papiers, toujours après ton accord (l’ancien contenu est perdu en cas d’écriture) |
+| « Y a-t-il des services Windows arrêtés ? » | Liste en lecture seule les services automatiques arrêtés puis des services en cours ; ne démarre ni n’arrête rien |
 | « Quels programmes utilisent le plus de mémoire ? » | Liste en lecture seule les 15 processus qui utilisent le plus de mémoire (nom, mémoire, temps processeur) ; rien n’est arrêté |
 | « Que montre la fenêtre que j’utilisais ? » | Lit la structure (types et noms des contrôles, jamais les champs de mot de passe) de la fenêtre utilisée juste avant AiWin11 |
 | « Décris la fenêtre que j’utilisais » | Fait décrire cette fenêtre par le modèle de vision **local** ; l’agent ne reçoit que la description |

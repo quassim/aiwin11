@@ -70,6 +70,7 @@ const actionNames: Record<string, string> = {
   readClipboard: "Lire le presse-papiers",
   writeClipboard: "Copier un texte dans le presse-papiers",
   listWindows: "Lister les fenêtres ouvertes",
+  listServices: "Lister les services Windows (lecture seule)",
   arrangeWindow: "Réduire, restaurer, agrandir ou mettre au premier plan une fenêtre",
 };
 

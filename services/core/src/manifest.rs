@@ -56,6 +56,7 @@ pub enum CapabilityName {
     ClipboardWrite,
     WindowList,
     WindowArrange,
+    ServiceList,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -86,7 +87,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 15] = [
+pub const MANIFESTS: [ToolManifest; 16] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -297,6 +298,20 @@ pub const MANIFESTS: [ToolManifest; 15] = [
         reversibility: R::Reversible,
         timeout_ms: 15_000,
         capabilities: &[C::WindowArrange],
+    },
+    ToolManifest {
+        action: AgentAction::ListServices,
+        tool: "list_services",
+        version: 1,
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 15_000,
+        capabilities: &[C::ServiceList],
     },
 ];
 
