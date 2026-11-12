@@ -38,6 +38,7 @@ message Command {
     InvokeControl invoke_control = 33;
     RememberNote remember_note = 34;
     RecallNotes recall_notes = 35;
+    RunDiagnostic run_diagnostic = 36;
   }
 }
 
@@ -149,6 +150,22 @@ message InvokeControl {
   string name = 5;
   // When set, replaces the control's value (UI Automation SetValue) instead of clicking it.
   optional string value = 6;
+}
+
+// ShellService.ExecuteApprovedCommand: one read-only diagnostic of a closed list.
+message RunDiagnostic {
+  enum Diagnostic {
+    DIAGNOSTIC_UNSPECIFIED = 0;
+    DIAGNOSTIC_NETWORK = 1;  // ipconfig /all
+    DIAGNOSTIC_WIFI = 2;     // netsh wlan show interfaces
+    DIAGNOSTIC_TIME = 3;     // w32tm /query /status
+  }
+  Diagnostic diagnostic = 1;
+}
+
+message CommandOutput {
+  string text = 1;
+  bool truncated = 2;
 }
 
 // Memory operations, run by the core itself after broker authorization. The note never
@@ -284,6 +301,7 @@ message Result {
   ClipboardContent clipboard_content = 12;
   WindowList window_list = 13;
   ServiceList service_list = 14;
+  CommandOutput command_output = 15;
 }
 
 message Error {

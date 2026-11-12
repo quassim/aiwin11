@@ -38,7 +38,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
-        && command.InvokeControl is null
+        && command.InvokeControl is null && command.RunDiagnostic is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -95,6 +95,18 @@ else if (command.ListProcesses is { } listing)
         result.ProcessList = ProcessLister.Read(listing.Limit);
         result.Status = Protocol.Result.Types.Status.Success;
     }
+}
+else if (command.RunDiagnostic is { } diagnostic)
+{
+    if (!Diagnostics.Known(diagnostic.Diagnostic))
+        Reject(Protocol.Result.Types.Status.Denied, "unknown_diagnostic", "Unknown diagnostic.");
+    else if (Diagnostics.Run(diagnostic.Diagnostic, command.DeadlineMs) is { } diagnosticOutput)
+    {
+        result.CommandOutput = new Protocol.CommandOutput { Text = diagnosticOutput.Output, Truncated = diagnosticOutput.Truncated };
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+    else
+        Reject(Protocol.Result.Types.Status.Failed, "diagnostic_failed", "The diagnostic could not run.");
 }
 else if (command.InvokeControl is { } control)
 {

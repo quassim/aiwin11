@@ -193,6 +193,17 @@ sécurité, de mise à jour et les services vitaux de Windows sont toujours refu
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
+            "name": "run_diagnostic",
+            "description": "Lance un diagnostic Windows en lecture seule : network (ipconfig /all), wifi (netsh wlan \
+        show interfaces) ou time (état de la synchronisation de l’heure). Ne modifie rien.",
+            "parameters": {
+                "type": "object",
+                "properties": { "diagnostic": { "type": "string", "enum": ["network", "wifi", "time"] } },
+                "required": ["diagnostic"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "list_services",
             "description": "Liste, en lecture seule, les services Windows : d’abord les services automatiques \
         arrêtés (souvent signe d’un problème), puis des services en cours d’exécution, avec les totaux. N’arrête ni ne \
@@ -872,6 +883,7 @@ mod tests {
                 "write_clipboard",
                 "admin_service",
                 "admin_clean_temp",
+                "run_diagnostic",
                 "list_services",
                 "get_system_status",
                 "list_processes",
@@ -895,6 +907,7 @@ mod tests {
                 "write_clipboard",
                 "admin_service",
                 "admin_clean_temp",
+                "run_diagnostic",
                 "list_services",
                 "get_system_status",
                 "list_processes",

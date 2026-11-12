@@ -64,6 +64,8 @@ pub enum Capability {
     MemoryWrite = 1 << 19,
     /// Read the encrypted memory's notes.
     MemoryRead = 1 << 20,
+    /// Run one read-only diagnostic of the closed list (ShellService).
+    Diagnostic = 1 << 21,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -145,6 +147,13 @@ impl Policy {
             Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
             Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
             Some(Operation::RememberNote(_)) if agent(Capability::MemoryWrite) => Ok("remember_note"),
+            Some(Operation::RunDiagnostic(run))
+                if agent(Capability::Diagnostic)
+                    && aiwin11_contracts::v1::run_diagnostic::Diagnostic::try_from(run.diagnostic)
+                        .is_ok_and(|d| d != aiwin11_contracts::v1::run_diagnostic::Diagnostic::Unspecified) =>
+            {
+                Ok("run_diagnostic")
+            }
             Some(Operation::RecallNotes(_)) if agent(Capability::MemoryRead) => Ok("recall_notes"),
             Some(Operation::InvokeControl(control))
                 if agent(Capability::ControlInvoke)

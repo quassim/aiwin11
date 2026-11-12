@@ -92,6 +92,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "write_clipboard": {"text": is_typed_text},
     "list_windows": {},
     "list_services": {},
+    "run_diagnostic": {"diagnostic": ("network", "wifi", "time")},
     "admin_service": {
         "service": is_service_name,
         "operation": ("start", "stop", "restart", "automatic", "manual", "disabled"),

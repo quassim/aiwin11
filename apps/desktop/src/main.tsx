@@ -55,6 +55,7 @@ type ApprovalAction =
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
   | { kind: "listServices" }
+  | { kind: "runDiagnostic"; diagnostic: string }
   | { kind: "remember"; text: string }
   | { kind: "recall" }
   | { kind: "searchMemory" }
@@ -134,6 +135,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
   }
   if (action.kind === "recall") {
     return { title: "L’agent demande à relire sa mémoire", detail: "Action : lire les informations retenues." };
+  }
+  if (action.kind === "runDiagnostic") {
+    return {
+      title: "L’agent demande un diagnostic Windows",
+      detail: `Action : lancer le diagnostic en lecture seule « ${action.diagnostic} ». Rien n’est modifié.`,
+    };
   }
   if (action.kind === "listServices") {
     return {
@@ -264,6 +271,8 @@ const activityNames: Record<string, string> = {
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
   "window.list.completed": "Fenêtres listées par l’agent",
   "service.list.completed": "Services listés par l’agent",
+  "diagnostic.run.completed": "Diagnostic Windows effectué",
+  "diagnostic.run.failed": "Diagnostic Windows impossible",
   "memory.saved": "Information retenue (chiffrée)",
   "memory.deleted": "Mémoire effacée",
   "settings.embedding.changed": "Recherche dans la mémoire modifiée",

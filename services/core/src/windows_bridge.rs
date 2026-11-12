@@ -10,10 +10,11 @@ use std::{
 
 use aiwin11_contracts::{
     v1::{
-        arrange_window::Arrangement, command::Operation, result::Status, service_entry::StartMode, AnalyzeCapture,
-        ArrangeWindow, CaptureForeground, CaptureWindow, CharacterMapDigit, Command, GetSystemStatus,
-        InspectForeground, InspectWindow, InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow,
-        ReadClipboard, Result as BridgeReply, TypeInNotepad, UiTree, WriteClipboard,
+        arrange_window::Arrangement, command::Operation, result::Status, run_diagnostic::Diagnostic,
+        service_entry::StartMode, AnalyzeCapture, ArrangeWindow, CaptureForeground, CaptureWindow, CharacterMapDigit,
+        Command, GetSystemStatus, InspectForeground, InspectWindow, InvokeControl, ListProcesses, ListServices,
+        ListWindows, LocateWindow, ReadClipboard, Result as BridgeReply, RunDiagnostic, TypeInNotepad, UiTree,
+        WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -255,6 +256,23 @@ impl Core {
         };
         self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
         outcome
+    }
+
+    /// Agent tool: one read-only diagnostic of the closed list. Returns its output.
+    pub(crate) fn agent_run_diagnostic(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        diagnostic: Diagnostic,
+    ) -> Result<(String, bool), &'static str> {
+        let operation = Operation::RunDiagnostic(RunDiagnostic { diagnostic: diagnostic as i32 });
+        self.agent_bridge_call(task, policy, operation, "diagnostic.run", |reply| {
+            if reply.ui_tree.is_some() || reply.window_list.is_some() || reply.clipboard_content.is_some() {
+                return None;
+            }
+            let output = reply.command_output?;
+            (output.text.chars().count() <= 12_000).then_some((output.text, output.truncated))
+        })
     }
 
     /// Agent tool: read-only snapshot of Windows services.
@@ -863,7 +881,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
         Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
-        Some(Operation::ReadClipboard(_)) => MAX_CLIPBOARD_REPLY_BYTES,
+        Some(Operation::ReadClipboard(_) | Operation::RunDiagnostic(_)) => MAX_CLIPBOARD_REPLY_BYTES * 3,
         Some(Operation::ListWindows(_) | Operation::ListServices(_)) => MAX_WINDOW_LIST_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };

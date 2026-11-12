@@ -151,7 +151,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre | R2 |
 | UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement ❌) | 🟡 | R2 |
 | InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
-| ShellService (ExecuteApprovedCommand) | ❌ | R2 |
+| ShellService (ExecuteApprovedCommand) | 🟡 Liste fermée de diagnostics en lecture seule (réseau, Wi-Fi, heure) ; pas de PowerShell libre (volontaire) | R2 |
 | SystemService (GetSystemMetrics ✅ mémoire, processeur, disques, durée de fonctionnement ; GetHardwareInfo ❌) | 🟡 | R2, R3 |
 | DPI, multi-écran, défilement, focus, références UIA périmées, dialogues modaux | ❌ Non testé | R2 |
 | Capture jamais envoyée au cloud sans politique | ✅ Vision locale seulement | — |
