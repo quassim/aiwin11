@@ -19,7 +19,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | ❌ Le cœur tourne dans le processus Tauri |
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | ❌ Choix manuel d’un seul modèle |
-| Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification et raccourci global Ctrl+Alt+Espace ✅ ; overlay et palette ❌ |
+| Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification ✅, raccourci global Ctrl+Alt+Espace ouvrant le champ de demande (palette simple) ✅ ; overlay flottant ❌ |
 | Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | ❌ |
 | Distribution (installateur, mises à jour) | ❌ Usage développeur seulement |
 

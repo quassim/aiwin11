@@ -77,7 +77,7 @@ La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque,
 
 ### Mode privé, zone de notification et raccourci
 
-**Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord. AiWin11 a une icône dans la zone de notification (Ouvrir, Stoppe toutes les tâches, Quitter) et **Ctrl+Alt+Espace** le ramène au premier plan depuis n’importe quelle application.
+**Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord. AiWin11 a une icône dans la zone de notification (Ouvrir, Stoppe toutes les tâches, Quitter) et **Ctrl+Alt+Espace** le ramène au premier plan depuis n’importe quelle application, directement sur le champ de demande (palette de commandes).
 
 ### Opérations administrateur (désactivées par défaut)
 

@@ -428,6 +428,10 @@ fn desktop_surfaces(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             .with_handler(move |app, pressed, event| {
                 if *pressed == shortcut && event.state() == ShortcutState::Pressed {
                     show_main(app);
+                    // Command palette: the window opens on the request field, ready to type.
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.eval("window.dispatchEvent(new Event('aiwin11-palette'))");
+                    }
                 }
             })
             .build(),

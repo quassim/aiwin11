@@ -419,6 +419,15 @@ function App() {
 
   useEffect(refresh, [refresh]);
   useEffect(() => {
+    // Ctrl+Alt+Espace from any application: open the request field, ready to type.
+    const palette = () => {
+      setPage("Accueil");
+      setTimeout(() => document.getElementById("prompt")?.focus(), 0);
+    };
+    window.addEventListener("aiwin11-palette", palette);
+    return () => window.removeEventListener("aiwin11-palette", palette);
+  }, []);
+  useEffect(() => {
     void refreshKey();
   }, []);
   useEffect(() => {
