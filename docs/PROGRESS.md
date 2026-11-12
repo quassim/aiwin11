@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, après-midi — suite
+
+**Fait** : `1273304` lancement en un double-clic (`Ollama.cmd`, `AiWin11.cmd`), testé par l’utilisateur ; `cc9251c` `click_control` (UI Automation Invoke/Toggle/Select sur un contrôle numéroté de la fenêtre lue, toujours demandé) ; `4d2b4d7` Ctrl+Alt+Espace ouvre directement le champ de demande.
+
+**Vérifié** : `verify.ps1` complet. Non testé en réel : clic UIA, palette.
+
+**Prochaine étape** : PowerShell approuvé (liste fermée), SetValue UIA, dossiers autorisés ; R3 modèle par type de tâche + routage + budget ; puis R4–R9.
+
 ## 2026-11-12, midi — suite (développement seul)
 
 **Fait** : `9a8d068` relecture complète de la conversation de conception, ROADMAP §2.5 ; `7bfad73` mode privé (T-011), icône de zone de notification (ouvrir, tout arrêter, quitter), raccourci global Ctrl+Alt+Espace, et **correction** : toutes les commandes Tauri ajoutées depuis R1 sont maintenant déclarées (`build.rs`, `capabilities/`) — avant, l’interface les aurait vues refusées.
