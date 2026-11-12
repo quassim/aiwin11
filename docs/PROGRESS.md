@@ -16,6 +16,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Manifestes complétés (migration 008) : fenêtre de contexte, paramètres, quantification et taille sur disque, lus dans `/api/show` et `/api/tags` ; libellés mal formés ignorés. Vérifié par `verify.ps1`, non testé avec Ollama réel (Ollama arrêté pendant la session).
 
+- Débit (jetons/s, mesuré pendant le test d’appel d’outils) et VRAM utilisée ajoutés aux manifestes (migration 009) ; ligne de feuille de route terminée. Vérifié par `verify.ps1`, non testé avec Ollama réel.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

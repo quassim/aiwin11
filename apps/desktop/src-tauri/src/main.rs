@@ -542,8 +542,8 @@ async fn probe_local_model(state: State<'_, Arc<AppState>>, model: String) -> Re
         let started = std::time::Instant::now();
         let ollama = Ollama::connect().map_err(|_| "MODEL_PROVIDER_UNAVAILABLE")?;
         let details = ollama.describe(&model).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?;
-        let verified = details.tool_calling_advertised
-            && ollama.probe_tool_calling(&model).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?;
+        let (verified, tokens_per_second) =
+            ollama.probe_measured(&model).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?;
         let elapsed_ms = started.elapsed().as_millis();
         let status = match (details.tool_calling_advertised, verified) {
             (false, _) => ToolCalling::NotAdvertised,
@@ -556,6 +556,8 @@ async fn probe_local_model(state: State<'_, Arc<AppState>>, model: String) -> Re
             parameter_size: details.parameter_size.clone(),
             quantization: details.quantization.clone(),
             size_bytes: ollama.installed_size(&model).ok().flatten(),
+            tokens_per_second,
+            vram_bytes: ollama.loaded_vram(&model).ok().flatten(),
         };
         lock_core(&state.core).record_model_probe(
             &model,

@@ -13,13 +13,16 @@ type Manifest = {
   parameterSize: string | null;
   quantization: string | null;
   sizeBytes: number | null;
+  tokensPerSecond: number | null;
+  vramBytes: number | null;
 };
 
 const number = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
 
 function hardware(manifest: Manifest): string {
   const parts = [manifest.parameterSize, manifest.quantization];
-  if (manifest.sizeBytes) parts.push(`${number.format(manifest.sizeBytes / 1e9)} Go`);
+  if (manifest.sizeBytes) parts.push(`${number.format(manifest.sizeBytes / 1e9)} Go sur disque`);
+  if (manifest.vramBytes) parts.push(`${number.format(manifest.vramBytes / 1e9)} Go en VRAM`);
   return parts.filter(Boolean).join(" · ") || "—";
 }
 
@@ -102,6 +105,7 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
               <th scope="col">Vision</th>
               <th scope="col">Contexte</th>
               <th scope="col">Taille</th>
+              <th scope="col">Débit</th>
               <th scope="col">Dernier test</th>
             </tr>
           </thead>
@@ -113,6 +117,7 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
                 <td>{manifest.visionAdvertised ? "Annoncée" : "Non annoncée"}</td>
                 <td>{manifest.contextLength ? `${number.format(manifest.contextLength)} jetons` : "—"}</td>
                 <td>{hardware(manifest)}</td>
+                <td>{manifest.tokensPerSecond ? `${manifest.tokensPerSecond} jetons/s` : "—"}</td>
                 <td>{manifest.probedAt ? new Date(manifest.probedAt).toLocaleString("fr-FR") : "—"}</td>
               </tr>
             ))}

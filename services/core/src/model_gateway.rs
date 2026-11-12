@@ -566,8 +566,22 @@ fn context_length(info: &Map<String, Value>) -> Option<u64> {
 struct ProbeReply {
     done: bool,
     message: ProbeMessage,
+    /// Generated tokens and generation time in nanoseconds, as reported by Ollama.
+    #[serde(default)]
+    eval_count: u64,
+    #[serde(default)]
+    eval_duration: u64,
     #[serde(flatten)]
     location: Location,
+}
+
+/// Generation speed in tokens per second, rounded; `None` when too few tokens to mean anything.
+fn throughput(reply: &ProbeReply) -> Option<u64> {
+    if reply.eval_count < 4 || reply.eval_duration == 0 {
+        return None;
+    }
+    let tokens_per_second = u128::from(reply.eval_count) * 1_000_000_000 / u128::from(reply.eval_duration);
+    u64::try_from(tokens_per_second).ok().filter(|speed| (1..=100_000).contains(speed))
 }
 
 #[derive(Deserialize)]
@@ -901,10 +915,17 @@ impl LocalModelProvider for Ollama {
     }
 
     fn probe_tool_calling(&self, model: &str) -> Result<bool, GatewayError> {
+        Ok(self.probe_measured(model)?.0)
+    }
+}
+
+impl Ollama {
+    /// The synthetic tool-call probe, with the generation speed it measured (tokens/s).
+    pub fn probe_measured(&self, model: &str) -> Result<(bool, Option<u64>), GatewayError> {
         if !self.describe(model)?.tool_calling_advertised {
-            return Ok(false);
+            return Ok((false, None));
         }
-        let reply = Self::receive(
+        let reply: ProbeReply = Self::receive(
             self.client.post(format!("{OLLAMA}/api/chat")).timeout(LOCAL_INFERENCE_TIMEOUT).json(&json!({
                 "model": model,
                 "stream": false,
@@ -924,7 +945,13 @@ impl LocalModelProvider for Ollama {
                 }]
             })),
         )?;
-        verify_probe(model, reply)
+        let speed = throughput(&reply);
+        Ok((verify_probe(model, reply)?, speed))
+    }
+
+    /// Memory the model uses on the GPU, if it is currently loaded.
+    pub fn loaded_vram(&self, model: &str) -> Result<Option<u64>, GatewayError> {
+        Ok(self.loaded_models()?.into_iter().find(|loaded| loaded.name == model).map(|loaded| loaded.size_vram))
     }
 }
 
@@ -1079,6 +1106,23 @@ mod tests {
         .unwrap();
         let model = describe("odd:latest", details).unwrap();
         assert_eq!((model.context_length, model.parameter_size, model.quantization), (None, None, None));
+    }
+
+    #[test]
+    fn probe_throughput_needs_enough_tokens_and_a_duration() {
+        let reply = |count: u64, duration: u64| -> ProbeReply {
+            serde_json::from_value(json!({
+                "done": true,
+                "message": { "role": "assistant" },
+                "eval_count": count,
+                "eval_duration": duration
+            }))
+            .unwrap()
+        };
+        assert_eq!(throughput(&reply(20, 250_000_000)), Some(80));
+        assert_eq!(throughput(&reply(3, 250_000_000)), None);
+        assert_eq!(throughput(&reply(20, 0)), None);
+        assert_eq!(throughput(&reply(u64::MAX, 1)), None);
     }
 
     fn ndjson(chunks: &[Value]) -> std::io::Cursor<String> {
