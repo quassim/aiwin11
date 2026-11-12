@@ -19,7 +19,14 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 **Problèmes** : heredocs bash avec du Python contenant `\a` ou des apostrophes : écrire les scripts de modification dans le scratchpad puis `python fichier.py`.
 
-**Prochaine étape** : voir l’entrée suivante (en haut) ou, si aucune : R2, autorisations temporaires et révocables (table `grants`, migration 003), puis politiques par ressource (dossiers, applications), puis outils Windows (fenêtres, processus en lecture, presse-papiers).
+**Suite de la session (R2)**
+- `8740de6` Autorisations temporaires et révocables (migration 003, table `grants`, section **Sécurité**) ; relues à chaque évaluation, elles ne transforment qu’un « Demander » en « Autoriser » (jamais pour une action critique, la lecture d’écran, les données privées, la simulation ni le cloud).
+- `d8c8f24` Outil `list_processes` (lecture seule) de bout en bout ; test réel OK (pont + qwen3:8b).
+- `88769b7` Outil `get_system_status` (mémoire, processeur, disques, durée de fonctionnement) ; scénario « PC lent » en lecture seule testé en réel.
+- `6b877d5` Presse-papiers : `read_clipboard` (règle `private_data`, toujours demandé) et `write_clipboard` (critique, irréversible). Lecture réelle testée ; **écriture réelle non testée** (test opt-in `AIWIN11_TEST_CLIPBOARD=1`, pour ne pas écraser le presse-papiers de l’utilisateur).
+- `5b29b07` Fenêtres : `list_windows` (données d’écran, toujours demandé) et `arrange_window` (premier plan, réduire, restaurer, agrandir une fenêtre de la liste de la même demande ; jamais fermer). Tests réels OK sur une Table des caractères ouverte par le test.
+
+**Prochaine étape** : voir l’entrée suivante (en haut) ou, si aucune : R2, politiques par ressource (dossiers autorisés au-delà du dossier dédié, applications autorisées), ApplicationService (liste fermée d’applications), lecture des services Windows, PowerShell approuvé (liste fermée), puis l’assistant élevé (option B) — à faire **avec l’utilisateur présent** : il exige une revue explicite (AGENTS.md) et l’invite UAC ne peut pas être validée sans lui.
 
 ## 2026-11-12, 01h15 — préparation du travail autonome
 
