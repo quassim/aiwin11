@@ -6,7 +6,7 @@ use std::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::{blocking::Client, redirect::Policy};
 use serde::{de::DeserializeOwned, Deserialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 const MAX_CATALOG_BYTES: usize = 2 * 1024 * 1024;
 const OLLAMA: &str = "http://127.0.0.1:11434";
@@ -406,6 +406,12 @@ pub struct Model {
     pub name: String,
     pub tool_calling_advertised: bool,
     pub vision_advertised: bool,
+    /// Context window in tokens (`<architecture>.context_length`), when reported.
+    pub context_length: Option<u64>,
+    /// Parameter count label such as "8.2B", when reported and well-formed.
+    pub parameter_size: Option<String>,
+    /// Quantization label such as "Q4_K_M", when reported and well-formed.
+    pub quantization: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -527,8 +533,33 @@ impl LocalStrategy {
 struct Details {
     #[serde(default)]
     capabilities: Vec<String>,
+    #[serde(default)]
+    details: Option<DetailLabels>,
+    #[serde(default)]
+    model_info: Map<String, Value>,
     #[serde(flatten)]
     location: Location,
+}
+
+#[derive(Deserialize, Default)]
+struct DetailLabels {
+    #[serde(default)]
+    parameter_size: String,
+    #[serde(default)]
+    quantization_level: String,
+}
+
+/// Short labels only (letters, digits, `._-`), at most 32 bytes; anything else is dropped.
+fn short_label(label: String) -> Option<String> {
+    (!label.is_empty()
+        && label.len() <= 32
+        && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte)))
+    .then_some(label)
+}
+
+fn context_length(info: &Map<String, Value>) -> Option<u64> {
+    let architecture = info.get("general.architecture")?.as_str()?;
+    info.get(&format!("{architecture}.context_length"))?.as_u64().filter(|tokens| (1..=16_777_216).contains(tokens))
 }
 
 #[derive(Deserialize)]
@@ -758,6 +789,11 @@ impl Ollama {
 }
 
 impl Ollama {
+    /// Size on disk of one installed local model, if listed.
+    pub fn installed_size(&self, model: &str) -> Result<Option<u64>, GatewayError> {
+        Ok(self.installed_sizes()?.into_iter().find(|(name, _)| name == model).map(|(_, size)| size))
+    }
+
     /// Installed local models with their size on disk (remote aliases excluded).
     fn installed_sizes(&self) -> Result<Vec<(String, u64)>, GatewayError> {
         let catalog: Catalog = Self::receive(self.client.get(format!("{OLLAMA}/api/tags")))?;
@@ -969,10 +1005,14 @@ fn describe(model: &str, details: Details) -> Result<Model, GatewayError> {
     if !details.location.is_local(model) {
         return Err(GatewayError::NonLocalModel);
     }
+    let labels = details.details.unwrap_or_default();
     Ok(Model {
         name: model.into(),
         tool_calling_advertised: details.capabilities.iter().any(|item| item == "tools"),
         vision_advertised: details.capabilities.iter().any(|item| item == "vision"),
+        context_length: context_length(&details.model_info),
+        parameter_size: short_label(labels.parameter_size),
+        quantization: short_label(labels.quantization_level),
     })
 }
 
@@ -1017,6 +1057,28 @@ mod tests {
         let model = describe("local:latest", details).unwrap();
         assert!(model.tool_calling_advertised);
         assert!(!model.vision_advertised);
+        assert_eq!((model.context_length, model.parameter_size, model.quantization), (None, None, None));
+    }
+
+    #[test]
+    fn reads_context_window_and_hardware_labels_and_drops_malformed_ones() {
+        let details = serde_json::from_value(json!({
+            "capabilities": ["completion", "tools"],
+            "details": { "parameter_size": "8.2B", "quantization_level": "Q4_K_M" },
+            "model_info": { "general.architecture": "qwen3", "qwen3.context_length": 40960 }
+        }))
+        .unwrap();
+        let model = describe("qwen3:8b", details).unwrap();
+        assert_eq!(model.context_length, Some(40_960));
+        assert_eq!((model.parameter_size.as_deref(), model.quantization.as_deref()), (Some("8.2B"), Some("Q4_K_M")));
+
+        let details = serde_json::from_value(json!({
+            "details": { "parameter_size": "<script>", "quantization_level": "x".repeat(33) },
+            "model_info": { "general.architecture": "llama", "qwen3.context_length": 40960, "llama.context_length": 0 }
+        }))
+        .unwrap();
+        let model = describe("odd:latest", details).unwrap();
+        assert_eq!((model.context_length, model.parameter_size, model.quantization), (None, None, None));
     }
 
     fn ndjson(chunks: &[Value]) -> std::io::Cursor<String> {

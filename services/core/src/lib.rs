@@ -133,6 +133,20 @@ pub struct ModelManifest {
     pub vision_advertised: bool,
     pub probe_ms: Option<u64>,
     pub probed_at: Option<String>,
+    pub context_length: Option<u64>,
+    pub parameter_size: Option<String>,
+    pub quantization: Option<String>,
+    pub size_bytes: Option<u64>,
+}
+
+/// What a full probe learnt about a model besides tool calling.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModelFacts {
+    pub vision_advertised: bool,
+    pub context_length: Option<u64>,
+    pub parameter_size: Option<String>,
+    pub quantization: Option<String>,
+    pub size_bytes: Option<u64>,
 }
 
 /// Public model identifiers as Ollama lists them: letters, digits and `-_.:/`, 1 to 256 bytes.
@@ -143,7 +157,7 @@ fn valid_model_name(name: &str) -> bool {
 }
 
 /// Schema migrations in order; migration N sets `user_version` to N.
-const MIGRATIONS: [&str; 7] = [
+const MIGRATIONS: [&str; 8] = [
     include_str!("../migrations/001.sql"),
     include_str!("../migrations/002.sql"),
     include_str!("../migrations/003.sql"),
@@ -151,6 +165,7 @@ const MIGRATIONS: [&str; 7] = [
     include_str!("../migrations/005.sql"),
     include_str!("../migrations/006.sql"),
     include_str!("../migrations/007.sql"),
+    include_str!("../migrations/008.sql"),
 ];
 
 pub struct Core {
@@ -318,7 +333,7 @@ impl Core {
         &self,
         name: &str,
         tool_calling: ToolCalling,
-        vision: Option<bool>,
+        facts: Option<&ModelFacts>,
         probe_ms: u64,
     ) -> Result<(), &'static str> {
         if !valid_model_name(name) {
@@ -326,19 +341,29 @@ impl Core {
         }
         self.db
             .execute(
-                "INSERT INTO models (id, provider, name, tool_calling, vision, probe_ms, probed_at)
+                "INSERT INTO models (id, provider, name, tool_calling, vision, probe_ms, probed_at,
+                                     context_length, parameter_size, quantization, size_bytes)
                  VALUES (?1, 'ollama', ?2, ?3, COALESCE(?4, 'not_advertised'), ?5,
-                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET tool_calling = excluded.tool_calling,
                  vision = COALESCE(?4, models.vision),
+                 context_length = CASE WHEN ?10 THEN excluded.context_length ELSE models.context_length END,
+                 parameter_size = CASE WHEN ?10 THEN excluded.parameter_size ELSE models.parameter_size END,
+                 quantization = CASE WHEN ?10 THEN excluded.quantization ELSE models.quantization END,
+                 size_bytes = CASE WHEN ?10 THEN excluded.size_bytes ELSE models.size_bytes END,
                  probe_ms = excluded.probe_ms, probed_at = excluded.probed_at,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
                 params![
                     format!("ollama:{name}"),
                     name,
                     tool_calling.code(),
-                    vision.map(|advertised| if advertised { "advertised" } else { "not_advertised" }),
-                    i64::try_from(probe_ms).unwrap_or(i64::MAX)
+                    facts.map(|facts| if facts.vision_advertised { "advertised" } else { "not_advertised" }),
+                    i64::try_from(probe_ms).unwrap_or(i64::MAX),
+                    facts.and_then(|facts| facts.context_length).and_then(|tokens| i64::try_from(tokens).ok()),
+                    facts.and_then(|facts| facts.parameter_size.as_deref()),
+                    facts.and_then(|facts| facts.quantization.as_deref()),
+                    facts.and_then(|facts| facts.size_bytes).and_then(|bytes| i64::try_from(bytes).ok()),
+                    facts.is_some()
                 ],
             )
             .map_err(|_| "SETTINGS_UNAVAILABLE")?;
@@ -355,7 +380,8 @@ impl Core {
     /// Known local model manifests, most recently probed first.
     pub fn model_manifests(&self) -> rusqlite::Result<Vec<ModelManifest>> {
         let mut statement = self.db.prepare(
-            "SELECT name, tool_calling, vision, probe_ms, probed_at FROM models
+            "SELECT name, tool_calling, vision, probe_ms, probed_at, context_length, parameter_size,
+                    quantization, size_bytes FROM models
              WHERE provider = 'ollama' ORDER BY probed_at DESC, name LIMIT 64",
         )?;
         let rows = statement.query_map([], |row| {
@@ -367,6 +393,10 @@ impl Core {
                 vision_advertised: vision == "advertised",
                 probe_ms: row.get::<_, Option<i64>>(3)?.and_then(|ms| u64::try_from(ms).ok()),
                 probed_at: row.get(4)?,
+                context_length: row.get::<_, Option<i64>>(5)?.and_then(|tokens| u64::try_from(tokens).ok()),
+                parameter_size: row.get(6)?,
+                quantization: row.get(7)?,
+                size_bytes: row.get::<_, Option<i64>>(8)?.and_then(|bytes| u64::try_from(bytes).ok()),
             })
         })?;
         rows.collect()
@@ -984,11 +1014,15 @@ mod tests {
             "memory_entries.last_run",
             "memory_entries.schedule",
             // Model manifests: public model identifiers, status codes, a duration, timestamps.
+            "models.context_length",
             "models.id",
             "models.name",
+            "models.parameter_size",
             "models.probe_ms",
             "models.probed_at",
             "models.provider",
+            "models.quantization",
+            "models.size_bytes",
             "models.tool_calling",
             "models.updated_at",
             "models.vision",
@@ -1109,15 +1143,33 @@ mod tests {
     fn model_manifests_record_probe_results_and_exclude_unusable_models() {
         let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         assert!(core.model_manifests().unwrap().is_empty());
-        core.record_model_probe("qwen3:8b", ToolCalling::Verified, Some(false), 1_200).unwrap();
-        core.record_model_probe("qwen3:0.6b", ToolCalling::Failed, Some(false), 900).unwrap();
-        core.record_model_probe("gemma3:4b", ToolCalling::NotAdvertised, Some(true), 0).unwrap();
+        let qwen_facts = ModelFacts {
+            context_length: Some(40_960),
+            parameter_size: Some("8.2B".into()),
+            quantization: Some("Q4_K_M".into()),
+            size_bytes: Some(5_225_387_923),
+            ..ModelFacts::default()
+        };
+        core.record_model_probe("qwen3:8b", ToolCalling::Verified, Some(&qwen_facts), 1_200).unwrap();
+        core.record_model_probe("qwen3:0.6b", ToolCalling::Failed, Some(&ModelFacts::default()), 900).unwrap();
+        core.record_model_probe(
+            "gemma3:4b",
+            ToolCalling::NotAdvertised,
+            Some(&ModelFacts { vision_advertised: true, ..ModelFacts::default() }),
+            0,
+        )
+        .unwrap();
         core.record_model_probe("gemma3:4b", ToolCalling::NotAdvertised, None, 0).unwrap();
         core.record_model_probe("qwen3:8b", ToolCalling::Verified, None, 800).unwrap();
         let manifests = core.model_manifests().unwrap();
         assert_eq!(manifests.len(), 3, "one row per model");
         let qwen = manifests.iter().find(|manifest| manifest.name == "qwen3:8b").unwrap();
         assert_eq!((qwen.tool_calling, qwen.probe_ms), (ToolCalling::Verified, Some(800)));
+        // A routing update (`None`) keeps the limits and hardware of the last full probe.
+        assert_eq!(
+            (qwen.context_length, qwen.parameter_size.as_deref(), qwen.quantization.as_deref(), qwen.size_bytes),
+            (Some(40_960), Some("8.2B"), Some("Q4_K_M"), Some(5_225_387_923))
+        );
         // `None` keeps what the last full probe said about vision.
         assert!(manifests.iter().find(|manifest| manifest.name == "gemma3:4b").unwrap().vision_advertised);
         let mut unusable = core.unusable_local_models();
@@ -1137,7 +1189,7 @@ mod tests {
     #[test]
     fn a_newer_database_is_rejected() {
         let db = Connection::open_in_memory().unwrap();
-        db.pragma_update(None, "user_version", 8).unwrap();
+        db.pragma_update(None, "user_version", 9).unwrap();
         assert!(Core::start(db).is_err());
     }
 

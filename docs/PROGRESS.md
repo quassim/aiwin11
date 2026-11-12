@@ -14,6 +14,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Manifestes de modèles persistés (migration 007, table `models`) : résultat du test d’appel d’outils et vision par modèle local, tableau dans **Modèles** ; les modèles en échec sont exclus du routage. Vérifié par `verify.ps1`, non testé avec Ollama réel.
 
+- Manifestes complétés (migration 008) : fenêtre de contexte, paramètres, quantification et taille sur disque, lus dans `/api/show` et `/api/tags` ; libellés mal formés ignorés. Vérifié par `verify.ps1`, non testé avec Ollama réel (Ollama arrêté pendant la session).
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

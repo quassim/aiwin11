@@ -9,7 +9,19 @@ type Manifest = {
   visionAdvertised: boolean;
   probeMs: number | null;
   probedAt: string | null;
+  contextLength: number | null;
+  parameterSize: string | null;
+  quantization: string | null;
+  sizeBytes: number | null;
 };
+
+const number = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+
+function hardware(manifest: Manifest): string {
+  const parts = [manifest.parameterSize, manifest.quantization];
+  if (manifest.sizeBytes) parts.push(`${number.format(manifest.sizeBytes / 1e9)} Go`);
+  return parts.filter(Boolean).join(" · ") || "—";
+}
 
 export const toolCallingLabels: Record<ToolCalling, string> = {
   unverified: "Non vérifiés",
@@ -88,6 +100,8 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
               <th scope="col">Modèle</th>
               <th scope="col">Appels d’outils</th>
               <th scope="col">Vision</th>
+              <th scope="col">Contexte</th>
+              <th scope="col">Taille</th>
               <th scope="col">Dernier test</th>
             </tr>
           </thead>
@@ -97,6 +111,8 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
                 <th scope="row">{manifest.name}</th>
                 <td>{toolCallingLabels[manifest.toolCalling]}</td>
                 <td>{manifest.visionAdvertised ? "Annoncée" : "Non annoncée"}</td>
+                <td>{manifest.contextLength ? `${number.format(manifest.contextLength)} jetons` : "—"}</td>
+                <td>{hardware(manifest)}</td>
                 <td>{manifest.probedAt ? new Date(manifest.probedAt).toLocaleString("fr-FR") : "—"}</td>
               </tr>
             ))}

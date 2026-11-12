@@ -14,7 +14,7 @@ use aiwin11_core::{
     policy::{self, AgentAction, Effect, PolicySettings},
     task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
-    Core, ModelManifest, ModelPreferences, ToolCalling,
+    Core, ModelFacts, ModelManifest, ModelPreferences, ToolCalling,
 };
 use serde::Serialize;
 use tauri::{ipc::Channel, Manager, State};
@@ -550,10 +550,17 @@ async fn probe_local_model(state: State<'_, Arc<AppState>>, model: String) -> Re
             (true, true) => ToolCalling::Verified,
             (true, false) => ToolCalling::Failed,
         };
+        let facts = ModelFacts {
+            vision_advertised: details.vision_advertised,
+            context_length: details.context_length,
+            parameter_size: details.parameter_size.clone(),
+            quantization: details.quantization.clone(),
+            size_bytes: ollama.installed_size(&model).ok().flatten(),
+        };
         lock_core(&state.core).record_model_probe(
             &model,
             status,
-            Some(details.vision_advertised),
+            Some(&facts),
             u64::try_from(elapsed_ms).unwrap_or(u64::MAX),
         )?;
         Ok(ModelProbe {
