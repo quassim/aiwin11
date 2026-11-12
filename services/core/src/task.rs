@@ -25,7 +25,7 @@ use crate::{
     admin,
     broker::{Capability, ExecutionError, Peer, Policy},
     local_files::{LocalFiles, SearchHit, MAX_SEARCH_CHARS},
-    model_gateway::{tool_catalog, GatewayError, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
+    model_gateway::{tool_catalog, GatewayError, LocalStrategy, Ollama, Proposal, AGENT_INSTRUCTIONS, MAX_REPLY_CHARS},
     openai,
     policy::{self, ActionContext, AgentAction, AgentProfile, Effect, PolicySettings},
     windows_bridge::{ListedWindow, NamedNode, ProcessSnapshot, SystemSnapshot, WindowTarget, MAX_LISTED_WINDOWS},
@@ -561,14 +561,14 @@ impl TaskSlot {
         let is_workflow = workflow.is_some();
         let outcome = (|| {
             let mut routed = request.clone();
-            if matches!(routed.provider, Provider::Ollama) && !routed.scheduled && lock(core)?.adaptive_local_routing()
-            {
+            let strategy = lock(core)?.local_strategy();
+            if matches!(routed.provider, Provider::Ollama) && !routed.scheduled && strategy != LocalStrategy::Manual {
                 routed.cloud_fallback_model = None;
                 progress(TaskUpdate::stage("model.routing"));
-                let candidate = Ollama::connect().and_then(|ollama| ollama.adaptive_model(&routed.model));
-                let reason = if let Ok(Some(model)) = candidate {
+                let candidate = Ollama::connect().and_then(|ollama| ollama.route_local(strategy, &routed.model));
+                let reason = if let Ok(Some((model, reason))) = candidate {
                     routed.model = model;
-                    "gpu_verified"
+                    reason
                 } else {
                     "configured_local"
                 };

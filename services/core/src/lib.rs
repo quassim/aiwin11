@@ -27,7 +27,10 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
-use crate::policy::{Autonomy, PolicySettings};
+use crate::{
+    model_gateway::LocalStrategy,
+    policy::{Autonomy, PolicySettings},
+};
 
 /// Remembered model choices. Only public identifiers: never a key, a prompt or a reply.
 /// The cloud approval is deliberately not remembered: it is given again for each request.
@@ -277,25 +280,34 @@ impl Core {
         matches!(self.setting("routing.cloud_fallback"), Ok(Some(value)) if value == "true")
     }
 
-    pub fn adaptive_local_routing(&self) -> bool {
-        matches!(self.setting("routing.adaptive_local"), Ok(Some(value)) if value == "true")
+    /// How interactive Ollama tasks pick their local model. Falls back to the older
+    /// `routing.adaptive_local` switch; an unknown or unreadable value means `Manual`.
+    pub fn local_strategy(&self) -> LocalStrategy {
+        match self.setting("routing.local_strategy") {
+            Ok(Some(code)) => LocalStrategy::from_code(&code).unwrap_or_default(),
+            Ok(None) if matches!(self.setting("routing.adaptive_local"), Ok(Some(value)) if value == "true") => {
+                LocalStrategy::Adaptive
+            }
+            _ => LocalStrategy::Manual,
+        }
     }
 
-    pub fn set_adaptive_local_routing(&mut self, enabled: bool) -> Result<(), &'static str> {
+    /// Stores the local routing strategy and journals the change (strategy code only).
+    pub fn set_local_strategy(&mut self, strategy: LocalStrategy) -> Result<(), &'static str> {
         let transaction = self.db.transaction().map_err(|_| "SETTINGS_UNAVAILABLE")?;
         transaction
             .execute(
-                "INSERT INTO settings (key, value) VALUES ('routing.adaptive_local', ?1)
+                "INSERT INTO settings (key, value) VALUES ('routing.local_strategy', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                [if enabled { "true" } else { "false" }],
+                [strategy.code()],
             )
             .map_err(|_| "SETTINGS_UNAVAILABLE")?;
         transaction
             .execute(
                 "INSERT INTO events (id, session_id, kind, source, code)
-             VALUES (?1, ?2, 'settings.adaptive.changed', 'core', ?3)",
-                params![Uuid::new_v4().to_string(), self.session_id, if enabled { "adaptive_local" } else { "manual" }],
+             VALUES (?1, ?2, 'settings.routing.strategy.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), self.session_id, strategy.code()],
             )
             .map_err(|_| "SETTINGS_UNAVAILABLE")?;
         transaction.commit().map_err(|_| "SETTINGS_UNAVAILABLE")
@@ -927,6 +939,23 @@ mod tests {
         assert!(!text.contains("hunter2"), "free text written to SQLite");
         assert!(text.contains("REDACTED"));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn local_strategy_defaults_to_manual_migrates_the_old_switch_and_persists() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert_eq!(core.local_strategy(), LocalStrategy::Manual);
+        core.db.execute("INSERT INTO settings (key, value) VALUES ('routing.adaptive_local', 'true')", []).unwrap();
+        assert_eq!(core.local_strategy(), LocalStrategy::Adaptive, "the older switch is honoured");
+        core.set_local_strategy(LocalStrategy::QualityFirst).unwrap();
+        assert_eq!(core.local_strategy(), LocalStrategy::QualityFirst, "the new setting wins");
+        let event = &core.activity().unwrap()[0];
+        assert_eq!(
+            (event.kind.as_str(), event.code.as_deref()),
+            ("settings.routing.strategy.changed", Some("quality_first"))
+        );
+        core.db.execute("UPDATE settings SET value = 'cloud_only' WHERE key = 'routing.local_strategy'", []).unwrap();
+        assert_eq!(core.local_strategy(), LocalStrategy::Manual, "unknown codes fall back to manual");
     }
 
     #[test]

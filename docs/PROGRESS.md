@@ -8,7 +8,9 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 **Vérifié** : `verify.ps1` complet (12 tests Python, 102 tests Rust, linters, builds). Recherche non testée avec un modèle réel.
 
-**Prochaine étape** : stratégies de routage `quality_first` / `cost_optimized` (R3), états PAUSED/RECOVERING et étape Recover (R2), test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran).
+- Choix du modèle local en quatre stratégies (`manual`, `adaptive`, `quality_first`, `cost_optimized`), remplaçant l’interrupteur adaptatif (repris automatiquement) ; vérifié par `verify.ps1` (106 tests Rust), non testé avec Ollama réel.
+
+**Prochaine étape** : états PAUSED/RECOVERING et étape Recover (R2), test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub
 

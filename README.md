@@ -44,7 +44,7 @@ Dans **Accueil → Demandes enregistrées**, **Créer un workflow** permet de co
 
 Le **Centre de contrôle** affiche l’état de l’assistant, le profil de sécurité, le mode privé et les modèles chargés par Ollama. Dans **Modèles**, **Tester le modèle local** vérifie un appel d’outil synthétique et affiche la durée du test ainsi que la capacité de vision annoncée par Ollama.
 
-Dans **Modèles**, **Routage adaptatif local** privilégie, pour une demande Ollama interactive, le modèle dont la part chargée en VRAM est la plus élevée. AiWin11 teste l’appel d’outil avant d’utiliser un modèle différent. En cas d’échec du test, il conserve le modèle local configuré. L’interface affiche la raison du choix.
+Dans **Modèles**, **Choix du modèle local** décide quel modèle Ollama traite une demande interactive : **Manuel** (le modèle choisi), **Adaptatif** (le modèle le plus chargé en VRAM), **Qualité d’abord** (le plus gros modèle installé capable d’appeler des outils) ou **Économie** (un modèle déjà chargé en mémoire, le plus léger, pour ne rien charger de nouveau). AiWin11 teste l’appel d’outil avant d’utiliser un modèle différent ; en cas d’échec, il garde le modèle choisi. L’interface affiche la raison du choix. Hors du mode Manuel, le secours cloud est désactivé.
 
 Le centre de contrôle affiche aussi les composants détectés et les jetons cloud journalisés sur les 30 derniers jours. Tu peux saisir un tarif moyen par million de jetons pour obtenir une estimation.
 

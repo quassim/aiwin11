@@ -12,7 +12,7 @@ import { Video } from "./Video";
 import { ModelProbe } from "./ModelProbe";
 import { ModelConfig, type ModelPreferences } from "./ModelConfig";
 import { autoSpeak, speak, SpeechControls } from "./Speech";
-import { Routing } from "./Routing";
+import { Routing, type LocalStrategy } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
 
@@ -44,6 +44,14 @@ type Snapshot = { sessionId: string; events: Activity[] };
 type ActionStatus = "done" | "partial" | "simulated" | "declined" | "expired" | "denied" | "failed";
 type ActionReport = { action: string; summary: string; status: ActionStatus; code: string | null };
 type TaskOutcome = { reply: string; actions: ActionReport[] };
+/** Why the local model was chosen for a request (journaled as model.selected). */
+const routingReasons: Record<string, string> = {
+  gpu_verified: "Déjà chargé sur le GPU, appel d’outil vérifié.",
+  quality_first: "Plus gros modèle local capable d’appeler des outils, appel d’outil vérifié.",
+  cost_optimized: "Modèle déjà chargé en mémoire, le plus léger, appel d’outil vérifié.",
+  configured_local: "Choix local configuré.",
+};
+
 const statusNames: Record<ActionStatus, string> = {
   done: "Fait",
   partial: "Non confirmé",
@@ -94,7 +102,11 @@ type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs
 type TaskUpdate =
   | { type: "stage"; stage: string }
   | { type: "delta"; text: string }
-  | { type: "modelSelected"; model: string; reason: "gpu_verified" | "configured_local" }
+  | {
+      type: "modelSelected";
+      model: string;
+      reason: "gpu_verified" | "quality_first" | "cost_optimized" | "configured_local";
+    }
   | ({ type: "approvalRequired" } & PendingApproval);
 const applicationNames: Record<"notepad" | "charmap" | "paint", string> = {
   notepad: "le Bloc-notes",
@@ -501,7 +513,8 @@ function App() {
   const [cloudModel, setCloudModel] = useState("");
   const [cloudApproved, setCloudApproved] = useState(false);
   const [cloudFallback, setCloudFallback] = useState(false);
-  const [adaptiveRouting, setAdaptiveRouting] = useState<boolean>();
+  const [localStrategy, setLocalStrategy] = useState<LocalStrategy>();
+  const adaptiveRouting = localStrategy !== undefined && localStrategy !== "manual";
   const [dictating, setDictating] = useState(false);
   const [floating, setFloating] = useState(false);
   const [agent, setAgent] = useState<"general" | "office" | "windowsAdmin" | "readOnly">("general");
@@ -582,7 +595,7 @@ function App() {
 
   useEffect(refresh, [refresh]);
   useEffect(() => {
-    void invoke<boolean>("get_adaptive_routing").then(setAdaptiveRouting, () => undefined);
+    void invoke<LocalStrategy>("get_local_strategy").then(setLocalStrategy, () => undefined);
   }, []);
   useEffect(() => {
     void invoke<"openai" | "deepseek">("get_cloud_vendor").then(setVendor, () => undefined);
@@ -669,9 +682,7 @@ function App() {
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "modelSelected") {
         setRoutingExplanation(
-          update.reason === "gpu_verified"
-            ? `Modèle utilisé : ${update.model}. Chargement GPU observé et appel d’outil vérifié.`
-            : `Modèle utilisé : ${update.model}. Choix local configuré.`,
+          `Modèle utilisé : ${update.model}. ${routingReasons[update.reason] ?? "Choix local configuré."}`,
         );
         return;
       }
@@ -1013,11 +1024,7 @@ function App() {
           />
         )}
         {page === "Modèles" && (
-          <Routing
-            onFallbackChange={setCloudFallback}
-            adaptive={adaptiveRouting}
-            onAdaptiveChange={setAdaptiveRouting}
-          />
+          <Routing onFallbackChange={setCloudFallback} strategy={localStrategy} onStrategyChange={setLocalStrategy} />
         )}
         {page === "Modèles" && (
           <ModelConfig

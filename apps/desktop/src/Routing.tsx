@@ -14,15 +14,36 @@ const tasks: { name: string; status: string }[] = [
 
 const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
 
+export type LocalStrategy = "manual" | "adaptive" | "qualityFirst" | "costOptimized";
+
+const strategies: { id: LocalStrategy; label: string; description: string }[] = [
+  { id: "manual", label: "Manuel", description: "toujours le modèle Ollama choisi ci-dessous." },
+  {
+    id: "adaptive",
+    label: "Adaptatif",
+    description: "le modèle déjà le plus chargé sur le GPU, pour répondre plus vite.",
+  },
+  {
+    id: "qualityFirst",
+    label: "Qualité d’abord",
+    description: "le plus gros modèle local installé capable d’appeler des outils.",
+  },
+  {
+    id: "costOptimized",
+    label: "Économie",
+    description: "un modèle déjà chargé en mémoire, le plus léger, pour ne rien charger de nouveau.",
+  },
+];
+
 /** Model per task, routing strategy and resources used by local models (Models page). */
 export function Routing({
   onFallbackChange,
-  adaptive,
-  onAdaptiveChange,
+  strategy,
+  onStrategyChange,
 }: {
   onFallbackChange: (enabled: boolean) => void;
-  adaptive: boolean | undefined;
-  onAdaptiveChange: (enabled: boolean) => void;
+  strategy: LocalStrategy | undefined;
+  onStrategyChange: (strategy: LocalStrategy) => void;
 }) {
   const [fallback, setFallback] = useState<boolean>();
   const [routingStatus, setRoutingStatus] = useState("");
@@ -85,31 +106,39 @@ export function Routing({
           </tbody>
         </table>
       </div>
-      <label className="approval">
-        <input
-          type="checkbox"
-          checked={adaptive ?? false}
-          disabled={adaptive === undefined}
-          onChange={(event) => {
-            const enabled = event.target.checked;
-            setRoutingStatus("");
-            void invoke("set_adaptive_routing", { enabled }).then(
-              () => onAdaptiveChange(enabled),
-              () => setRoutingStatus("Le réglage du routage n’a pas pu être enregistré."),
-            );
-          }}
-        />
-        <span>
-          <strong>Routage adaptatif local</strong> · préfère un modèle déjà chargé sur le GPU si son appel d’outil est
-          vérifié. Sinon, utilise le modèle Ollama configuré. Ce mode reste local.
-        </span>
-      </label>
+      <fieldset className="task-form" disabled={strategy === undefined}>
+        <legend>Choix du modèle local</legend>
+        {strategies.map((option) => (
+          <label key={option.id} className="approval">
+            <input
+              type="radio"
+              name="local-strategy"
+              value={option.id}
+              checked={strategy === option.id}
+              onChange={() => {
+                setRoutingStatus("");
+                void invoke("set_local_strategy", { strategy: option.id }).then(
+                  () => onStrategyChange(option.id),
+                  () => setRoutingStatus("Le réglage du routage n’a pas pu être enregistré."),
+                );
+              }}
+            />
+            <span>
+              <strong>{option.label}</strong> — {option.description}
+            </span>
+          </label>
+        ))}
+        <p>
+          Un autre modèle que celui choisi n’est utilisé qu’après un test d’appel d’outil réussi. Tout reste local ; la
+          raison du choix s’affiche à chaque demande.
+        </p>
+      </fieldset>
       <p role="status">{routingStatus}</p>
       <label className="approval">
         <input
           type="checkbox"
           checked={fallback ?? false}
-          disabled={fallback === undefined || adaptive}
+          disabled={fallback === undefined || (strategy !== undefined && strategy !== "manual")}
           onChange={(event) => {
             const next = event.target.checked;
             void invoke("set_cloud_fallback", { enabled: next }).then(() => {

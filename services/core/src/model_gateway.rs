@@ -483,8 +483,44 @@ struct Catalog {
 #[derive(Deserialize)]
 struct CatalogEntry {
     name: String,
+    /// Size on disk in bytes, as reported by `/api/tags`; a proxy for model capacity.
+    #[serde(default)]
+    size: u64,
     #[serde(flatten)]
     location: Location,
+}
+
+/// How an interactive Ollama task picks its local model (ROADMAP R3, [S1 §4.3]).
+/// Any model other than the configured one is used only after a successful tool-call probe.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LocalStrategy {
+    /// Always the configured model.
+    #[default]
+    Manual,
+    /// The loaded model with the largest share in VRAM.
+    Adaptive,
+    /// The largest installed model that advertises tool calling.
+    QualityFirst,
+    /// A model already loaded in memory, the smallest one, so nothing new is loaded.
+    CostOptimized,
+}
+
+impl LocalStrategy {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Adaptive => "adaptive",
+            Self::QualityFirst => "quality_first",
+            Self::CostOptimized => "cost_optimized",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        [Self::Manual, Self::Adaptive, Self::QualityFirst, Self::CostOptimized]
+            .into_iter()
+            .find(|strategy| strategy.code() == code)
+    }
 }
 
 #[derive(Deserialize)]
@@ -729,6 +765,74 @@ impl Ollama {
         }
         Ok(Some(candidate.to_owned()))
     }
+}
+
+impl Ollama {
+    /// Installed local models with their size on disk (remote aliases excluded).
+    fn installed_sizes(&self) -> Result<Vec<(String, u64)>, GatewayError> {
+        let catalog: Catalog = Self::receive(self.client.get(format!("{OLLAMA}/api/tags")))?;
+        let mut models: Vec<_> = catalog
+            .models
+            .into_iter()
+            .filter(|entry| !entry.name.is_empty() && entry.location.is_local(&entry.name))
+            .map(|entry| (entry.name, entry.size))
+            .collect();
+        models.truncate(32);
+        Ok(models)
+    }
+
+    /// Applies `strategy` to an interactive local task. Returns the model to use instead of
+    /// `preferred`, with the reason journaled, or `None` to keep the configured model. A
+    /// different model is returned only after it advertises tool calling and passes the probe.
+    pub(crate) fn route_local(
+        &self,
+        strategy: LocalStrategy,
+        preferred: &str,
+    ) -> Result<Option<(String, &'static str)>, GatewayError> {
+        let candidate = match strategy {
+            LocalStrategy::Manual => return Ok(None),
+            LocalStrategy::Adaptive => return Ok(self.adaptive_model(preferred)?.map(|model| (model, "gpu_verified"))),
+            LocalStrategy::QualityFirst => {
+                let installed = self.installed_sizes()?;
+                let capable: Vec<_> = installed
+                    .into_iter()
+                    .filter(|(name, _)| self.describe(name).is_ok_and(|model| model.tool_calling_advertised))
+                    .collect();
+                largest_candidate(&capable).map(str::to_owned)
+            }
+            LocalStrategy::CostOptimized => {
+                let loaded = self.loaded_models()?;
+                cheapest_loaded(&loaded, preferred).map(str::to_owned)
+            }
+        };
+        let Some(candidate) = candidate else { return Ok(None) };
+        if candidate == preferred || !self.probe_tool_calling(&candidate)? {
+            return Ok(None);
+        }
+        Ok(Some((candidate, strategy.code())))
+    }
+}
+
+/// `quality_first`: the largest model (size on disk as a proxy for parameters), then by name.
+fn largest_candidate(models: &[(String, u64)]) -> Option<&str> {
+    models
+        .iter()
+        .filter(|(_, size)| *size > 0)
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
+        .map(|(name, _)| name.as_str())
+}
+
+/// `cost_optimized`: keep the configured model if it is already loaded; otherwise the
+/// smallest loaded model, so that no new model has to be loaded.
+fn cheapest_loaded<'a>(models: &'a [LoadedModel], preferred: &'a str) -> Option<&'a str> {
+    if models.iter().any(|model| model.name == preferred) {
+        return Some(preferred);
+    }
+    models
+        .iter()
+        .filter(|model| model.size > 0)
+        .min_by(|left, right| left.size.cmp(&right.size).then_with(|| left.name.cmp(&right.name)))
+        .map(|model| model.name.as_str())
 }
 
 fn gpu_candidate<'a>(models: &'a [LoadedModel], preferred: &str) -> Option<&'a str> {
@@ -1069,6 +1173,41 @@ mod tests {
             .unwrap()
             .iter()
             .all(|tool| tool["function"].get("strict").is_none()));
+    }
+
+    #[test]
+    fn quality_first_prefers_the_largest_model_and_ignores_unknown_sizes() {
+        let models = vec![
+            ("qwen3:0.6b".to_owned(), 500),
+            ("qwen3:8b".to_owned(), 5_000),
+            ("inconnu".to_owned(), 0),
+            ("autre:8b".to_owned(), 5_000),
+        ];
+        assert_eq!(largest_candidate(&models), Some("autre:8b"), "ties broken by name");
+        assert_eq!(largest_candidate(&models[2..3]), None);
+        assert_eq!(largest_candidate(&[]), None);
+    }
+
+    #[test]
+    fn cost_optimized_keeps_a_loaded_configured_model_or_the_smallest_loaded_one() {
+        let loaded = vec![
+            LoadedModel { name: "gros".into(), size: 9_000, size_vram: 9_000 },
+            LoadedModel { name: "petit".into(), size: 2_000, size_vram: 2_000 },
+        ];
+        assert_eq!(cheapest_loaded(&loaded, "gros"), Some("gros"), "already loaded: nothing to load");
+        assert_eq!(cheapest_loaded(&loaded, "absent"), Some("petit"));
+        assert_eq!(cheapest_loaded(&[], "absent"), None, "nothing loaded: keep the configured model");
+    }
+
+    #[test]
+    fn local_strategy_codes_round_trip() {
+        for strategy in
+            [LocalStrategy::Manual, LocalStrategy::Adaptive, LocalStrategy::QualityFirst, LocalStrategy::CostOptimized]
+        {
+            assert_eq!(LocalStrategy::from_code(strategy.code()), Some(strategy));
+        }
+        assert_eq!(LocalStrategy::from_code("cloud_only"), None);
+        assert_eq!(LocalStrategy::default(), LocalStrategy::Manual);
     }
 
     #[test]

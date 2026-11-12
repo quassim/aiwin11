@@ -9,7 +9,7 @@ use aiwin11_core::{
     grants::Grant,
     local_files::LocalFiles,
     manifest::{ToolManifest, MANIFESTS},
-    model_gateway::{LocalModelProvider, Ollama},
+    model_gateway::{LocalModelProvider, LocalStrategy, Ollama},
     openai,
     policy::{self, AgentAction, Effect, PolicySettings},
     task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
@@ -493,14 +493,15 @@ fn create_grant(state: State<'_, Arc<AppState>>, action: AgentAction, minutes: u
     lock_core(&state.core).grant_temporarily(action, minutes)
 }
 
+/// How interactive Ollama tasks pick their local model (manual, adaptive, quality, cost).
 #[tauri::command]
-fn get_adaptive_routing(state: State<'_, Arc<AppState>>) -> bool {
-    lock_core(&state.core).adaptive_local_routing()
+fn get_local_strategy(state: State<'_, Arc<AppState>>) -> LocalStrategy {
+    lock_core(&state.core).local_strategy()
 }
 
 #[tauri::command]
-fn set_adaptive_routing(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
-    lock_core(&state.core).set_adaptive_local_routing(enabled)
+fn set_local_strategy(state: State<'_, Arc<AppState>>, strategy: LocalStrategy) -> Result<(), &'static str> {
+    lock_core(&state.core).set_local_strategy(strategy)
 }
 
 #[tauri::command]
@@ -974,8 +975,8 @@ fn main() {
             get_admin_helper,
             get_privacy,
             get_cloud_fallback,
-            get_adaptive_routing,
-            set_adaptive_routing,
+            get_local_strategy,
+            set_local_strategy,
             get_memories,
             get_routines,
             get_image_engine,

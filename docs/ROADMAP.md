@@ -9,7 +9,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 ### Avancement depuis l’état initial
 
 - **R2**. Le bureau recherche, renomme et met à la corbeille les fichiers texte, Markdown et CSV. Il restaure aussi les éléments de la corbeille sans écrasement. L’Inspecteur liste les écrans et propose la capture locale d’un écran choisi.
-- **R3 et R5**. Le bureau propose un centre de contrôle, deux modes de navigation, un test des appels d’outils Ollama, le transfert JSON des choix de modèles et le suivi des jetons cloud avec une estimation de coût. Le routage adaptatif local utilise la part chargée en VRAM et vérifie les appels d’outils avant de choisir un autre modèle. Les stratégies de qualité et de coût restent ouvertes.
+- **R3 et R5**. Le bureau propose un centre de contrôle, deux modes de navigation, un test des appels d’outils Ollama, le transfert JSON des choix de modèles et le suivi des jetons cloud avec une estimation de coût. Le choix du modèle local propose quatre stratégies (manuel, adaptatif selon la VRAM, qualité d’abord, économie) et vérifie l’appel d’outil avant tout autre modèle.
 - **R7**. L’Inspecteur transcrit les captures avec Ollama. La page Vidéo soumet et suit un workflow ComfyUI sur la boucle locale, avec un seul travail suivi à la fois. La génération sur un modèle vidéo réel reste à vérifier.
 - **R8**. Les workflows enregistrés prennent en charge des étapes distinctes, les branches après échec, la reprise manuelle, les jours choisis et le démarrage d’AiWin11. Les exécutions planifiées restent locales et en lecture seule.
 - **R9**. Le script de distribution peut embarquer Python et produire une mise à jour NSIS signée avec son manifeste. La publication du canal de production et l’essai d’installation restent ouverts.
@@ -141,7 +141,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Ordre par tâche ✅ ; tolérance aux doublons après reconnexion | 🟡 | R4 |
 | Model Gateway : ProviderRegistry, ModelCatalog 🟡, ModelRouter (Resolve, Rank, Select, **ExplainSelection**), InferenceService (Generate, Stream ✅, Cancel 🟡), ResourceMonitor, UsageService | 🟡 | R3 |
 | Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | ❌ | R3 |
-| Stratégies : manual ✅, local_only, cloud_only, local_first, quality_first, cost_optimized, adaptive ; élimination puis classement | ❌ | R3 |
+| Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first ✅, cost_optimized ✅, adaptive ✅ ; élimination (capacité d’appel d’outil, sonde) puis classement | ✅ Pour les modèles locaux ; pas encore de classement mixte local/cloud | R3 |
 | Aucun repli local → cloud en mode privé strict | ✅ Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
 | HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | ❌ | R3 |
 | Agent défini en YAML (rôle, profil de modèle, capacités, limites, vérification, `retry_limit`, profil de politique) | ❌ Limites fixes dans le code | R8 |
