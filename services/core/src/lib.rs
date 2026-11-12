@@ -5,6 +5,8 @@ pub mod grants;
 #[cfg(windows)]
 pub mod local_files;
 pub mod manifest;
+#[cfg(windows)]
+pub mod memory;
 pub mod model_gateway;
 #[cfg(windows)]
 pub mod openai;
@@ -126,13 +128,19 @@ impl Core {
                 transaction.execute_batch(include_str!("../migrations/001.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/002.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/003.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
             }
             1 => {
                 transaction.execute_batch(include_str!("../migrations/002.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/003.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
             }
-            2 => transaction.execute_batch(include_str!("../migrations/003.sql"))?,
-            3 => {}
+            2 => {
+                transaction.execute_batch(include_str!("../migrations/003.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
+            }
+            3 => transaction.execute_batch(include_str!("../migrations/004.sql"))?,
+            4 => {}
             _ => return Err(rusqlite::Error::InvalidQuery),
         }
         let session_id = Uuid::new_v4().to_string();
@@ -739,6 +747,10 @@ mod tests {
             "grants.expires_at",
             "grants.id",
             "grants.revoked_at",
+            // Memory: the content column only holds DPAPI ciphertext (see memory.rs tests).
+            "memory_entries.content",
+            "memory_entries.created_at",
+            "memory_entries.id",
             "events.code",
             "events.id",
             "events.kind",
@@ -838,7 +850,7 @@ mod tests {
     #[test]
     fn a_newer_database_is_rejected() {
         let db = Connection::open_in_memory().unwrap();
-        db.pragma_update(None, "user_version", 4).unwrap();
+        db.pragma_update(None, "user_version", 5).unwrap();
         assert!(Core::start(db).is_err());
     }
 
@@ -849,7 +861,7 @@ mod tests {
         db.execute("INSERT INTO sessions (id) VALUES ('old')", []).unwrap();
         let core = Core::start(db).unwrap();
         let version: u32 = core.db.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         let sessions: u32 = core.db.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0)).unwrap();
         assert_eq!(sessions, 2, "existing data is kept");
         assert_eq!(core.policy_settings(), PolicySettings::default());

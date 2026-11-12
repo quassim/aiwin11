@@ -101,6 +101,22 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
     }
     if include_windows {
         functions.push(json!({
+            "name": "remember",
+            "description": "Enregistre dans la mémoire durable d’AiWin11 une information que l’utilisateur te demande \
+        de retenir (1000 caractères au plus). Chiffrée sur ce PC.",
+            "parameters": {
+                "type": "object",
+                "properties": { "text": { "type": "string" } },
+                "required": ["text"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
+            "name": "recall",
+            "description": "Relit les informations que l’utilisateur t’a demandé de retenir.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
             "name": "list_windows",
             "description": "Liste les fenêtres d’applications ouvertes (titre, application, réduite ou non), numérotées \
 à partir de 1, dans l’ordre d’empilement. L’utilisateur doit l’approuver.",
@@ -811,6 +827,8 @@ mod tests {
                 "copy_text_file",
                 "move_text_file",
                 "trash_text_file",
+                "remember",
+                "recall",
                 "list_windows",
                 "arrange_window",
                 "read_clipboard",
@@ -831,6 +849,8 @@ mod tests {
             names(tool_catalog(false, false, true, false)),
             [
                 "launch_application",
+                "remember",
+                "recall",
                 "list_windows",
                 "arrange_window",
                 "read_clipboard",

@@ -2,6 +2,12 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, R6 — mémoire
+
+**Fait** : mémoire durable chiffrée (DPAPI) : outils `remember` / `recall` via le broker, page **Mémoire**, migration 004. Vérifié par `verify.ps1` (87 tests Rust, dont le contrôle qu’aucun texte en clair n’est dans le fichier SQLite). Non testé avec un modèle réel.
+
+**Prochaine étape** : recherche sémantique (embeddings locaux Ollama) sur la mémoire et un dossier choisi ; client MCP ; R7 voix ; R8 workflows ; R4.
+
 ## 2026-11-12, DeepSeek et distribution
 
 **Fait** : `7db6cc0` DeepSeek comme fournisseur cloud au choix (compatible OpenAI, clé séparée `AiWin11/DeepSeek`) ; `9d57c50` installateur NSIS par utilisateur (`Installateur.cmd`, `scripts/package.ps1`) embarquant pont, assistant élevé et agent, Python détecté automatiquement. L’installateur a été construit avec succès ; non installé ni testé.

@@ -281,6 +281,10 @@ The host records the cloud authorization decision (`model.cloud.authorized` / `m
 
 The main window can save, remove and check the presence of the `AiWin11/OpenAI` credential. Rust stores it as a generic entry in Windows Credential Manager for the current user on the local machine. The presence command returns a boolean. The key is read in the native gateway for the OpenAI request and excluded from SQLite, agent input and error messages.
 
+## Durable memory (R6)
+
+Migration 004 adds `memory_entries` (`id`, `created_at`, `content`). `content` is DPAPI ciphertext (`CryptProtectData`, current Windows user, entropy `AiWin11.memory.v1`); the plain text never reaches SQLite (tested by scanning the file). Agent tools, local models only: `remember { text }` (1 to 1000 characters; Observation deny, Assisted ask with the full text shown, Limited/Advanced allow; at most 200 notes) and `recall {}` (read, allowed). Both pass through the broker (`RememberNote` / `RecallNotes`, capabilities `MemoryWrite` / `MemoryRead`; the note itself is not in the command). Notes reach the model framed as data. `get_memories`, `delete_memory { id? }` (none = all) serve the **Mémoire** page. Events `memory.saved`, `memory.deleted` (`entries:N`), no content.
+
 ## Storage invariant: nothing sensitive in SQLite
 
 Every write to `events` passes event kinds, codes and task IDs through `journal_code`: a value that is not a short machine code (ASCII letters, digits and `_.:+/-`, at most 96 bytes) is stored as `REDACTED`. The test `the_schema_only_holds_identifiers_codes_and_timestamps` lists every column of the schema with what it holds; adding a column fails it until the column is reviewed. `free_text_never_reaches_the_database_file` scans the database file for injected free text.

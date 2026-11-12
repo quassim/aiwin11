@@ -51,6 +51,14 @@ def is_window_number(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_LISTED_WINDOWS
 
 
+MAX_NOTE_CHARS = 1000
+
+
+def is_note(value: object) -> bool:
+    """Memory note: 1 to 1000 characters, not blank, no NUL."""
+    return isinstance(value, str) and value.strip() != "" and len(value) <= MAX_NOTE_CHARS and "\x00" not in value
+
+
 def is_control_number(value: object) -> bool:
     """Number [n] of a control in the task's last inspect_window result: 1 to 80."""
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 80
@@ -90,6 +98,8 @@ TOOLS: dict[str, dict[str, Rule]] = {
     },
     "admin_clean_temp": {},
     "click_control": {"control": is_control_number},
+    "remember": {"text": is_note},
+    "recall": {},
     "set_control_value": {"control": is_control_number, "text": is_typed_text},
     "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }

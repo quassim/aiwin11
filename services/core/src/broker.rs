@@ -60,6 +60,10 @@ pub enum Capability {
     LaunchAllowedApp = 1 << 17,
     /// Click one control of the window the same task inspected (UI Automation Invoke).
     ControlInvoke = 1 << 18,
+    /// Save one note in the encrypted memory.
+    MemoryWrite = 1 << 19,
+    /// Read the encrypted memory's notes.
+    MemoryRead = 1 << 20,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -140,6 +144,8 @@ impl Policy {
             Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
             Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
             Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
+            Some(Operation::RememberNote(_)) if agent(Capability::MemoryWrite) => Ok("remember_note"),
+            Some(Operation::RecallNotes(_)) if agent(Capability::MemoryRead) => Ok("recall_notes"),
             Some(Operation::InvokeControl(control))
                 if agent(Capability::ControlInvoke)
                     && control.window != 0

@@ -36,6 +36,8 @@ message Command {
     AdminService admin_service = 31;
     AdminCleanTemp admin_clean_temp = 32;
     InvokeControl invoke_control = 33;
+    RememberNote remember_note = 34;
+    RecallNotes recall_notes = 35;
   }
 }
 
@@ -148,6 +150,11 @@ message InvokeControl {
   // When set, replaces the control's value (UI Automation SetValue) instead of clicking it.
   optional string value = 6;
 }
+
+// Memory operations, run by the core itself after broker authorization. The note never
+// travels in the command; it is encrypted by the core before storage.
+message RememberNote {}
+message RecallNotes {}
 
 // Deletes files older than one day in %SystemRoot%\Temp.
 message AdminCleanTemp {}

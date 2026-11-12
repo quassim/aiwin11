@@ -4,11 +4,12 @@ import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
 import { History } from "./History";
+import { Memory } from "./Memory";
 import { Routing } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
 
-type Page = "Accueil" | "Modèles" | "Sécurité" | "Inspecteur" | "Fichiers" | "Activité";
+type Page = "Accueil" | "Modèles" | "Sécurité" | "Mémoire" | "Inspecteur" | "Fichiers" | "Activité";
 type Provider = "ollama" | "openai";
 type ModelPreferences = { provider: Provider; localModel: string; cloudModel: string; visionModel: string };
 type Activity = { sequence: number; kind: string; timestamp: string; taskId: string | null; code: string | null };
@@ -52,6 +53,8 @@ type ApprovalAction =
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
   | { kind: "listServices" }
+  | { kind: "remember"; text: string }
+  | { kind: "recall" }
   | { kind: "clickControl"; application: string; title: string; control: string }
   | { kind: "setControlValue"; application: string; title: string; control: string; text: string }
   | { kind: "adminService"; service: string; operation: string }
@@ -112,6 +115,16 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       title: "L’agent propose de cliquer dans une fenêtre",
       detail: `Action : cliquer sur ${action.control} dans « ${action.title} » (application ${action.application}). Le clic est fait par UI Automation, sans souris.`,
     };
+  }
+  if (action.kind === "remember") {
+    return {
+      title: "L’agent propose de retenir une information",
+      detail: "Action : enregistrer ce texte, chiffré, dans la mémoire d’AiWin11 (page Mémoire pour l’effacer).",
+      quote: action.text,
+    };
+  }
+  if (action.kind === "recall") {
+    return { title: "L’agent demande à relire sa mémoire", detail: "Action : lire les informations retenues." };
   }
   if (action.kind === "listServices") {
     return {
@@ -215,7 +228,7 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
 }
 const MAX_PROMPT_CHARS = 2000;
 
-const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Inspecteur", "Fichiers", "Activité"];
+const pages: Page[] = ["Accueil", "Modèles", "Sécurité", "Mémoire", "Inspecteur", "Fichiers", "Activité"];
 const activityNames: Record<string, string> = {
   "session.started": "Session ouverte",
   "task.created": "Demande reçue",
@@ -242,6 +255,8 @@ const activityNames: Record<string, string> = {
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
   "window.list.completed": "Fenêtres listées par l’agent",
   "service.list.completed": "Services listés par l’agent",
+  "memory.saved": "Information retenue (chiffrée)",
+  "memory.deleted": "Mémoire effacée",
   "control.invoke.completed": "Contrôle cliqué par l’agent",
   "control.invoke.failed": "Clic sur un contrôle impossible",
   "admin.operation.completed": "Opération administrateur effectuée",
@@ -903,6 +918,7 @@ function App() {
           </section>
         )}
         {page === "Sécurité" && <Security onFinished={refresh} />}
+        {page === "Mémoire" && <Memory />}
         {page === "Inspecteur" && <Inspector onFinished={refresh} />}
         {page === "Fichiers" && <LocalFiles onFinished={refresh} />}
         {page === "Activité" && (

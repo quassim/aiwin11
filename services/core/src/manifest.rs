@@ -60,6 +60,8 @@ pub enum CapabilityName {
     AdminOperation,
     LaunchAllowedApp,
     ControlInvoke,
+    MemoryWrite,
+    MemoryRead,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -90,7 +92,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 20] = [
+pub const MANIFESTS: [ToolManifest; 22] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -374,6 +376,35 @@ pub const MANIFESTS: [ToolManifest; 20] = [
         reversibility: R::Irreversible,
         timeout_ms: 15_000,
         capabilities: &[C::ControlInvoke],
+    },
+    ToolManifest {
+        action: AgentAction::Remember,
+        tool: "remember",
+        version: 1,
+        risk: Risk::Medium,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        // Deletable from the Memory page.
+        reversibility: R::Reversible,
+        timeout_ms: 5_000,
+        capabilities: &[C::MemoryWrite],
+    },
+    ToolManifest {
+        action: AgentAction::Recall,
+        tool: "recall",
+        version: 1,
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 5_000,
+        capabilities: &[C::MemoryRead],
     },
 ];
 

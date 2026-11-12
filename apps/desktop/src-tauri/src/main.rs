@@ -338,6 +338,17 @@ fn set_cloud_vendor(state: State<'_, Arc<AppState>>, vendor: openai::Vendor) -> 
 }
 
 #[tauri::command]
+fn get_memories(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.memories()
+}
+
+/// Main window only: deletes one note, or all of them without an ID.
+#[tauri::command]
+fn delete_memory(state: State<'_, Arc<AppState>>, id: Option<String>) -> Result<usize, &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.forget(id.as_deref())
+}
+
+#[tauri::command]
 fn get_privacy(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
     Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.private_mode())
 }
@@ -513,6 +524,8 @@ fn main() {
             get_admin_helper,
             get_privacy,
             get_cloud_fallback,
+            get_memories,
+            delete_memory,
             get_cloud_vendor,
             set_cloud_vendor,
             get_cloud_budget,

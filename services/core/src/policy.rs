@@ -90,10 +90,12 @@ pub enum AgentAction {
     AdminCleanTemp,
     ClickControl,
     SetControlValue,
+    Remember,
+    Recall,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 22] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -114,6 +116,8 @@ impl AgentAction {
         Self::AdminCleanTemp,
         Self::ClickControl,
         Self::SetControlValue,
+        Self::Remember,
+        Self::Recall,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -142,6 +146,8 @@ impl AgentAction {
             Self::AdminCleanTemp => "admin_clean_temp",
             Self::ClickControl => "click_control",
             Self::SetControlValue => "set_control_value",
+            Self::Remember => "remember",
+            Self::Recall => "recall",
         }
     }
 
@@ -198,7 +204,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 20] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 22] = [
+    (A::Recall, [E::Allow, E::Allow, E::Allow, E::Allow]),
+    (A::Remember, [E::Deny, E::Ask, E::Allow, E::Allow]),
     (A::SetControlValue, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ClickControl, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::AdminService, [E::Deny, E::Ask, E::Ask, E::Ask]),
