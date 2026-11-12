@@ -172,7 +172,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 
 | Point | État | Phase |
 |---|---|---|
-| Dépôt privé pour versionner le travail de Codex | ✅ Décidé : dépôt git **local** uniquement | — |
+| Dépôt privé pour versionner le travail de Codex | ✅ Dépôt GitHub `quassim/aiwin11` (branche `main`), poussé à la demande de l’utilisateur le 13/11/2026 ; `scripts/verify.ps1` reste la vérification de référence | — |
 | CI sur un vrai runner Windows 11 | 🟡 Workflow présent mais pas exécuté (dépôt local) ; remplacé par `scripts/verify.ps1` sur la machine de référence | R1 |
 | Code linté et typé | ✅ clippy, TypeScript strict, ESLint (règles typées) + Prettier, ruff + mypy strict, `cargo fmt --check`, tous dans `scripts/verify.ps1` ; 🟡 pas d’analyseurs .NET supplémentaires | — |
 | Tests unitaires, intégration, sécurité | ✅ 82 tests Rust, 11 Python, 19 tests réels | — |

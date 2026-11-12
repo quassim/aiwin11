@@ -2,6 +2,10 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-13 — dépôt GitHub
+
+Le dépôt est publié sur GitHub (`https://github.com/quassim/aiwin11`, branche `main`, à la demande de l’utilisateur). Avant l’envoi : aucun secret dans les fichiers suivis, `.tools`, `.venv`, `target` et `node_modules` exclus. Pousser depuis le terminal de l’utilisateur (connexion GitHub par le navigateur) : `git push`.
+
 ## 2026-11-13, matin
 
 **Fait** : `3dcf9a9` ADR-011 (Protobuf sur stdio au lieu de gRPC pour l’instant, R4) ; `b5f16fb` tests de composants React (Vitest + Testing Library) dans `verify.ps1` ; `4da7894` signature de code optionnelle (`AIWIN11_SIGN_THUMBPRINT`). Installateur reconstruit avec succès (assistant en fichier unique, SHA-256 épinglé).
