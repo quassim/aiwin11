@@ -136,6 +136,8 @@ const activityNames: Record<string, string> = {
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
   "history.exported": "Journal d’audit exporté",
+  "grant.created": "Autorisation temporaire accordée",
+  "grant.revoked": "Autorisation temporaire révoquée",
   "model.cloud.authorized": "Requête OpenAI autorisée",
   "model.cloud.denied": "Requête OpenAI refusée",
   "agent.tool.requested": "Action demandée par l’agent",

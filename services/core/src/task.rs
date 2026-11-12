@@ -456,7 +456,7 @@ impl TaskSlot {
             task,
             progress,
             settings,
-            context: ActionContext { local_model: local },
+            context: ActionContext { local_model: local, temporary_grant: false },
             actions: Vec::new(),
             launched_notepad: None,
             vision_model: request.vision_model.as_deref().filter(|_| local),
@@ -680,7 +680,9 @@ impl TaskSlot {
         action: AgentAction,
         summary: &str,
     ) -> Result<Result<Effect, String>, &'static str> {
-        let decision = policy::evaluate(run.settings, action, run.context);
+        // Grants are read at each evaluation, so a revocation applies to the very next action.
+        let context = ActionContext { temporary_grant: lock(run.core)?.has_active_grant(action), ..run.context };
+        let decision = policy::evaluate(run.settings, action, context);
         record_code(
             run.core,
             run.task,

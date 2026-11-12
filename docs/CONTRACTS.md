@@ -41,6 +41,7 @@ SQLite tables: providers, models, model_profiles, agents, sessions, tasks, tool_
 
 - The Tauri command `get_snapshot` reads the current session ID and up to 100 session events, newest first. Errors use fixed codes and contain no database diagnostics.
 - Cargo generates the Rust types from `contracts/v1/aiwin11.proto`. The command contains a typed operation and an absolute Unix deadline in milliseconds. The core uses the peer identity supplied by the trusted host for authorization. The envelope's actor string has no authority. Cross-process transport and peer authentication are pending.
+- Migration 003 adds `grants` (temporary permissions, see "Temporary grants"); versions 1 and 2 migrate in place.
 - Migration 001 uses SQLite `user_version` and creates sessions, events and the tool dispatch reservations. Migration 002 adds `settings` (policy profile) and `tasks` (one row per chat task, see "Tasks and recovery"); a version 1 database migrates in place. Migrations, task recovery and initial session creation run in one transaction. The core refuses schemas newer than it supports.
 - Before dispatch, the broker commits an authorization event and a reservation keyed by session and idempotency key. It checks authorization again before invoking the trusted executor and records the outcome. If a process crashes after reservation or the outcome cannot be written, the reservation prevents repeat dispatch with the same key in that session.
 
@@ -140,6 +141,12 @@ Model preferences (`model.provider` = `ollama`|`openai`, `model.local`, `model.c
 ### Tool manifests
 
 `manifest::MANIFESTS` holds one reviewed `ToolManifest` per agent action: `tool` (catalog and agent registry name), `version`, `risk` (`low`, `medium`, `high`, `critical`), `sideEffect`, `readsScreen`, `localOnly`, `dryRun`, `reversibility` (`noEffect`, `reversible`, `recoverable`, `irreversible`), `timeoutMs` and the broker `capabilities` it needs. The policy invariants read these facts: `local_only` from `localOnly`, `screen_data` from `readsScreen`, `critical_action` from `risk = critical`, simulation from `sideEffect`. Tests check that every action has a manifest, that the manifests match the model tool catalog and `agent.py`, and consistency rules (a side effect is simulable and says how it is undone; screen readers are local only; an irreversible tool is critical). `get_policy_overview` returns them as `manifests`; the Security page shows them. A manifest never grants anything.
+
+### Temporary grants
+
+Migration 003 adds `grants` (`id`, `action` code, `created_at`, `expires_at`, `revoked_at`). `create_grant { action, minutes }` (1 to 480 minutes) lets one action run without asking; it is refused with `GRANT_NOT_ALLOWED` unless `policy::grantable(action)` (a side effect that is neither critical nor a screen read). `revoke_grant { id }` ends it at once (`GRANT_NOT_ACTIVE` if unknown, expired or already revoked). `get_grants` returns `{ active, grantable }`. Journaled as `grant.created` (`<action>:<N>min`) and `grant.revoked` (`<action>`).
+
+The host reads grants at each evaluation, just before execution (`ActionContext.temporary_grant`), so revocation and expiry apply to the very next action. In `policy::evaluate` a grant is the last rule: it only turns a profile `Ask` into `Allow` (rule `temporary_grant`), after the local-only, profile denial, simulation, screen-data and critical-action rules, which it never relaxes.
 
 ### Gate for one action
 

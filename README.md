@@ -63,6 +63,8 @@ Le **mode simulation** remplace toute action avec effet par une simulation : l�
 
 Le bouton **Stoppe toutes les tâches**, toujours visible dans la barre latérale, arrête tout : une demande en réflexion ou en attente d’accord est annulée immédiatement (« Arrêt confirmé ») ; si une action est en cours d’exécution, elle n’est pas coupée au milieu (« Arrêt demandé ») et la demande s’arrête juste après, sans aucune autre action.
 
+Toujours dans **Sécurité**, **Autorisations temporaires** permet de laisser une action (par exemple copier un fichier) se faire sans demander pendant 15 minutes à 2 heures. Cela ne vaut que là où ton profil demande ton accord, jamais pour la corbeille ni la lecture de l’écran ; **Révoquer** l’arrête dès l’action suivante.
+
 La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque, possibilité d’annuler, simulation, usage local uniquement et délai maximal. Un outil **critique** demande toujours ton accord.
 
 ### Fournisseur cloud optionnel

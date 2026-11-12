@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { Grants } from "./Grants";
 
 type Autonomy = "observation" | "assisted" | "limited" | "advanced";
 type Effect = "allow" | "ask" | "deny" | "simulate";
@@ -177,6 +178,7 @@ export function Security({ onFinished }: { onFinished: () => void }) {
           </tbody>
         </table>
       </div>
+      <Grants actionNames={actionNames} onChange={onFinished} />
       <h3>Fiche de chaque outil</h3>
       <p>
         Faits vérifiés par AiWin11 pour chaque outil : ils déterminent les règles toujours appliquées (une action

@@ -67,7 +67,7 @@ pub struct PolicySettings {
 }
 
 /// Actions the agent can propose. Each maps to one tool.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentAction {
     LaunchApplication,
@@ -93,6 +93,10 @@ impl AgentAction {
         Self::DescribeWindow,
         Self::TypeText,
     ];
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|action| action.code() == code)
+    }
 
     pub fn code(self) -> &'static str {
         match self {
@@ -133,6 +137,14 @@ impl AgentAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActionContext {
     pub local_model: bool,
+    /// The user gave a temporary grant for this action that is still in force.
+    pub temporary_grant: bool,
+}
+
+/// A temporary grant can only relax an `Ask` for a side effect that is neither critical nor
+/// a screen read.
+pub fn grantable(action: AgentAction) -> bool {
+    action.has_side_effect() && !action.critical() && !action.reads_screen()
 }
 
 /// An effect and the rule that produced it, for the audit trail and the UI.
@@ -194,12 +206,15 @@ pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionCo
     if action.critical() {
         return Decision { effect: E::Ask, rule: "critical_action" };
     }
+    if base == E::Ask && context.temporary_grant && grantable(action) {
+        return Decision { effect: E::Allow, rule: "temporary_grant" };
+    }
     Decision { effect: base, rule: "profile" }
 }
 
 /// The full table for the UI: effect of every action in every profile, for a local model.
 pub fn table(simulate: bool) -> Vec<(AgentAction, [Effect; 4])> {
-    let context = ActionContext { local_model: true };
+    let context = ActionContext { local_model: true, temporary_grant: false };
     AgentAction::ALL
         .into_iter()
         .map(|action| {
@@ -214,8 +229,31 @@ pub fn table(simulate: bool) -> Vec<(AgentAction, [Effect; 4])> {
 mod tests {
     use super::*;
 
-    const LOCAL: ActionContext = ActionContext { local_model: true };
-    const CLOUD: ActionContext = ActionContext { local_model: false };
+    const LOCAL: ActionContext = ActionContext { local_model: true, temporary_grant: false };
+    const CLOUD: ActionContext = ActionContext { local_model: false, temporary_grant: false };
+    const GRANTED: ActionContext = ActionContext { local_model: true, temporary_grant: true };
+
+    #[test]
+    fn a_temporary_grant_only_turns_an_ask_into_allow() {
+        for autonomy in [P::Observation, P::Assisted, P::Limited, P::Advanced] {
+            for action in AgentAction::ALL {
+                let without = evaluate(PolicySettings { autonomy, simulate: false }, action, LOCAL);
+                let with = evaluate(PolicySettings { autonomy, simulate: false }, action, GRANTED);
+                if without.effect == E::Ask && grantable(action) {
+                    assert_eq!(with, Decision { effect: E::Allow, rule: "temporary_grant" }, "{autonomy:?} {action:?}");
+                } else {
+                    assert_eq!(with, without, "{autonomy:?} {action:?}");
+                }
+            }
+            // Never for critical actions or screen reading, never past simulation or the cloud rule.
+            assert_eq!(effect(autonomy, false, A::TrashFile, GRANTED), effect(autonomy, false, A::TrashFile, LOCAL));
+            assert_eq!(effect(autonomy, false, A::InspectWindow, GRANTED), E::Ask);
+            assert_ne!(effect(autonomy, true, A::CopyFile, GRANTED), E::Allow);
+        }
+        let cloud_granted = ActionContext { local_model: false, temporary_grant: true };
+        assert_eq!(effect(P::Assisted, false, A::CopyFile, cloud_granted), E::Deny);
+        assert_eq!(effect(P::Observation, false, A::CopyFile, GRANTED), E::Deny, "a denial stays a denial");
+    }
 
     fn effect(autonomy: Autonomy, simulate: bool, action: AgentAction, context: ActionContext) -> Effect {
         evaluate(PolicySettings { autonomy, simulate }, action, context).effect

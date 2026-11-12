@@ -84,7 +84,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto ❌ | 🟡 | R3 |
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
 | M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ❌, vérification 🟡, interruption ✅, **reprise** ❌ | 🟡 | R2, R8 |
-| M04 Sécurité : règles par ressource ❌, permissions temporaires ❌, approbations ✅, journalisation ✅, arrêt immédiat 🟡 | 🟡 | R1, R2 |
+| M04 Sécurité : règles par ressource ❌, permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
 | M05 Mémoire de session, préférences durables, indexation sélective, historique ✅, recherche sémantique | 🟡 | R6 |
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
 | M07 Déclencheurs, planification, conditions, tâches répétitives, reprise sur erreur, éditeur visuel | ❌ | R8 |
@@ -138,10 +138,10 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | États : CREATED ✅, PLANNING ✅, RUNNING ✅ (`dispatching`), AWAITING_APPROVAL ✅, COMPLETED ✅, FAILED ✅, CANCELLED ✅, **PAUSED**, **CANCELLING**, **RECOVERING** ❌ (`interrupted` à la place) | 🟡 | R2 |
 | Cycle Understand → Plan → Authorize ✅ → Execute ✅ → Observe ✅ → **Verify** 🟡 → **Recover** ❌ → Report ✅ | 🟡 | R2 |
 | Contrat d’exécution d’outil avec `dry_run`, `timeout`, `idempotency_key` ; retour avec décision, effets, observations, statut de vérification | 🟡 Interne ; à formaliser | R2 |
-| Broker : EvaluateAction ✅, RequestApproval ✅, **GrantCapability / RevokeCapability temporaires** ❌, ExecuteAuthorized ✅, CancelExecution 🟡, GetAuditTrail 🟡 | 🟡 | R2 |
+| Broker : EvaluateAction ✅, RequestApproval ✅, GrantCapability / RevokeCapability temporaires ✅ (table `grants`), ExecuteAuthorized ✅, CancelExecution 🟡, GetAuditTrail ✅ (export) | 🟡 | R2 |
 | Politique JSON (sujet, actions, **ressources/chemins**, contraintes `max_files`, `require_backup`, `expires_after`) | ❌ | R2 |
 | Chemins canoniques, jonctions, liens | ✅ Fichiers | — |
-| Invariants : action inconnue refusée ✅, pas d’auto-attribution ✅, confirmation précise ✅, pas de transmission entre agents (N/A), LLM jamais autorité ✅, erreur → refus ✅, contournement = défaillance ✅, révocation effective ❌, vérification juste avant exécution ✅ | 🟡 | R2 |
+| Invariants : action inconnue refusée ✅, pas d’auto-attribution ✅, confirmation précise ✅, pas de transmission entre agents (N/A), LLM jamais autorité ✅, erreur → refus ✅, contournement = défaillance ✅, révocation effective ✅ (autorisations relues à chaque évaluation), vérification juste avant exécution ✅ | 🟡 | R2 |
 | Windows Bridge — WindowService (List, Focus, Resize, Minimize, Close) | ❌ | R2 |
 | ApplicationService (Discover, Launch, GetStatus) | 🟡 Launch Bloc-notes | R2 |
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ❌) | 🟡 | R2 |
@@ -246,7 +246,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 
 ### R2 — Politiques par ressource et contrôle Windows étendu (fin du lot C, début de M02/M04)
 
-- Politiques en données : sujet, action, **ressource (dossiers autorisés, applications)**, contraintes (`max_files`, `require_backup`, expiration), **autorisations temporaires et révocables** ; tables `policies` et `approvals` ; éditeur dans **Sécurité**.
+- 🟡 Politiques en données : sujet, action, **ressource (dossiers autorisés, applications)** ❌, contraintes (`max_files`, `require_backup`, expiration) ❌, **autorisations temporaires et révocables** ✅ (table `grants`, section de **Sécurité**) ; table `policies` ❌.
 - ✅ Risque formel par outil et **manifeste d’outil** (risque, dry-run, réversible, timeout, capacités).
 - Règles critiques explicites (toujours demandées ou refusées) : suppression massive, élévation, sécurité Windows, transactions financières, envoi de données confidentielles, installation de logiciel.
 - Pont Windows :

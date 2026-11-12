@@ -6,6 +6,7 @@ use std::{
 };
 
 use aiwin11_core::{
+    grants::Grant,
     local_files::LocalFiles,
     manifest::{ToolManifest, MANIFESTS},
     model_gateway::{LocalModelProvider, Ollama},
@@ -270,6 +271,32 @@ async fn export_audit(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) ->
     .map_err(|_| "EXPORT_FAILED")?
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GrantOverview {
+    active: Vec<Grant>,
+    /// Actions a temporary grant may relax.
+    grantable: Vec<AgentAction>,
+}
+
+#[tauri::command]
+fn get_grants(state: State<'_, Arc<AppState>>) -> Result<GrantOverview, &'static str> {
+    let active = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.active_grants()?;
+    let grantable = AgentAction::ALL.into_iter().filter(|action| policy::grantable(*action)).collect();
+    Ok(GrantOverview { active, grantable })
+}
+
+/// Main window only: the user lets one action run without asking for a limited time.
+#[tauri::command]
+fn create_grant(state: State<'_, Arc<AppState>>, action: AgentAction, minutes: u32) -> Result<String, &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.grant_temporarily(action, minutes)
+}
+
+#[tauri::command]
+fn revoke_grant(state: State<'_, Arc<AppState>>, id: String) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.revoke_grant(&id)
+}
+
 /// "Stoppe toutes les tâches": always available, journaled with its immediate result. The stop
 /// is confirmed when the running task ends as cancelled (`task.cancelled`).
 #[tauri::command]
@@ -350,6 +377,9 @@ fn main() {
             run_task,
             cancel_task,
             stop_all_tasks,
+            get_grants,
+            create_grant,
+            revoke_grant,
             get_history_settings,
             set_retention_days,
             clear_history,

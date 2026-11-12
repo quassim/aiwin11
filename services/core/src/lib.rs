@@ -1,4 +1,5 @@
 pub mod broker;
+pub mod grants;
 #[cfg(windows)]
 pub mod local_files;
 pub mod manifest;
@@ -122,9 +123,14 @@ impl Core {
             0 => {
                 transaction.execute_batch(include_str!("../migrations/001.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/002.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/003.sql"))?;
             }
-            1 => transaction.execute_batch(include_str!("../migrations/002.sql"))?,
-            2 => {}
+            1 => {
+                transaction.execute_batch(include_str!("../migrations/002.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/003.sql"))?;
+            }
+            2 => transaction.execute_batch(include_str!("../migrations/003.sql"))?,
+            3 => {}
             _ => return Err(rusqlite::Error::InvalidQuery),
         }
         let session_id = Uuid::new_v4().to_string();
@@ -604,6 +610,12 @@ mod tests {
     fn the_schema_only_holds_identifiers_codes_and_timestamps() {
         let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
         let reviewed = [
+            // Temporary grants: action code and timestamps only.
+            "grants.action",
+            "grants.created_at",
+            "grants.expires_at",
+            "grants.id",
+            "grants.revoked_at",
             "events.code",
             "events.id",
             "events.kind",
@@ -673,7 +685,7 @@ mod tests {
     #[test]
     fn a_newer_database_is_rejected() {
         let db = Connection::open_in_memory().unwrap();
-        db.pragma_update(None, "user_version", 3).unwrap();
+        db.pragma_update(None, "user_version", 4).unwrap();
         assert!(Core::start(db).is_err());
     }
 
@@ -684,7 +696,7 @@ mod tests {
         db.execute("INSERT INTO sessions (id) VALUES ('old')", []).unwrap();
         let core = Core::start(db).unwrap();
         let version: u32 = core.db.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         let sessions: u32 = core.db.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0)).unwrap();
         assert_eq!(sessions, 2, "existing data is kept");
         assert_eq!(core.policy_settings(), PolicySettings::default());
