@@ -1,6 +1,6 @@
 # AiWin11 — Feuille de route
 
-État au 12 novembre 2026, dernier commit `48f31ec`. Ce document recoupe **tous les points de la conversation de conception** (vision initiale, cadrage v0.1, spécification v1.0, transmission à Codex) avec ce qui est réellement implémenté, puis organise le reste en phases.
+État au 12 novembre 2026, dernier commit `2a26a1c` (conversation de conception relue intégralement le 12/11, points manquants ajoutés en §2.5). Ce document recoupe **tous les points de la conversation de conception** (vision initiale, cadrage v0.1, spécification v1.0, transmission à Codex) avec ce qui est réellement implémenté, puis organise le reste en phases.
 
 Légende : ✅ fait et vérifié · 🟡 partiel · ❌ à faire · 🔷 décision à prendre.
 
@@ -14,7 +14,9 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|
 | Socle (lots A et B : AW-001 à AW-012) | ✅ Application Tauri, contrats Protobuf, broker, pont .NET, passerelle Ollama/OpenAI, agent, streaming, scénario « Ouvre le Bloc-notes » validé en réel |
 | Moteur de politiques, profils d’autonomie, approbations, simulation | ✅ |
-| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Fait dans un périmètre restreint : Bloc-notes, un dossier de fichiers `.txt`, fenêtre précédente |
+| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers `.txt` d’un dossier dédié, lecture et vision de la fenêtre précédente, opérations administrateur via l’assistant élevé ; manquent : dossiers au choix, UIA Invoke/SetValue, souris/clavier génériques, PowerShell approuvé |
+| Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
+| Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | ❌ Le cœur tourne dans le processus Tauri |
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | ❌ Choix manuel d’un seul modèle |
 | Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | ❌ |
@@ -173,12 +175,28 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Dépôt privé pour versionner le travail de Codex | ✅ Décidé : dépôt git **local** uniquement | — |
 | CI sur un vrai runner Windows 11 | 🟡 Workflow présent mais pas exécuté (dépôt local) ; remplacé par `scripts/verify.ps1` sur la machine de référence | R1 |
 | Code linté et typé | ✅ clippy, TypeScript strict, ESLint (règles typées) + Prettier, ruff + mypy strict, `cargo fmt --check`, tous dans `scripts/verify.ps1` ; 🟡 pas d’analyseurs .NET supplémentaires | — |
-| Tests unitaires, intégration, sécurité | ✅ 59 tests Rust, 10 Python, 11 tests réels | — |
+| Tests unitaires, intégration, sécurité | ✅ 82 tests Rust, 11 Python, 19 tests réels | — |
 | Aucune opération hors broker | ✅ | — |
 | APIs publiques et migrations documentées | ✅ `docs/CONTRACTS.md` | — |
 | README : installation, lancement, dépannage | ✅ | — |
 | Pas de télémétrie, pas de serveur exposé au LAN | ✅ | — |
 | UI accessible, badges local/cloud, activité de l’agent | 🟡 | R1, R5 |
+
+### 2.5 Points de la conversation ajoutés après relecture complète (12/11)
+
+| Point | Source | État | Phase |
+|---|---|---|---|
+| Limites d’un agent : `max_steps` 30, `max_tool_calls` 50, `max_runtime_seconds` 900, `max_parallel_tools` 2, `retry_limit` 2, `verification_required` | [S1 §5.1] | 🟡 8 étapes max, une action à la fois, vérification par outil ; pas de durée max ni de reprise automatique | R2, R8 |
+| Résilience : la panne d’un provider ou d’un agent ne fait pas tomber le noyau ; « crash d’un agent : core et interface restent fonctionnels » | [S0 §8][S1 §11] | 🟡 Agent Python et pont en processus séparés avec délais ; non testé par injection de pannes | R4, R9 |
+| Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud | [S1 §9] | ❌ | R3 |
+| Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud | [V][S0 §8][S1 §4.3], T-011 | 🟡 Aucun fallback automatique ; pas d’interrupteur « mode privé » global | R3 |
+| Intégration profonde : agent permanent, interfaces contextuelles, événements Windows, automatisation proactive | [V §7] | ❌ | R5, R8 |
+| Zero-trust entre agents et outils ; un agent ne transmet pas d’autorisation à un autre | [S0 §10][S1 §6.3] | ✅ pour l’agent unique (broker, identité attribuée par le cœur) ; à revalider avec le multi-agents | R8 |
+| Périphériques, terminal, navigateur parmi les capacités | [V §2] | ❌ Navigateur via MCP prévu ; périphériques non planifiés en détail | R2, R6 |
+| Agents spécialisés (développement, recherche, administration Windows, bureautique, multimédia) | [V §2] | ❌ | R8 |
+| Isolation des tâches risquées (processus limités, environnement contrôlé, VM si pertinent) | [S0 §5] | 🟡 Processus séparés, utilisateur standard, assistant élevé une opération ; pas de bac à sable ni de VM | R4 |
+| Licence (open source, privée, hybride) | [S0 §10] | 🔷 À décider (usage personnel pour l’instant) | — |
+| Coûts API, consommation GPU/RAM/VRAM et tests de performance par modèle dans le gestionnaire de modèles | [V §4] | ❌ | R3, R9 |
 
 ---
 
