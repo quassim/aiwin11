@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, DeepSeek et distribution
+
+**Fait** : `7db6cc0` DeepSeek comme fournisseur cloud au choix (compatible OpenAI, clé séparée `AiWin11/DeepSeek`) ; `9d57c50` installateur NSIS par utilisateur (`Installateur.cmd`, `scripts/package.ps1`) embarquant pont, assistant élevé et agent, Python détecté automatiquement. L’installateur a été construit avec succès ; non installé ni testé.
+
+**Point de sécurité ouvert** : installé par utilisateur, `AiWin11.Admin.exe` est dans un dossier modifiable par l’utilisateur ; prévoir une installation par machine de l’assistant et la signature du code (R9).
+
+**Prochaine étape** : R6 mémoire (chiffrée DPAPI, §6) et MCP ; R7 voix locale ; R8 workflows ; R4 processus séparés.
+
 ## 2026-11-12, R3 — modèles par tâche
 
 **Fait** : `28ee87e` vue « Modèles par tâche » (texte/actions, vision ; voix/image/vidéo signalées indisponibles), routage `manual` / `local_first` avec secours OpenAI explicite (avant toute action, accord de la demande, jamais en mode privé), modèles chargés et VRAM (`/api/ps`) ; budget en jetons par demande cloud (`CLOUD_BUDGET_EXCEEDED`, événements `model.usage`).
