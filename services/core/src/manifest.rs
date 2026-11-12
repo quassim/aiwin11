@@ -65,6 +65,7 @@ pub enum CapabilityName {
     Diagnostic,
     McpServer,
     ImageGenerate,
+    Delegation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -95,7 +96,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 28] = [
+pub const MANIFESTS: [ToolManifest; 29] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -497,6 +498,21 @@ pub const MANIFESTS: [ToolManifest; 28] = [
         reversibility: R::Reversible,
         timeout_ms: 180_000,
         capabilities: &[C::ImageGenerate],
+    },
+    ToolManifest {
+        action: AgentAction::Delegate,
+        tool: "delegate",
+        version: 1,
+        // Runs a specialized agent whose every action is gated on its own.
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 180_000,
+        capabilities: &[C::Delegation],
     },
 ];
 

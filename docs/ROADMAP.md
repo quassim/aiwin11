@@ -193,7 +193,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Intégration profonde : agent permanent, interfaces contextuelles, événements Windows, automatisation proactive | [V §7] | ❌ | R5, R8 |
 | Zero-trust entre agents et outils ; un agent ne transmet pas d’autorisation à un autre | [S0 §10][S1 §6.3] | ✅ pour l’agent unique (broker, identité attribuée par le cœur) ; à revalider avec le multi-agents | R8 |
 | Périphériques, terminal, navigateur parmi les capacités | [V §2] | ❌ Navigateur via MCP prévu ; périphériques non planifiés en détail | R2, R6 |
-| Agents spécialisés (développement, recherche, administration Windows, bureautique, multimédia) | [V §2] | 🟡 Général, Fichiers et bureautique, Administration Windows, Lecture seule, chacun limité à ses outils (règle `agent_scope`) ; délégation entre agents ❌ | R8 |
+| Agents spécialisés (développement, recherche, administration Windows, bureautique, multimédia) | [V §2] | 🟡 Général, Fichiers et bureautique, Administration Windows, Lecture seule, chacun limité à ses outils (règle `agent_scope`) ; délégation d’un niveau par l’agent Général ✅ | R8 |
 | Isolation des tâches risquées (processus limités, environnement contrôlé, VM si pertinent) | [S0 §5] | 🟡 Processus séparés, utilisateur standard, assistant élevé une opération ; pas de bac à sable ni de VM | R4 |
 | Licence (open source, privée, hybride) | [S0 §10] | 🔷 À décider (usage personnel pour l’instant) | — |
 | Coûts API, consommation GPU/RAM/VRAM et tests de performance par modèle dans le gestionnaire de modèles | [V §4] | ❌ | R3, R9 |

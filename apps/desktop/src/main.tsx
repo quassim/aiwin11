@@ -294,6 +294,7 @@ const activityNames: Record<string, string> = {
   "settings.models.changed": "Choix des modèles modifié",
   "settings.privacy.changed": "Mode privé modifié",
   "agent.profile": "Agent choisi",
+  "agent.delegated": "Sous-demande confiée à un agent spécialisé",
   "settings.routing.changed": "Routage des modèles modifié",
   "model.usage": "Jetons cloud utilisés",
   "model.budget.exceeded": "Budget cloud de la demande atteint",

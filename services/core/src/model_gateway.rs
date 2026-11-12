@@ -230,6 +230,21 @@ sécurité, de mise à jour et les services vitaux de Windows sont toujours refu
             }
         }));
         functions.push(json!({
+            "name": "delegate",
+            "description": "Confie une sous-demande à un agent spécialisé : office (fichiers, Bloc-notes, \
+presse-papiers, mémoire), windows_admin (diagnostic, processus, services, fenêtres) ou read_only (lecture seule). \
+Il agit avec ses seuls outils et te rend sa réponse.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent": { "type": "string", "enum": ["office", "windows_admin", "read_only"] },
+                    "request": { "type": "string" }
+                },
+                "required": ["agent", "request"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "generate_image",
             "description": "Génère une image 512×512 avec le moteur d’images local de l’utilisateur (Stable \
 Diffusion sur ce PC) à partir d’une description, et l’enregistre dans le dossier d’images d’AiWin11.",
@@ -947,6 +962,7 @@ mod tests {
                 "admin_service",
                 "admin_clean_temp",
                 "run_diagnostic",
+                "delegate",
                 "generate_image",
                 "mcp_list_tools",
                 "mcp_call",
@@ -974,6 +990,7 @@ mod tests {
                 "admin_service",
                 "admin_clean_temp",
                 "run_diagnostic",
+                "delegate",
                 "generate_image",
                 "mcp_list_tools",
                 "mcp_call",

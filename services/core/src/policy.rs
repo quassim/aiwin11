@@ -98,10 +98,11 @@ pub enum AgentAction {
     McpListTools,
     McpCall,
     GenerateImage,
+    Delegate,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -130,6 +131,7 @@ impl AgentAction {
         Self::McpListTools,
         Self::McpCall,
         Self::GenerateImage,
+        Self::Delegate,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -166,6 +168,7 @@ impl AgentAction {
             Self::McpListTools => "mcp_list_tools",
             Self::McpCall => "mcp_call",
             Self::GenerateImage => "generate_image",
+            Self::Delegate => "delegate",
         }
     }
 
@@ -233,6 +236,10 @@ impl AgentProfile {
 
     pub fn allows(self, action: AgentAction) -> bool {
         use AgentAction as A;
+        // Only the general agent delegates, and only once: specialized agents cannot.
+        if action == A::Delegate {
+            return self == Self::General;
+        }
         match self {
             Self::General => true,
             Self::ReadOnly => !action.has_side_effect(),
@@ -290,7 +297,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 28] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 29] = [
+    (A::Delegate, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::GenerateImage, [E::Deny, E::Ask, E::Allow, E::Allow]),
     (A::McpListTools, [E::Ask, E::Ask, E::Allow, E::Allow]),
     (A::McpCall, [E::Deny, E::Ask, E::Ask, E::Ask]),
@@ -398,11 +406,15 @@ mod tests {
         assert_eq!(decide(AgentProfile::Office, A::AdminService).rule, "agent_scope");
         assert_eq!(decide(AgentProfile::WindowsAdmin, A::TrashFile).rule, "agent_scope");
         assert_ne!(decide(AgentProfile::WindowsAdmin, A::ListServices).effect, E::Deny);
+        for profile in [AgentProfile::Office, AgentProfile::WindowsAdmin, AgentProfile::ReadOnly] {
+            assert_eq!(decide(profile, A::Delegate).rule, "agent_scope", "no re-delegation: {profile:?}");
+        }
+        assert_eq!(decide(AgentProfile::General, A::Delegate).effect, E::Allow);
         for action in AgentAction::ALL {
             let read_only = decide(AgentProfile::ReadOnly, action);
             assert_eq!(
                 read_only.effect == E::Deny && read_only.rule == "agent_scope",
-                action.has_side_effect(),
+                action.has_side_effect() || action == A::Delegate,
                 "{action:?}"
             );
             assert_eq!(decide(AgentProfile::General, action), evaluate(PolicySettings::default(), action, LOCAL));

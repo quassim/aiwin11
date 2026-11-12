@@ -138,6 +138,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "organize_files": {"moves": is_move_plan},
     "mcp_list_tools": {"server": is_mcp_server},
     "generate_image": {"prompt": is_note},
+    "delegate": {"agent": ("office", "windows_admin", "read_only"), "request": is_note},
     "mcp_call": {"server": is_mcp_server, "tool": is_mcp_tool, "arguments": is_mcp_arguments},
     "run_diagnostic": {"diagnostic": ("network", "wifi", "time")},
     "admin_service": {
