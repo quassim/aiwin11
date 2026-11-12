@@ -107,6 +107,15 @@ npm --prefix apps/desktop run tauri -- build --no-bundle
 
 `cargo test` lance aussi le vrai agent Python : `python` doit être accessible dans le `PATH`. Le workflow GitHub Actions utilise Windows Server 2025 pour compiler et tester ; la validation du bureau et des actions Windows exige une session interactive sur Windows 11 x64.
 
+### Mesures de performance
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/measure.ps1 -Runs 3
+cargo test --locked -p aiwin11-core --release measure_ -- --ignored --nocapture
+```
+
+Le script démarre l’application release (à construire avant), mesure le temps jusqu’à la création de la fenêtre et la mémoire au repos de l’application et des processus qu’elle a lancés, puis ferme uniquement l’instance qu’il a démarrée ; il refuse de s’exécuter si AiWin11 est déjà ouvert. Le test mesure la latence d’une décision de permission. Résultats de référence dans `docs/ROADMAP.md` §4.
+
 ### Tests avec un modèle réel
 
 Les tests marqués `ignored` utilisent Ollama, le pont et l’agent publiés à côté de l’exécutable de test. Ils couvrent : refus puis ouverture approuvée du Bloc-notes ; ouverture puis écriture dans le Bloc-notes ; réponse texte sans action ; lecture de fichiers ; consigne piégée dans un fichier ; copie refusée puis approuvée ; renommage puis mise à la corbeille ; lecture et description de la Table des caractères ouverte par le test ; démarrage du pont de réserve.

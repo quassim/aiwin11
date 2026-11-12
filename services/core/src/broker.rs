@@ -249,6 +249,38 @@ mod tests {
         }
     }
 
+    /// Measurement for the NFR "permission evaluation p95 < 50 ms" (ROADMAP §4): the policy
+    /// engine decision plus the broker's persisted authorization, on a database file.
+    /// Run with `cargo test --locked -p aiwin11-core --release measure_ -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement on the reference machine"]
+    fn measure_permission_decision_latency() {
+        use crate::policy::{self, ActionContext, AgentAction, PolicySettings};
+        use std::time::Instant;
+        let path = std::env::temp_dir().join(format!("aiwin11-measure-{}.sqlite3", Uuid::new_v4()));
+        let mut core = Core::open(&path).unwrap();
+        let mut samples = Vec::new();
+        for _ in 0..500 {
+            let command = request(&core);
+            let start = Instant::now();
+            let decision = policy::evaluate(
+                PolicySettings::default(),
+                AgentAction::LaunchApplication,
+                ActionContext { local_model: true },
+            );
+            assert!(!decision.rule.is_empty());
+            core.authorize_dispatch(Policy::granting(&[Capability::LaunchNotepad]), Peer::Agent, &command).unwrap();
+            samples.push(start.elapsed());
+        }
+        samples.sort();
+        let p50 = samples[samples.len() / 2];
+        let p95 = samples[samples.len() * 95 / 100];
+        println!("permission decision: p50 {p50:?}, p95 {p95:?}, max {:?}", samples.last().unwrap());
+        drop(core);
+        let _ = std::fs::remove_file(&path);
+        assert!(p95.as_millis() < 50, "p95 {p95:?} over the 50 ms budget");
+    }
+
     #[test]
     fn character_map_input_requires_the_desktop_role_and_a_decimal_digit() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();

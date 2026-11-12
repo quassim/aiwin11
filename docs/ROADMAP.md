@@ -194,7 +194,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | — | Provider indisponible : bascule autorisée ou erreur compréhensible | 🟡 Erreur ✅, bascule ❌ — R3 |
 | — | Instruction malveillante dans une page | 🟡 Fichiers ✅ ; pages web ❌ — R6 |
 | — | Redémarrage après interruption | ✅ |
-| T-001 | Démarrage à froid, services démarrés et états visibles | 🟡 Non mesuré — R1 |
+| T-001 | Démarrage à froid, services démarrés et états visibles | 🟡 Fenêtre principale créée en 2,9 s à froid, 0,05 s à chaud (`scripts/measure.ps1`, 12/11/2026) ; « interface prête » pas encore instrumentée — R1 |
 | T-002 | Provider local | ✅ |
 | T-003 | Provider cloud | ❌ Jamais testé avec une vraie clé — R1 |
 | T-004 | Changement de modèle sans redémarrage | ✅ |
@@ -214,10 +214,10 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Exigence | État |
 |---|---|
 | Palette p95 < 200 ms | ❌ Pas de palette — R5 |
-| Évaluation d’une permission p95 < 50 ms | 🟡 Non mesuré (évaluation en mémoire) — R1 |
+| Évaluation d’une permission p95 < 50 ms | ✅ p95 7,1 ms, p50 6,6 ms (politique + autorisation du broker journalisée sur SQLite disque, 500 essais, release, machine de référence, 12/11/2026) |
 | Navigation p95 < 150 ms | ❌ Non mesuré — R1 |
-| Interface prête < 3 s | ❌ Non mesuré — R1 |
-| RAM au repos < 350 Mo hors modèles | ❌ Non mesuré — R1 |
+| Interface prête < 3 s | 🟡 Fenêtre créée en 2,9 s au premier démarrage à froid ; le rendu React n’est pas encore horodaté — R1 |
+| RAM au repos < 350 Mo hors modèles | ✅ 178–182 Mo de mémoire privée pour 9 processus (application, WebView2, pont de réserve) après 15 s ; ensemble de travail cumulé 358–366 Mo, qui compte plusieurs fois les pages partagées de WebView2 |
 | Crash d’un agent : cœur et UI fonctionnels | ✅ L’agent Python est un processus séparé, borné dans le temps |
 | 100 % des appels d’outils par le broker, 100 % des actions tracées | ✅ |
 | Aucune requête cloud en mode local strict | ✅ Par conception — test réseau R3 |
@@ -238,7 +238,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - ✅ **Durée de conservation et effacement** de l’historique ; export du journal d’audit (JSON).
 - ✅ Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; charge utile = code non sensible (fournisseur, numéro d’étape). 🟡 Pas de payload JSON structuré.
 - ✅ Qualité : ESLint + Prettier, ruff + mypy, `cargo fmt --check`. ❌ Tests de composants React, test E2E de l’application.
-- Mesures : démarrage, RAM au repos, navigation, évaluation de politique ; machine de référence documentée.
+- 🟡 Mesures : RAM au repos ✅, évaluation de politique ✅, démarrage (fenêtre) 🟡 ; navigation et « interface prête » ❌ (`scripts/measure.ps1`, test `measure_permission_decision_latency`).
 - Tests manquants : T-003 (OpenAI réel), T-008 annulation réelle, suite d’injection de prompt (début d’AW-024).
 - Audit d’accessibilité au lecteur d’écran (Narrateur, NVDA).
 - Script local `scripts/verify.ps1` qui remplace la CI (dépôt local) : builds, analyse statique, tests unitaires et, en option, tests réels.
