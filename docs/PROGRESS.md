@@ -8,7 +8,9 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 **Vérifié** : `verify.ps1 -Live` complet sur la machine de référence : tout passe, **17/17 tests réels** avec le catalogue complet (les 2 tests qui ouvrent le Bloc-notes sautés : un Bloc-notes de l’utilisateur était ouvert, non touché).
 
-**Reste** : délégation entre agents et éditeur visuel de workflows (R8), génération vidéo (R7, aucun moteur local), mises à jour automatiques (R9), test E2E de l’application complète, UAC réel de l’assistant élevé, OpenAI/DeepSeek réels, lecteur d’écran.
+- `31530ee` délégation d’un niveau : l’agent Général confie une sous-demande à un agent spécialisé (actions approuvées une à une, pas de re-délégation). Build release démarré : fenêtre en 2,2 s, 196 Mo privés.
+
+**Reste** : éditeur visuel de workflows (R8), génération vidéo (R7, aucun moteur local), mises à jour automatiques (R9), test E2E de l’application complète, UAC réel de l’assistant élevé, OpenAI/DeepSeek réels, lecteur d’écran.
 
 ## 2026-11-12, nuit (suite)
 
