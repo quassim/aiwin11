@@ -890,6 +890,7 @@ impl TaskSlot {
         let mut workflow = TaskOutcome { reply: String::new(), actions: Vec::new() };
         let total = steps.len();
         let mut previous_passed = true;
+        let mut previous_reply = String::new();
         let mut jump: Option<usize> = None;
         for (index, step) in steps.iter().enumerate() {
             if self.phase.load(Ordering::Acquire) == CANCELLED {
@@ -905,16 +906,35 @@ impl TaskSlot {
                 workflow.reply.push_str("\n\nWorkflow arrêté après une action refusée, échouée ou non vérifiée.");
                 break;
             }
+            if !condition_met(step.condition, &previous_reply) {
+                // Not met: the step is skipped and the run goes on as if it had passed.
+                record_code(core, task, "workflow.step.condition.unmet", &code)?;
+                if let Some([success, _]) = step.branches {
+                    if success == 0 {
+                        break;
+                    }
+                    jump = Some(success);
+                }
+                continue;
+            }
             record_code(core, task, "workflow.step.started", &code)?;
             progress(TaskUpdate::stage("workflow.step.started"));
-            let result = self.plan_and_execute(core, files, task, step.prompt, &local, progress, started, true);
-            let outcome = match result {
-                Ok(outcome) => outcome,
-                Err(error) => {
-                    record_code(core, task, "workflow.step.failed", &code)?;
-                    return Err(error);
+            let mut attempts = if step.retry { 2 } else { 1 };
+            let outcome = loop {
+                attempts -= 1;
+                let result = self.plan_and_execute(core, files, task, step.prompt, &local, progress, started, true);
+                match result {
+                    Ok(outcome) if attempts > 0 && retryable(&outcome) => {}
+                    Ok(outcome) => break outcome,
+                    Err(error) if attempts > 0 && error != "TASK_CANCELLED" => {}
+                    Err(error) => {
+                        record_code(core, task, "workflow.step.failed", &code)?;
+                        return Err(error);
+                    }
                 }
+                record_code(core, task, "workflow.step.retried", &code)?;
             };
+            previous_reply = outcome.reply.clone();
             let passed = !outcome.actions.iter().any(action_failed);
             let blocked = outcome.actions.iter().any(|action| {
                 matches!(action.status, ActionStatus::Declined | ActionStatus::Expired | ActionStatus::Denied)
@@ -3321,6 +3341,24 @@ struct WorkflowStep<'a> {
     prompt: &'a str,
     on_failure: bool,
     branches: Option<[usize; 2]>,
+    /// `[réessayer]`: run once more when nothing happened (every action failed, none refused).
+    retry: bool,
+    /// `[si contient:…]`: run only if the last executed step's reply contains this text.
+    condition: Option<&'a str>,
+}
+
+/// Longest text a workflow condition may look for.
+const MAX_CONDITION_CHARS: usize = 40;
+
+/// The step can be tried again: it failed without refusal and without any action that may
+/// have done something (a retry never repeats a side effect).
+fn retryable(outcome: &TaskOutcome) -> bool {
+    outcome.actions.iter().any(action_failed)
+        && outcome.actions.iter().all(|action| matches!(action.status, ActionStatus::Failed))
+}
+
+fn condition_met(condition: Option<&str>, previous_reply: &str) -> bool {
+    condition.is_none_or(|text| previous_reply.to_lowercase().contains(&text.to_lowercase()))
 }
 
 fn workflow_steps(prompt: &str) -> Result<Option<Vec<WorkflowStep<'_>>>, &'static str> {
@@ -3349,8 +3387,30 @@ fn workflow_steps(prompt: &str) -> Result<Option<Vec<WorkflowStep<'_>>>, &'stati
             }
             None => (fallback.unwrap_or(step), None),
         };
+        let retry = text.strip_prefix("[réessayer] ");
+        let text = retry.unwrap_or(text);
+        let (text, condition) = match text.strip_prefix("[si contient:") {
+            Some(rest) => {
+                let (condition, text) = rest.split_once("] ").ok_or("WORKFLOW_INVALID")?;
+                let valid = !condition.trim().is_empty()
+                    && condition.chars().count() <= MAX_CONDITION_CHARS
+                    && !condition.contains(']')
+                    && !condition.chars().any(char::is_control);
+                if !valid || index == 0 {
+                    return Err("WORKFLOW_INVALID");
+                }
+                (text, Some(condition.trim()))
+            }
+            None => (text, None),
+        };
         let prompt = validate_prompt(text).map_err(|_| "WORKFLOW_INVALID")?;
-        steps.push(WorkflowStep { prompt, on_failure: fallback.is_some(), branches });
+        steps.push(WorkflowStep {
+            prompt,
+            on_failure: fallback.is_some(),
+            branches,
+            retry: retry.is_some(),
+            condition,
+        });
     }
     if steps.is_empty()
         || steps
@@ -3370,8 +3430,14 @@ fn workflow_validates_all_steps_before_execution() {
     assert_eq!(
         workflow_steps(&valid),
         Ok(Some(vec![
-            WorkflowStep { prompt: "Liste les fichiers", on_failure: false, branches: None },
-            WorkflowStep { prompt: "Lis notes.txt", on_failure: true, branches: None },
+            WorkflowStep {
+                prompt: "Liste les fichiers",
+                on_failure: false,
+                branches: None,
+                retry: false,
+                condition: None
+            },
+            WorkflowStep { prompt: "Lis notes.txt", on_failure: true, branches: None, retry: false, condition: None },
         ]))
     );
     let malformed = format!("{header}\n1. Liste les fichiers\n3. Lis notes.txt");
@@ -3381,6 +3447,19 @@ fn workflow_validates_all_steps_before_execution() {
     assert_eq!(workflow_steps(&graph).unwrap().unwrap()[0].branches, Some([3, 2]));
     assert_eq!(workflow_steps(&graph.replace("3/2", "1/2")), Err("WORKFLOW_INVALID"));
     assert_eq!(workflow_steps(&graph.replace("3/2", "4/2")), Err("WORKFLOW_INVALID"));
+    let tagged =
+        format!("{header}\n1. [réessayer] Liste les fichiers\n2. [suite:0/0] [si contient:rapport] Lis rapport.txt");
+    let steps = workflow_steps(&tagged).unwrap().unwrap();
+    assert!(steps[0].retry && steps[0].condition.is_none());
+    assert_eq!(
+        (steps[1].condition, steps[1].prompt, steps[1].branches),
+        (Some("rapport"), "Lis rapport.txt", Some([0, 0]))
+    );
+    for bad in ["1. [si contient:x] Liste", "1. Liste\n2. [si contient:] Lis", "1. Liste\n2. [si contient:a]b] Lis"] {
+        assert_eq!(workflow_steps(&format!("{header}\n{bad}")), Err("WORKFLOW_INVALID"), "{bad}");
+    }
+    assert!(condition_met(Some("Rapport"), "Le RAPPORT est prêt") && !condition_met(Some("x"), "rien"));
+    assert!(condition_met(None, ""));
 }
 
 struct ResetSlot<'a>(&'a TaskSlot);

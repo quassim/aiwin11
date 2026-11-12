@@ -2,7 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
 type Routine = { id: string; text: string; createdAt: string; schedule?: string };
-type WorkflowStep = { text: string; onFailure: boolean; branches?: [number, number] };
+type WorkflowStep = {
+  text: string;
+  onFailure: boolean;
+  branches?: [number, number];
+  retry?: boolean;
+  condition?: string;
+};
 const workflowHeader = "Exécute ces étapes dans l’ordre. Si une étape échoue, arrête-toi et explique pourquoi.";
 const failurePrefix = "[si échec] ";
 const maxRoutineChars = 1000;
@@ -22,7 +28,7 @@ function formatWorkflow(steps: WorkflowStep[]) {
     workflowHeader,
     ...steps.map(
       (step, index) =>
-        `${index + 1}. ${step.onFailure ? failurePrefix : ""}${step.branches ? `[suite:${step.branches.join("/")}] ` : ""}${step.text.trim()}`,
+        `${index + 1}. ${step.onFailure ? failurePrefix : ""}${step.branches ? `[suite:${step.branches.join("/")}] ` : ""}${step.retry ? "[réessayer] " : ""}${step.condition?.trim() ? `[si contient:${step.condition.trim()}] ` : ""}${step.text.trim()}`,
     ),
   ].join("\n");
 }
@@ -48,8 +54,9 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
         (index > 0 || !step.onFailure) &&
         step.text.trim() &&
         !step.text.trim().startsWith(failurePrefix) &&
-        !step.text.trim().startsWith("[suite:") &&
-        !/[\r\n\0]/.test(step.text),
+        !step.text.trim().startsWith("[") &&
+        !/[\r\n\0]/.test(step.text) &&
+        (!step.condition?.trim() || (index > 0 && step.condition.trim().length <= 40 && !step.condition.includes("]"))),
     ) && workflowLength <= maxRoutineChars;
 
   async function load() {
@@ -86,9 +93,17 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
           const onFailure = text.startsWith(failurePrefix);
           const body = onFailure ? text.slice(failurePrefix.length) : text;
           const route = /^\[suite:(\d+)\/(\d+)\] (.*)$/.exec(body);
-          return route
-            ? { text: route[3], onFailure, branches: [Number(route[1]), Number(route[2])] }
-            : { text: body, onFailure };
+          let rest = route ? route[3] : body;
+          const retry = rest.startsWith("[réessayer] ");
+          if (retry) rest = rest.slice("[réessayer] ".length);
+          const test = /^\[si contient:([^\]]+)\] (.*)$/.exec(rest);
+          return {
+            text: test ? test[2] : rest,
+            onFailure,
+            branches: route ? ([Number(route[1]), Number(route[2])] as [number, number]) : undefined,
+            retry,
+            condition: test ? test[1] : undefined,
+          };
         }),
     );
     setStatus("");
@@ -148,14 +163,17 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
 
   async function schedule(id: string, time: string | null, selected = everyDay) {
     try {
-      const value = time && time !== "startup" && selected !== everyDay ? `${time}@${selected}` : time;
+      const value =
+        time && time !== "startup" && time !== "folder" && selected !== everyDay ? `${time}@${selected}` : time;
       await invoke("set_routine_schedule", { id, schedule: value });
       setStatus(
         time === "startup"
           ? "Au prochain démarrage d’AiWin11, au plus une fois par jour (modèle local, lecture seule)."
-          : time
-            ? `Planifiée à ${time} les jours sélectionnés (modèle local, lecture seule, AiWin11 doit être ouvert).`
-            : "Planification retirée.",
+          : time === "folder"
+            ? "Exécutée quand le dossier de l’agent change (vérifié toutes les 30 secondes, modèle local, lecture seule)."
+            : time
+              ? `Planifiée à ${time} les jours sélectionnés (modèle local, lecture seule, AiWin11 doit être ouvert).`
+              : "Planification retirée.",
       );
       await load();
     } catch {
@@ -228,6 +246,27 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
                       />
                       <span>Si échec de la dernière étape exécutée</span>
                     </label>
+                  )}
+                  <label className="approval">
+                    <input
+                      type="checkbox"
+                      checked={!!step.retry}
+                      onChange={(event) => updateStep(index, { retry: event.target.checked })}
+                    />
+                    <span>Réessayer une fois si rien n’a pu être fait</span>
+                  </label>
+                  {index > 0 && (
+                    <>
+                      <label htmlFor={`workflow-condition-${index}`}>
+                        Seulement si la réponse précédente contient (facultatif)
+                      </label>
+                      <input
+                        id={`workflow-condition-${index}`}
+                        value={step.condition ?? ""}
+                        maxLength={40}
+                        onChange={(event) => updateStep(index, { condition: event.target.value })}
+                      />
+                    </>
                   )}
                   <label className="approval">
                     <input
@@ -337,7 +376,10 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
         <ul>
           {routines.map((routine) => {
             const atStartup = routine.schedule === "startup";
-            const [savedTime, savedDays = everyDay] = (atStartup ? "" : (routine.schedule ?? "")).split("@");
+            const onFolder = routine.schedule === "folder";
+            const [savedTime, savedDays = everyDay] = (atStartup || onFolder ? "" : (routine.schedule ?? "")).split(
+              "@",
+            );
             const time = times[routine.id] ?? savedTime;
             const selected = days[routine.id] ?? savedDays;
             return (
@@ -389,7 +431,11 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
                   <button type="button" disabled={atStartup} onClick={() => void schedule(routine.id, "startup")}>
                     Au démarrage
                   </button>
+                  <button type="button" disabled={onFolder} onClick={() => void schedule(routine.id, "folder")}>
+                    Quand le dossier change
+                  </button>
                   {atStartup && <p>Prévu au démarrage d’AiWin11.</p>}
+                  {onFolder && <p>Exécutée quand un fichier du dossier de l’agent est ajouté, modifié ou retiré.</p>}
                   {routine.schedule && (
                     <button type="button" onClick={() => void schedule(routine.id, null)}>
                       Déplanifier

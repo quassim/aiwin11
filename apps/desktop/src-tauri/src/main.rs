@@ -1246,8 +1246,28 @@ fn set_routine_schedule(
     lock_core(&state.core).set_routine_schedule(&id, schedule.as_deref())
 }
 
-/// Runs saved requests at their daily time: local model, Observation profile, result kept
-/// encrypted. Skipped while another task runs.
+/// What the agent's primary folder holds now (names, sizes, write times), as a short hash.
+fn folder_stamp(state: &AppState) -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let root = state.files.as_ref()?.root().to_path_buf();
+    let mut entries: Vec<(String, u64, u128)> = fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .take(10_000)
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            let modified = metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+            Some((entry.file_name().to_string_lossy().into_owned(), metadata.len(), modified))
+        })
+        .collect();
+    entries.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    entries.hash(&mut hasher);
+    Some(format!("{:016x}", hasher.finish()))
+}
+
+/// Runs saved requests at their daily time, at startup or when the agent's folder changes:
+/// local model, Observation profile, result kept encrypted. Skipped while another task runs.
 fn run_scheduler(state: Arc<AppState>) {
     let mut startup = true;
     loop {
@@ -1260,6 +1280,10 @@ fn run_scheduler(state: Arc<AppState>) {
                     return false;
                 }
                 let Ok(due) = core.take_due_routine(startup) else { return false };
+                let due = match due {
+                    Some(routine) => Some(routine),
+                    None => folder_stamp(&state).and_then(|stamp| core.take_folder_routine(&stamp).ok().flatten()),
+                };
                 let Some(routine) = due else {
                     startup = false;
                     return false;

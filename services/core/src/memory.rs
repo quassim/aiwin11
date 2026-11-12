@@ -43,8 +43,11 @@ pub struct IndexedFile {
 }
 
 pub fn valid_schedule(value: &str) -> bool {
-    value == "startup" || schedule_parts(value).is_some()
+    value == "startup" || value == FOLDER_TRIGGER || schedule_parts(value).is_some()
 }
+
+/// Trigger: the agent's primary folder changed (a file added, removed or modified).
+pub const FOLDER_TRIGGER: &str = "folder";
 
 /// SQLite weekday digits run from Sunday (0) through Saturday (6).
 fn schedule_parts(value: &str) -> Option<(&str, &str)> {
@@ -403,6 +406,34 @@ impl Core {
                 )
                 .map_err(|_| "MEMORY_UNAVAILABLE")?;
             if marked == 1 {
+                return Ok(Some(routine));
+            }
+        }
+        Ok(None)
+    }
+
+    /// A saved request triggered by a change of the agent's folder. `stamp` describes the
+    /// folder now; the first stamp seen for a request only becomes its reference (nothing runs
+    /// when the trigger is set), then each new stamp runs it once.
+    pub fn take_folder_routine(&mut self, stamp: &str) -> Result<Option<MemoryEntry>, &'static str> {
+        let marker = format!("folder:{stamp}");
+        let triggered: Vec<MemoryEntry> = self
+            .entries("routine")?
+            .into_iter()
+            .filter(|routine| routine.schedule.as_deref() == Some(FOLDER_TRIGGER))
+            .collect();
+        for routine in triggered {
+            let previous: Option<String> = self
+                .db
+                .query_row("SELECT last_run FROM memory_entries WHERE id = ?1", [&routine.id], |row| row.get(0))
+                .map_err(|_| "MEMORY_UNAVAILABLE")?;
+            if previous.as_deref() == Some(marker.as_str()) {
+                continue;
+            }
+            self.db
+                .execute("UPDATE memory_entries SET last_run = ?2 WHERE id = ?1", params![routine.id, marker])
+                .map_err(|_| "MEMORY_UNAVAILABLE")?;
+            if previous.is_some_and(|value| value.starts_with("folder:")) {
                 return Ok(Some(routine));
             }
         }
@@ -796,6 +827,18 @@ mod tests {
         for invalid in ["07:30@", "07:30@11", "07:30@7", "07:30@51", "07:30@1@2"] {
             assert!(!valid_schedule(invalid));
         }
+    }
+
+    #[test]
+    fn a_folder_trigger_runs_once_per_change_and_never_when_set() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let id = core.save_routine("Résume les nouveaux fichiers").unwrap();
+        core.set_routine_schedule(&id, Some(FOLDER_TRIGGER)).unwrap();
+        assert!(core.take_folder_routine("a").unwrap().is_none(), "the first state is the reference");
+        assert!(core.take_folder_routine("a").unwrap().is_none());
+        assert_eq!(core.take_folder_routine("b").unwrap().unwrap().id, id);
+        assert!(core.take_folder_routine("b").unwrap().is_none(), "once per change");
+        assert!(!valid_schedule("dossier"));
     }
 
     #[test]
