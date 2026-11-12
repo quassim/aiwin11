@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { CloudCostSettings } from "./CloudCost";
 import { placementAdvice, placementLabel, type LoadedModel } from "./placement";
 
 const tasks: { name: string; status: string }[] = [
@@ -170,6 +171,7 @@ export function Routing({
           ))}
         </select>
       </div>
+      <CloudCostSettings />
       <div className="task-form">
         <label htmlFor="image-endpoint">Moteur d’images local (API AUTOMATIC1111, sur ce PC uniquement)</label>
         <input

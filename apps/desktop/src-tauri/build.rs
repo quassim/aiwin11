@@ -68,6 +68,7 @@ fn main() {
         "get_cloud_vendor",
         "set_cloud_vendor",
         "get_cloud_budget",
+        "get_cloud_cost",
         "get_cloud_usage",
         "get_runtime_status",
         "video_status",
@@ -76,6 +77,7 @@ fn main() {
         "check_update",
         "install_update",
         "set_cloud_budget",
+        "set_cloud_cost",
         "set_cloud_fallback",
         "get_model_resources",
     ])))

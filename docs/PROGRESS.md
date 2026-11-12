@@ -20,6 +20,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Placement des modèles chargés (`gpu`, `partial`, `cpu`, `unknown`, pourcentage sur le GPU) dans le Centre de contrôle et **Modèles**, avec un conseil en cas de repli sur le processeur. Vérifié par `verify.ps1`, non testé avec Ollama réel.
 
+- Plafond de coût par demande cloud : tarif par million de jetons et coût maximal saisis dans **Modèles** (aucun prix intégré), vérifiés avant chaque appel (`CLOUD_COST_EXCEEDED`) ; le Centre de contrôle estime le coût sur 30 jours avec ce tarif (l’ancien tarif du navigateur est repris). Vérifié par `verify.ps1`, non testé avec une vraie clé.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

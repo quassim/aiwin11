@@ -844,9 +844,9 @@ impl TaskSlot {
             .filter(|model| local && request.cloud_approved && !model.is_empty() && model.len() <= 256);
         let mut cloud_model: Option<&str> = (!local).then_some(request.model.as_str());
         // Checked before each cloud call: a task never starts a call once its budget is spent.
-        let (budget, vendor) = {
+        let (budget, cost, vendor) = {
             let core = lock(core)?;
-            (core.cloud_token_budget(), core.cloud_vendor())
+            (core.cloud_token_budget(), core.cloud_cost(), core.cloud_vendor())
         };
         let mut cloud_tokens: u64 = 0;
         let mut history: Vec<StepRecord> = Vec::new();
@@ -888,6 +888,11 @@ impl TaskSlot {
                 Some(_) if cloud_tokens >= budget => {
                     record_code(core, task, "model.budget.exceeded", &format!("tokens:{cloud_tokens}"))?;
                     return Err("CLOUD_BUDGET_EXCEEDED");
+                }
+                // Estimated from the price the user entered; checked before each call like the tokens.
+                Some(_) if cost.exceeded(cloud_tokens) => {
+                    record_code(core, task, "model.cost.exceeded", &format!("milli:{}", cost.estimate(cloud_tokens)))?;
+                    return Err("CLOUD_COST_EXCEEDED");
                 }
                 Some(model) => openai::propose(vendor, model, &openai_messages(prompt, &history), &mut sink).map(
                     |(proposal, used)| {

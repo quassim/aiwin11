@@ -46,7 +46,7 @@ Le **Centre de contrôle** affiche l’état de l’assistant, le profil de séc
 
 Dans **Modèles**, **Choix du modèle local** décide quel modèle Ollama traite une demande interactive : **Manuel** (le modèle choisi), **Adaptatif** (le modèle le plus chargé en VRAM), **Qualité d’abord** (le plus gros modèle installé capable d’appeler des outils) ou **Économie** (un modèle déjà chargé en mémoire, le plus léger, pour ne rien charger de nouveau). AiWin11 teste l’appel d’outil avant d’utiliser un modèle différent ; en cas d’échec, il garde le modèle choisi. L’interface affiche la raison du choix. Hors du mode Manuel, le secours cloud est désactivé.
 
-Le centre de contrôle affiche aussi les composants détectés et les jetons cloud journalisés sur les 30 derniers jours. Tu peux saisir un tarif moyen par million de jetons pour obtenir une estimation.
+Le centre de contrôle affiche aussi les composants détectés et les jetons cloud journalisés sur les 30 derniers jours. Dans **Modèles**, tu peux saisir le tarif de ton fournisseur par million de jetons et un coût maximal par demande : le centre de contrôle estime alors le coût, et une demande cloud s’arrête (`CLOUD_COST_EXCEEDED`) avant l’appel qui dépasserait ce plafond. Aucun prix n’est intégré à l’application.
 
 Dans **Modèles → Importer ou exporter les choix de modèles**, le JSON v1 contient le mode local ou cloud et les identifiants de modèles. Les clés, les accords d’envoi et le fournisseur cloud sélectionné restent propres à chaque installation.
 

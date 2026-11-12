@@ -196,7 +196,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 |---|---|---|---|
 | Limites d’un agent : `max_steps` 30, `max_tool_calls` 50, `max_runtime_seconds` 900, `max_parallel_tools` 2, `retry_limit` 2, `verification_required` | [S1 §5.1] | 🟡 16 étapes et 15 minutes max, une action à la fois, vérification par outil ; pas de reprise automatique | R8 |
 | Résilience : la panne d’un provider ou d’un agent ne fait pas tomber le noyau ; « crash d’un agent : core et interface restent fonctionnels » | [S0 §8][S1 §11] | 🟡 Agent Python, pont, assistant et serveurs MCP en processus séparés avec délais ; le verrou du cœur se rétablit après une panique (une commande en échec ne bloque plus l’application) ; non testé par injection de pannes | R4, R9 |
-| Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud | [S1 §9] | ❌ | R3 |
+| Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud | [S1 §9] | ✅ Tarif par million de jetons et plafond par demande saisis par l’utilisateur (aucun prix intégré), coût estimé vérifié avant chaque appel cloud (`CLOUD_COST_EXCEEDED`), en plus du plafond de jetons | R3 |
 | Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud | [V][S0 §8][S1 §4.3], T-011 | ✅ Interrupteur **Mode privé** (Sécurité), aucun fallback automatique | — |
 | Intégration profonde : agent permanent, interfaces contextuelles, événements Windows, automatisation proactive | [V §7] | ❌ | R5, R8 |
 | Zero-trust entre agents et outils ; un agent ne transmet pas d’autorisation à un autre | [S0 §10][S1 §6.3] | ✅ pour l’agent unique (broker, identité attribuée par le cœur) ; à revalider avec le multi-agents | R8 |

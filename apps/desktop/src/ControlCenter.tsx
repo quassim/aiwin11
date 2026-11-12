@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { type CloudCost, euros, loadCloudCost } from "./CloudCost";
 import { type LoadedModel, placementAdvice, placementLabel } from "./placement";
 import { Updates } from "./Updates";
 
@@ -12,7 +13,6 @@ type RuntimeStatus = {
   python: boolean;
   adminHelper: boolean;
 };
-const rateKey = "aiwin11-cloud-eur-per-million";
 
 const profiles: Record<string, string> = {
   observation: "Observation",
@@ -47,7 +47,7 @@ export function ControlCenter({
   const [loaded, setLoaded] = useState<LoadedModel[]>();
   const [usage, setUsage] = useState<CloudUsage>();
   const [runtime, setRuntime] = useState<RuntimeStatus>();
-  const [rate, setRate] = useState(() => localStorage.getItem(rateKey) ?? "");
+  const [cost, setCost] = useState<CloudCost>();
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
 
@@ -59,13 +59,15 @@ export function ControlCenter({
       invoke<LoadedModel[]>("get_model_resources"),
       invoke<CloudUsage>("get_cloud_usage"),
       invoke<RuntimeStatus>("get_runtime_status"),
-    ]).then(([nextPolicy, nextPrivacy, nextLoaded, nextUsage, nextRuntime]) => {
+      loadCloudCost(),
+    ]).then(([nextPolicy, nextPrivacy, nextLoaded, nextUsage, nextRuntime, nextCost]) => {
       if (!current) return;
       setPolicy(nextPolicy.status === "fulfilled" ? nextPolicy.value : undefined);
       setPrivacy(nextPrivacy.status === "fulfilled" ? nextPrivacy.value : undefined);
       setLoaded(nextLoaded.status === "fulfilled" ? nextLoaded.value : undefined);
       setUsage(nextUsage.status === "fulfilled" ? nextUsage.value : undefined);
       setRuntime(nextRuntime.status === "fulfilled" ? nextRuntime.value : undefined);
+      setCost(nextCost.status === "fulfilled" ? nextCost.value : undefined);
       setLoading(false);
     });
     return () => {
@@ -135,29 +137,13 @@ export function ControlCenter({
             {usage.tokens.toLocaleString("fr-FR")} jetons · {usage.tasks.toLocaleString("fr-FR")} demandes enregistrées
             sur 30 jours.
           </p>
-          <label htmlFor="cloud-rate">Tarif moyen estimé en euros par million de jetons</label>
-          <input
-            id="cloud-rate"
-            type="number"
-            min="0"
-            max="100000"
-            step="any"
-            value={rate}
-            onChange={(event) => {
-              const value = event.target.value;
-              setRate(value);
-              if (event.target.validity.valid) localStorage.setItem(rateKey, value);
-            }}
-          />
-          {rate !== "" && Number(rate) >= 0 && Number(rate) <= 100000 && (
+          {cost?.priceMilliPerMillion ? (
             <p>
-              Coût estimé{" "}
-              {((usage.tokens * Number(rate)) / 1_000_000).toLocaleString("fr-FR", {
-                style: "currency",
-                currency: "EUR",
-                maximumFractionDigits: 4,
-              })}
+              Coût estimé {euros(Math.ceil((usage.tokens * cost.priceMilliPerMillion) / 1_000_000))} au tarif saisi
+              {cost.maxMilliPerTask ? `, plafond de ${euros(cost.maxMilliPerTask)} par demande` : ""}.
             </p>
+          ) : (
+            <p>Saisis le tarif de ton fournisseur dans la page Modèles pour estimer le coût.</p>
           )}
         </>
       ) : (

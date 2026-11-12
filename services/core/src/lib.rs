@@ -197,6 +197,35 @@ pub struct CloudUsage {
     pub tasks: u64,
 }
 
+/// Cloud cost settings, entered by the user: no price is hard-coded ([S1 §9]).
+/// Amounts are in thousandths of the billing currency (shown in euros); 0 means "not set".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCost {
+    /// Price of one million tokens (input and output blended), as charged by the provider.
+    pub price_milli_per_million: u64,
+    /// Most one task may cost; checked before each cloud call. Needs a price.
+    pub max_milli_per_task: u64,
+}
+
+/// Highest accepted amount: 1 000 units of the currency.
+pub const MAX_COST_MILLI: u64 = 1_000_000;
+
+impl CloudCost {
+    /// Estimated cost of `tokens`, rounded up, in thousandths of the currency.
+    pub fn estimate(self, tokens: u64) -> u64 {
+        let cost = (u128::from(tokens) * u128::from(self.price_milli_per_million)).div_ceil(1_000_000);
+        u64::try_from(cost).unwrap_or(u64::MAX)
+    }
+
+    /// True once `tokens` reach the per-task cap; never true without both a price and a cap.
+    pub fn exceeded(self, tokens: u64) -> bool {
+        self.price_milli_per_million > 0
+            && self.max_milli_per_task > 0
+            && self.estimate(tokens) >= self.max_milli_per_task
+    }
+}
+
 /// One chat task as persisted, for the activity page and recovery.
 #[derive(Debug, PartialEq, Eq)]
 pub struct TaskRecord {
@@ -544,6 +573,54 @@ impl Core {
             .and_then(|value| value.parse().ok())
             .filter(|budget| (1_000..=2_000_000).contains(budget))
             .unwrap_or(50_000)
+    }
+
+    /// Cloud price and per-task cost cap; unreadable or out-of-range values mean "not set".
+    pub fn cloud_cost(&self) -> CloudCost {
+        let read = |key: &str| {
+            self.setting(key)
+                .ok()
+                .flatten()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|amount| *amount <= MAX_COST_MILLI)
+                .unwrap_or(0)
+        };
+        CloudCost {
+            price_milli_per_million: read("routing.cloud_price_milli"),
+            max_milli_per_task: read("routing.cloud_max_cost_milli"),
+        }
+    }
+
+    pub fn set_cloud_cost(&mut self, cost: CloudCost) -> Result<(), &'static str> {
+        if cost.price_milli_per_million > MAX_COST_MILLI || cost.max_milli_per_task > MAX_COST_MILLI {
+            return Err("SETTINGS_INVALID");
+        }
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            for (key, value) in [
+                ("routing.cloud_price_milli", cost.price_milli_per_million),
+                ("routing.cloud_max_cost_milli", cost.max_milli_per_task),
+            ] {
+                transaction.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                    params![key, value.to_string()],
+                )?;
+            }
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.cost.changed', 'core', ?3)",
+                params![
+                    Uuid::new_v4().to_string(),
+                    session,
+                    format!("price:{}+max:{}", cost.price_milli_per_million, cost.max_milli_per_task)
+                ],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
     /// Retained cumulative cloud counters, counted once per task across sessions.
@@ -1144,6 +1221,31 @@ mod tests {
         assert!(core.cloud_fallback_enabled());
         core.db.execute("DROP TABLE settings", []).unwrap();
         assert!(!core.cloud_fallback_enabled(), "an unreadable setting never allows the cloud");
+    }
+
+    #[test]
+    fn cloud_cost_is_user_entered_bounded_and_estimated_rounding_up() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert_eq!(core.cloud_cost(), CloudCost::default(), "nothing set by default");
+        let too_high = CloudCost { price_milli_per_million: MAX_COST_MILLI + 1, max_milli_per_task: 0 };
+        assert_eq!(core.set_cloud_cost(too_high), Err("SETTINGS_INVALID"));
+        // 0.150 per million tokens, at most 0.010 per task.
+        let cost = CloudCost { price_milli_per_million: 150, max_milli_per_task: 10 };
+        core.set_cloud_cost(cost).unwrap();
+        assert_eq!(core.cloud_cost(), cost);
+        assert_eq!(core.activity().unwrap()[0].code.as_deref(), Some("price:150+max:10"));
+        assert_eq!(cost.estimate(0), 0);
+        assert_eq!(cost.estimate(1), 1, "rounded up");
+        assert_eq!(cost.estimate(60_000), 9);
+        assert!(!cost.exceeded(60_000));
+        assert!(cost.exceeded(66_667));
+        assert!(!CloudCost { max_milli_per_task: 0, ..cost }.exceeded(u64::MAX), "no cap");
+        assert!(!CloudCost { price_milli_per_million: 0, ..cost }.exceeded(u64::MAX), "no price");
+        assert_eq!(
+            CloudCost { price_milli_per_million: MAX_COST_MILLI, ..cost }.estimate(u64::MAX),
+            u64::MAX,
+            "no overflow"
+        );
     }
 
     #[test]

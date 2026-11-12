@@ -14,7 +14,7 @@ use aiwin11_core::{
     policy::{self, AgentAction, Effect, PolicySettings},
     task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
-    Core, ModelFacts, ModelManifest, ModelPreferences, ToolCalling,
+    CloudCost, Core, ModelFacts, ModelManifest, ModelPreferences, ToolCalling,
 };
 use serde::Serialize;
 use tauri::{ipc::Channel, Manager, State};
@@ -633,6 +633,16 @@ fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), 
     lock_core(&state.core).set_cloud_token_budget(tokens)
 }
 
+#[tauri::command]
+fn get_cloud_cost(state: State<'_, Arc<AppState>>) -> CloudCost {
+    lock_core(&state.core).cloud_cost()
+}
+
+#[tauri::command]
+fn set_cloud_cost(state: State<'_, Arc<AppState>>, cost: CloudCost) -> Result<(), &'static str> {
+    lock_core(&state.core).set_cloud_cost(cost)
+}
+
 fn cloud_vendor(state: &State<'_, Arc<AppState>>) -> Result<openai::Vendor, &'static str> {
     Ok(lock_core(&state.core).cloud_vendor())
 }
@@ -1042,6 +1052,7 @@ fn main() {
             get_cloud_vendor,
             set_cloud_vendor,
             get_cloud_budget,
+            get_cloud_cost,
             get_cloud_usage,
             get_runtime_status,
             video_status,
@@ -1050,6 +1061,7 @@ fn main() {
             check_update,
             install_update,
             set_cloud_budget,
+            set_cloud_cost,
             set_cloud_fallback,
             get_model_resources,
             probe_local_model,

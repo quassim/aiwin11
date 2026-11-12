@@ -472,6 +472,7 @@ const taskErrors: Record<string, string> = {
   CLOUD_APPROVAL_REQUIRED: "Autorise la requête cloud pour cette demande.",
   CLOUD_KEY_REQUIRED: "Enregistre une clé API cloud dans Modèles.",
   CLOUD_BUDGET_EXCEEDED: "Le budget de jetons cloud de cette demande est atteint (page Modèles).",
+  CLOUD_COST_EXCEEDED: "Le coût maximal fixé pour cette demande cloud est atteint (page Modèles).",
   AGENT_TIME_LIMIT: "La demande a dépassé 15 minutes : elle a été arrêtée.",
   PRIVATE_MODE: "Le mode privé est activé (page Sécurité) : aucune requête n’est envoyée au cloud.",
   CLOUD_REQUEST_FAILED: "La requête cloud a échoué. Vérifie la clé, l’accès au modèle et la connexion.",

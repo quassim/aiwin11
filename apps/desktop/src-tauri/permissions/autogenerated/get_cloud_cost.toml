@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-cloud-cost"
+description = "Enables the get_cloud_cost command without any pre-configured scope."
+commands.allow = ["get_cloud_cost"]
+
+[[permission]]
+identifier = "deny-get-cloud-cost"
+description = "Denies the get_cloud_cost command without any pre-configured scope."
+commands.deny = ["get_cloud_cost"]
