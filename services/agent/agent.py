@@ -56,6 +56,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "inspect_window": {},
     "describe_window": {},
     "type_in_notepad": {"text": is_typed_text},
+    "list_processes": {},
 }
 
 # Tools whose two file names must differ (ignoring case).

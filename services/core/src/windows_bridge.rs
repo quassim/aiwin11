@@ -11,7 +11,8 @@ use std::{
 use aiwin11_contracts::{
     v1::{
         command::Operation, result::Status, AnalyzeCapture, CaptureForeground, CaptureWindow, CharacterMapDigit,
-        Command, InspectForeground, InspectWindow, LocateWindow, Result as BridgeReply, TypeInNotepad, UiTree,
+        Command, InspectForeground, InspectWindow, ListProcesses, LocateWindow, Result as BridgeReply, TypeInNotepad,
+        UiTree,
     },
     Message, SCHEMA_VERSION,
 };
@@ -37,6 +38,9 @@ const AGENT_DEADLINE_MS: i64 = 15_000;
 /// Largest command sent to the bridge: room for 2000 characters of Notepad text.
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_TREE_REPLY_BYTES: usize = 32 * 1024;
+const MAX_PROCESS_REPLY_BYTES: usize = 8 * 1024;
+/// Processes reported to the agent by `list_processes`.
+pub(crate) const AGENT_PROCESS_LIMIT: u32 = 15;
 const MAX_AGENT_NODES: usize = 80;
 
 /// A located window. Before approval, only the user sees its title and application.
@@ -183,6 +187,21 @@ impl Core {
                 title: info.title,
                 process_name: info.process_name,
             })
+        })
+    }
+
+    /// Agent tool: read-only snapshot of the processes using the most memory.
+    pub(crate) fn agent_list_processes(&mut self, task: &str, policy: Policy) -> Result<ProcessSnapshot, &'static str> {
+        let operation = Operation::ListProcesses(ListProcesses { limit: AGENT_PROCESS_LIMIT });
+        self.agent_bridge_call(task, policy, operation, "process.list", |reply| {
+            if reply.ui_tree.is_some()
+                || reply.window_capture.is_some()
+                || reply.window_info.is_some()
+                || reply.process_id.is_some()
+            {
+                return None;
+            }
+            accept_process_list(reply.process_list?)
         })
     }
 
@@ -427,6 +446,51 @@ fn spawn_bridge() -> Option<std::process::Child> {
 
 /// Starts the spare bridge if none is waiting. Called at application start and after each
 /// dispatch. Failures are ignored: `dispatch` then starts a bridge on demand.
+/// One process as reported to the agent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessInfo {
+    pub process_id: u32,
+    pub name: String,
+    pub working_set_bytes: u64,
+    pub cpu_time_ms: u64,
+    pub has_window: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessSnapshot {
+    pub processes: Vec<ProcessInfo>,
+    pub total: u32,
+}
+
+/// Validates the bridge's process list: bounded size, real IDs, short printable names,
+/// sorted by memory as requested.
+fn accept_process_list(list: aiwin11_contracts::v1::ProcessList) -> Option<ProcessSnapshot> {
+    if list.processes.len() > AGENT_PROCESS_LIMIT as usize || (list.total as usize) < list.processes.len() {
+        return None;
+    }
+    let sorted = list.processes.windows(2).all(|pair| pair[0].working_set_bytes >= pair[1].working_set_bytes);
+    let valid = list.processes.iter().all(|entry| {
+        entry.process_id != 0
+            && !entry.name.is_empty()
+            && entry.name.chars().count() <= 64
+            && entry.name.chars().all(|c| !c.is_control())
+    });
+    (sorted && valid).then(|| ProcessSnapshot {
+        total: list.total,
+        processes: list
+            .processes
+            .into_iter()
+            .map(|entry| ProcessInfo {
+                process_id: entry.process_id,
+                name: entry.name,
+                working_set_bytes: entry.working_set_bytes,
+                cpu_time_ms: entry.cpu_time_ms,
+                has_window: entry.has_window,
+            })
+            .collect(),
+    })
+}
+
 pub fn prewarm_bridge() {
     if let Ok(mut spare) = SPARE_BRIDGE.lock() {
         if spare.is_none() {
@@ -472,6 +536,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
     let limit = match command.operation {
         Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
+        Some(Operation::ListProcesses(_)) => MAX_PROCESS_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -540,6 +605,51 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_lists_from_the_bridge_are_validated() {
+        use aiwin11_contracts::v1::{ProcessEntry, ProcessList};
+        let entry = |pid, name: &str, memory| ProcessEntry {
+            process_id: pid,
+            name: name.into(),
+            working_set_bytes: memory,
+            cpu_time_ms: 1,
+            has_window: false,
+        };
+        let good = ProcessList { processes: vec![entry(10, "chrome", 900), entry(11, "code", 500)], total: 120 };
+        let snapshot = accept_process_list(good).unwrap();
+        assert_eq!(snapshot.total, 120);
+        assert_eq!(snapshot.processes[0].name, "chrome");
+        for bad in [
+            ProcessList { processes: vec![entry(10, "a", 1), entry(11, "b", 2)], total: 2 },
+            ProcessList { processes: vec![entry(0, "Idle", 1)], total: 1 },
+            ProcessList { processes: vec![entry(4, "", 1)], total: 1 },
+            ProcessList { processes: vec![entry(4, "a\nb", 1)], total: 1 },
+            ProcessList { processes: vec![entry(4, &"x".repeat(65), 1)], total: 1 },
+            ProcessList { processes: vec![entry(4, "a", 1)], total: 0 },
+            ProcessList { processes: (1..=16).map(|pid| entry(pid, "p", 1)).collect(), total: 16 },
+        ] {
+            assert_eq!(accept_process_list(bad.clone()), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn lists_processes_through_the_broker_and_the_bridge() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let denied = core.agent_list_processes(&task, Policy::default());
+        assert_eq!(denied, Err("WINDOW_ACCESS_DENIED"));
+        let snapshot =
+            core.agent_list_processes(&task, Policy::granting(&[crate::broker::Capability::ProcessList])).unwrap();
+        assert!(!snapshot.processes.is_empty() && snapshot.total as usize >= snapshot.processes.len());
+        assert!(
+            snapshot.processes.iter().any(|process| process.process_id == std::process::id())
+                || snapshot.processes.len() == AGENT_PROCESS_LIMIT as usize
+        );
+        let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
+        assert!(kinds.contains(&"process.list.completed".to_owned()), "{kinds:?}");
+    }
 
     fn node(parent: u32, name: &str) -> aiwin11_contracts::v1::UiNode {
         aiwin11_contracts::v1::UiNode { parent, control_type: 50032, enabled: true, focused: false, name: name.into() }

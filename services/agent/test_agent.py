@@ -108,10 +108,10 @@ class AgentProtocolTest(unittest.TestCase):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("inspect_window", {})]}})
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout)["tool"], "inspect_window")
-        for tool in ["inspect_window", "describe_window"]:
+        for tool in ["inspect_window", "describe_window", "list_processes"]:
             result = self.invoke({"version": 2, "proposal": {"calls": [call(tool, {})]}})
             self.assertEqual(result.returncode, 0)
-            for arguments in [{"window": 123}, {"title": "Banque"}, {"process_id": 4}]:
+            for arguments in [{"window": 123}, {"title": "Banque"}, {"process_id": 4}, {"limit": 500}]:
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_rejected({"version": 2, "proposal": {"calls": [call(tool, arguments)]}})
 

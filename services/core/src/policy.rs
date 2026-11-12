@@ -79,10 +79,11 @@ pub enum AgentAction {
     InspectWindow,
     DescribeWindow,
     TypeText,
+    ListProcesses,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -92,6 +93,7 @@ impl AgentAction {
         Self::InspectWindow,
         Self::DescribeWindow,
         Self::TypeText,
+        Self::ListProcesses,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -109,6 +111,7 @@ impl AgentAction {
             Self::InspectWindow => "inspect_window",
             Self::DescribeWindow => "describe_window",
             Self::TypeText => "type_text",
+            Self::ListProcesses => "list_processes",
         }
     }
 
@@ -160,8 +163,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 9] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 10] = [
     (A::ListFiles, [E::Allow, E::Allow, E::Allow, E::Allow]),
+    (A::ListProcesses, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ReadFile, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::InspectWindow, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::DescribeWindow, [E::Ask, E::Ask, E::Ask, E::Ask]),

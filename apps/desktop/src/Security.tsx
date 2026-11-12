@@ -65,6 +65,7 @@ const actionNames: Record<string, string> = {
   inspectWindow: "Lire la structure d’une fenêtre",
   describeWindow: "Décrire une fenêtre (capture + vision locale)",
   typeText: "Écrire dans le Bloc-notes ouvert par l’agent",
+  listProcesses: "Lister les processus (lecture seule)",
 };
 
 const effectNames: Record<Effect, string> = {

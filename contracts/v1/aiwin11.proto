@@ -26,6 +26,7 @@ message Command {
     CaptureWindow capture_window = 21;
     TypeInNotepad type_in_notepad = 22;
     TrashLocalText trash_local_text = 23;
+    ListProcesses list_processes = 24;
   }
 }
 
@@ -45,6 +46,24 @@ message TypeInNotepad {
 message TrashLocalText {}
 
 message ListLocalText {}
+
+// Read-only snapshot of the processes using the most memory (at most 25).
+message ListProcesses { uint32 limit = 1; }
+
+message ProcessList {
+  repeated ProcessEntry processes = 1;
+  // Number of processes seen, before the limit.
+  uint32 total = 2;
+}
+
+message ProcessEntry {
+  uint32 process_id = 1;
+  // Executable name without extension, at most 64 characters.
+  string name = 2;
+  uint64 working_set_bytes = 3;
+  uint64 cpu_time_ms = 4;
+  bool has_window = 5;
+}
 
 // Finds the topmost visible, unowned application window that the given process
 // (the trusted host) does not own: the window the user was using before AiWin11.
@@ -122,6 +141,7 @@ message Result {
   UiTree ui_tree = 7;
   WindowCapture window_capture = 8;
   WindowInfo window_info = 9;
+  ProcessList process_list = 10;
 }
 
 message Error {

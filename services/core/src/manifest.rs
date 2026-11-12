@@ -13,7 +13,7 @@ use crate::policy::AgentAction;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Risk {
-    /// Reads AiWin11's own data; changes nothing.
+    /// Reads AiWin11's own data or system facts; changes nothing.
     Low,
     /// Changes something inside AiWin11's scope, or reads another application.
     Medium,
@@ -50,6 +50,7 @@ pub enum CapabilityName {
     WindowInspect,
     WindowCapture,
     TypeText,
+    ProcessList,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -78,7 +79,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 9] = [
+pub const MANIFESTS: [ToolManifest; 10] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -195,6 +196,19 @@ pub const MANIFESTS: [ToolManifest; 9] = [
         reversibility: R::Reversible,
         timeout_ms: 15_000,
         capabilities: &[C::TypeText],
+    },
+    ToolManifest {
+        action: AgentAction::ListProcesses,
+        tool: "list_processes",
+        version: 1,
+        risk: Risk::Low,
+        side_effect: false,
+        reads_screen: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 15_000,
+        capabilities: &[C::ProcessList],
     },
 ];
 

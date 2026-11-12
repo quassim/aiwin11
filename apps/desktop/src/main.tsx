@@ -44,7 +44,8 @@ type ApprovalAction =
   | { kind: "trashFile"; name: string; characters: number }
   | { kind: "inspectWindow"; application: string; title: string }
   | { kind: "describeWindow"; application: string; title: string; model: string }
-  | { kind: "typeText"; text: string; characters: number };
+  | { kind: "typeText"; text: string; characters: number }
+  | { kind: "listProcesses" };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
@@ -65,6 +66,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "listProcesses") {
+    return {
+      title: "L’agent demande à lister les processus",
+      detail: "Action : lire les noms, la mémoire et le temps processeur des processus en cours. Rien n’est arrêté.",
     };
   }
   if (action.kind === "listFiles") {
@@ -136,6 +143,8 @@ const activityNames: Record<string, string> = {
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
   "history.exported": "Journal d’audit exporté",
+  "process.list.completed": "Processus listés par l’agent",
+  "process.list.failed": "Liste des processus impossible",
   "grant.created": "Autorisation temporaire accordée",
   "grant.revoked": "Autorisation temporaire révoquée",
   "model.cloud.authorized": "Requête OpenAI autorisée",

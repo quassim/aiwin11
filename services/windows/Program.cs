@@ -35,7 +35,7 @@ var elapsed = Stopwatch.StartNew();
 if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", out _)
     || (command.InspectForeground is null && command.CaptureForeground is null && command.CharacterMapDigit is null
         && command.LocateWindow is null && command.InspectWindow is null && command.TypeInNotepad is null
-        && command.CaptureWindow is null
+        && command.CaptureWindow is null && command.ListProcesses is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -79,6 +79,16 @@ else if (command.CaptureWindow is { } captureTarget)
         or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
     {
         Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the window.");
+    }
+}
+else if (command.ListProcesses is { } listing)
+{
+    if (listing.Limit == 0 || listing.Limit > ProcessLister.MaxLimit)
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_limit", "The limit must be between 1 and 25.");
+    else
+    {
+        result.ProcessList = ProcessLister.Read(listing.Limit);
+        result.Status = Protocol.Result.Types.Status.Success;
     }
 }
 else if (command.LocateWindow is { } locate)

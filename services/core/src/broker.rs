@@ -40,6 +40,8 @@ pub enum Capability {
     WindowCapture = 1 << 7,
     /// Type text into a Notepad window the same task launched.
     TypeText = 1 << 8,
+    /// Read a snapshot of running processes (names, IDs, memory, CPU time). Read-only.
+    ProcessList = 1 << 9,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -111,6 +113,11 @@ impl Policy {
             Some(Operation::LocateWindow(_)) if agent(Capability::WindowLookup) => Ok("locate_window"),
             Some(Operation::InspectWindow(_)) if agent(Capability::WindowInspect) => Ok("inspect_window"),
             Some(Operation::CaptureWindow(_)) if agent(Capability::WindowCapture) => Ok("capture_window"),
+            Some(Operation::ListProcesses(listing))
+                if agent(Capability::ProcessList) && (1..=25).contains(&listing.limit) =>
+            {
+                Ok("list_processes")
+            }
             Some(Operation::TypeInNotepad(input))
                 if agent(Capability::TypeText) && !input.text.is_empty() && input.text.chars().count() <= 2000 =>
             {
@@ -414,6 +421,27 @@ mod tests {
                 command.operation = Some(operation.clone());
                 assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
             }
+        }
+    }
+
+    #[test]
+    fn process_listing_needs_its_own_grant_and_a_bounded_limit() {
+        use aiwin11_contracts::v1::ListProcesses;
+        let listing = Policy::granting(&[Capability::ProcessList]);
+        let others = Policy::granting(&[Capability::WindowInspect, Capability::FileRead, Capability::LaunchNotepad]);
+        for (policy, peer, limit, expected) in [
+            (listing, Peer::Agent, 15, true),
+            (listing, Peer::Agent, 25, true),
+            (listing, Peer::Agent, 0, false),
+            (listing, Peer::Agent, 26, false),
+            (others, Peer::Agent, 15, false),
+            (listing, Peer::DesktopInspector, 15, false),
+            (listing, Peer::Other, 15, false),
+        ] {
+            let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+            let mut command = request(&core);
+            command.operation = Some(Operation::ListProcesses(ListProcesses { limit }));
+            assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{peer:?} {limit}");
         }
     }
 

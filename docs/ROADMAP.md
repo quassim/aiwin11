@@ -145,7 +145,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Windows Bridge — WindowService (List, Focus, Resize, Minimize, Close) | ❌ | R2 |
 | ApplicationService (Discover, Launch, GetStatus) | 🟡 Launch Bloc-notes | R2 |
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ❌) | 🟡 | R2 |
-| ProcessService (List, Inspect, Terminate) | ❌ | R2 |
+| ProcessService (List ✅ lecture seule, Inspect ❌, Terminate ❌) | 🟡 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre | R2 |
 | UIAutomationService (InspectTree ✅, FindElement, Invoke, SetValue) | 🟡 | R2 |
 | InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
