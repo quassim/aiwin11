@@ -6,6 +6,7 @@ import { LocalFiles } from "./LocalFiles";
 import { History } from "./History";
 import { Memory } from "./Memory";
 import { Routines } from "./Routines";
+import { autoSpeak, speak, SpeechControls } from "./Speech";
 import { Routing } from "./Routing";
 import { Security } from "./Security";
 import "./style.css";
@@ -574,6 +575,7 @@ function App() {
         progress,
       });
       setAgentReply(outcome.reply);
+      if (autoSpeak()) speak(outcome.reply);
       setActionReports(outcome.actions);
       setTaskStatus("");
       setPrompt("");
@@ -670,6 +672,7 @@ function App() {
                 {agentReply}
               </p>
             )}
+            {agentReply && <SpeechControls text={agentReply} />}
             {actionReports.length > 0 && (
               <section className="action-report" aria-labelledby="report-heading">
                 <h3 id="report-heading">Actions réellement effectuées</h3>

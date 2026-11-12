@@ -287,6 +287,8 @@ Migration 004 adds `memory_entries` (`id`, `created_at`, `content`). `content` i
 
 `search_memory { query }` (read, allowed) returns the 5 closest notes: cosine similarity of local embeddings (`/api/embed`, model `memory.embedding_model`, set in the Mémoire page; vectors computed on demand, never stored) or, without a model or on any embedding error, keyword overlap.
 
+Speech (R7, window only): replies can be read aloud with `speechSynthesis`, restricted to voices with `localService === true` (Windows voices on this PC; online voices are never used). Speech recognition is not offered: WebView2's recognizer is an online service.
+
 Saved requests (migration 005, `memory_entries.kind = 'routine'`, same DPAPI encryption): `save_routine { text }`, `get_routines`, deletion with `delete_memory { id }` (clearing all notes keeps routines). Picking one only fills the request field: it never runs without the user sending it.
 
 ## Storage invariant: nothing sensitive in SQLite

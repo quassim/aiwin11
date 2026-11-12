@@ -6,7 +6,8 @@ type LoadedModel = { name: string; size: number; size_vram: number };
 const tasks: { name: string; status: string }[] = [
   { name: "Texte et actions Windows", status: "Modèle choisi ci-dessous (local ou cloud)" },
   { name: "Vision (description de fenêtre)", status: "Modèle de vision local choisi ci-dessous" },
-  { name: "Reconnaissance et synthèse vocale", status: "Pas encore disponible (phase R7)" },
+  { name: "Synthèse vocale", status: "Voix Windows locale (français si installée)" },
+  { name: "Reconnaissance vocale", status: "Pas encore disponible : aucun moteur local (phase R7)" },
   { name: "Génération d’images", status: "Pas encore disponible (phase R7)" },
   { name: "Génération vidéo", status: "Pas encore disponible (phase R7)" },
 ];

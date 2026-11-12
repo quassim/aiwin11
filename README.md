@@ -104,6 +104,10 @@ Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant d
 
 Dans **Activité**, la section **Historique et journal d’audit** règle la durée de conservation des sessions passées (90 jours par défaut ; les plus anciennes sont supprimées au démarrage), exporte le journal en JSON dans `%LOCALAPPDATA%\app.aiwin11.desktop\exports` et efface l’historique des sessions passées après confirmation (irréversible).
 
+### Lecture à voix haute
+
+Sous chaque réponse, **Lire à voix haute** utilise une voix Windows installée sur le PC (jamais une voix en ligne). Coche **Lire chaque réponse automatiquement** pour l’entendre à chaque fois. Des voix françaises s’ajoutent dans Paramètres Windows → Heure et langue → Voix.
+
 ### Demandes enregistrées
 
 Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ; un clic sur une demande enregistrée la remet dans le champ, tu n’as plus qu’à l’envoyer.
