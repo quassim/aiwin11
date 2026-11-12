@@ -227,10 +227,10 @@ const activityNames: Record<string, string> = {
   "settings.models.changed": "Choix des modèles modifié",
   "settings.privacy.changed": "Mode privé modifié",
   "settings.routing.changed": "Routage des modèles modifié",
-  "model.usage": "Jetons OpenAI utilisés",
-  "model.budget.exceeded": "Budget OpenAI de la demande atteint",
-  "settings.budget.changed": "Budget OpenAI modifié",
-  "model.fallback.cloud": "Bascule vers OpenAI (Ollama indisponible, autorisée)",
+  "model.usage": "Jetons cloud utilisés",
+  "model.budget.exceeded": "Budget cloud de la demande atteint",
+  "settings.budget.changed": "Budget cloud modifié",
+  "model.fallback.cloud": "Bascule vers le cloud (Ollama indisponible, autorisée)",
   "settings.retention.changed": "Durée de conservation modifiée",
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
@@ -258,8 +258,8 @@ const activityNames: Record<string, string> = {
   "clipboard.write.failed": "Copie dans le presse-papiers impossible",
   "grant.created": "Autorisation temporaire accordée",
   "grant.revoked": "Autorisation temporaire révoquée",
-  "model.cloud.authorized": "Requête OpenAI autorisée",
-  "model.cloud.denied": "Requête OpenAI refusée",
+  "model.cloud.authorized": "Requête cloud autorisée",
+  "model.cloud.denied": "Requête cloud refusée",
   "agent.tool.requested": "Action demandée par l’agent",
   "agent.reply": "Réponse de l’agent",
   "agent.observation": "Résultat transmis à l’agent",
@@ -316,12 +316,12 @@ const activityNames: Record<string, string> = {
 const taskErrors: Record<string, string> = {
   PROMPT_INVALID: `Saisis une demande de ${MAX_PROMPT_CHARS} caractères au maximum.`,
   MODEL_REQUIRED: "Choisis un identifiant de modèle valide dans Modèles.",
-  CLOUD_APPROVAL_REQUIRED: "Autorise la requête OpenAI pour cette demande.",
-  CLOUD_KEY_REQUIRED: "Enregistre une clé API OpenAI dans Modèles.",
-  CLOUD_BUDGET_EXCEEDED: "Le budget de jetons OpenAI de cette demande est atteint (page Modèles).",
+  CLOUD_APPROVAL_REQUIRED: "Autorise la requête cloud pour cette demande.",
+  CLOUD_KEY_REQUIRED: "Enregistre une clé API cloud dans Modèles.",
+  CLOUD_BUDGET_EXCEEDED: "Le budget de jetons cloud de cette demande est atteint (page Modèles).",
   PRIVATE_MODE: "Le mode privé est activé (page Sécurité) : aucune requête n’est envoyée au cloud.",
-  CLOUD_REQUEST_FAILED: "La requête OpenAI a échoué. Vérifie la clé, l’accès au modèle et la connexion.",
-  CLOUD_PROPOSAL_INVALID: "Le modèle OpenAI n’a renvoyé ni réponse complète ni appel d’outil valide.",
+  CLOUD_REQUEST_FAILED: "La requête cloud a échoué. Vérifie la clé, l’accès au modèle et la connexion.",
+  CLOUD_PROPOSAL_INVALID: "Le modèle cloud n’a renvoyé ni réponse complète ni appel d’outil valide.",
   CREDENTIAL_STORE_UNAVAILABLE: "Le Gestionnaire d’identifiants Windows est indisponible.",
   INVALID_API_KEY: "Le format de la clé API est invalide.",
   MODEL_UNAVAILABLE_OR_INVALID:
@@ -362,6 +362,8 @@ function App() {
   const [cloudModel, setCloudModel] = useState("");
   const [cloudApproved, setCloudApproved] = useState(false);
   const [cloudFallback, setCloudFallback] = useState(false);
+  const [vendor, setVendor] = useState<"openai" | "deepseek">("openai");
+  const vendorName = vendor === "deepseek" ? "DeepSeek" : "OpenAI";
   const [keyConfigured, setKeyConfigured] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyStatus, setKeyStatus] = useState("");
@@ -434,6 +436,9 @@ function App() {
   }, []);
 
   useEffect(refresh, [refresh]);
+  useEffect(() => {
+    void invoke<"openai" | "deepseek">("get_cloud_vendor").then(setVendor, () => undefined);
+  }, []);
   useEffect(() => {
     // Ctrl+Alt+Espace from any application: open the request field, ready to type.
     const palette = () => {
@@ -602,7 +607,7 @@ function App() {
         </nav>
         <div className="connection">
           <span aria-hidden="true" />
-          {provider === "ollama" ? "Ollama · Local" : "OpenAI · Cloud"}
+          {provider === "ollama" ? "Ollama · Local" : `${vendorName} · Cloud`}
         </div>
         <button className="stop-all" onClick={() => void stopAll()} aria-describedby="stop-status">
           Stoppe toutes les tâches
@@ -727,7 +732,7 @@ function App() {
                     disabled={running}
                     onChange={(event) => setCloudApproved(event.target.checked)}
                   />
-                  Si Ollama est indisponible, envoyer cette demande à OpenAI ({cloudModel.trim()})
+                  Si Ollama est indisponible, envoyer cette demande à {vendorName} ({cloudModel.trim()})
                 </label>
               )}
               {provider === "openai" && (
@@ -738,7 +743,7 @@ function App() {
                     disabled={running}
                     onChange={(event) => setCloudApproved(event.target.checked)}
                   />
-                  Envoyer le texte de cette demande à OpenAI
+                  Envoyer le texte de cette demande à {vendorName}
                 </label>
               )}
               <div className="section-header">
@@ -771,7 +776,7 @@ function App() {
                 }}
               >
                 <option value="ollama">Ollama · Local</option>
-                <option value="openai">OpenAI · Cloud</option>
+                <option value="openai">{vendorName} · Cloud</option>
               </select>
             </div>
             {provider === "ollama" ? (
@@ -827,7 +832,24 @@ function App() {
             ) : (
               <>
                 <div className="task-form">
-                  <label htmlFor="cloud-model">Identifiant du modèle OpenAI</label>
+                  <label htmlFor="cloud-vendor">Fournisseur cloud</label>
+                  <select
+                    id="cloud-vendor"
+                    value={vendor}
+                    disabled={running || keyBusy}
+                    onChange={(event) => {
+                      const next = event.target.value === "deepseek" ? "deepseek" : "openai";
+                      void invoke("set_cloud_vendor", { vendor: next }).then(() => {
+                        setVendor(next);
+                        resetApproval();
+                        void refreshKey();
+                      });
+                    }}
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="deepseek">DeepSeek</option>
+                  </select>
+                  <label htmlFor="cloud-model">Identifiant du modèle {vendorName}</label>
                   <input
                     id="cloud-model"
                     value={cloudModel}
@@ -852,7 +874,7 @@ function App() {
                     void updateKey(key);
                   }}
                 >
-                  <label htmlFor="api-key">Clé API OpenAI</label>
+                  <label htmlFor="api-key">Clé API {vendorName}</label>
                   <input
                     id="api-key"
                     name="api-key"

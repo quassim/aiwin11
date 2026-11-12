@@ -87,7 +87,10 @@ La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque,
 
 AiWin11 tourne sans droits administrateur. Dans **Sécurité → Opérations administrateur**, tu peux autoriser l’agent à proposer une liste fermée d’opérations : démarrer, arrêter, redémarrer un service ou changer son démarrage (automatique, manuel, désactivé), et vider les fichiers temporaires de Windows de plus d’un jour. Chaque opération demande ton accord dans AiWin11, puis la confirmation Windows (UAC). Elle est exécutée par un programme séparé, `AiWin11.Admin.exe`, qui fait une seule opération puis s’arrête. Les services de sécurité (Defender, pare-feu), de mise à jour et les services vitaux de Windows sont toujours refusés.
 
-### Fournisseur cloud optionnel
+### Fournisseur cloud optionnel (OpenAI ou DeepSeek)
+
+Dans **Modèles**, choisis **Cloud**, puis le **Fournisseur cloud** (OpenAI ou DeepSeek), saisis l’identifiant du modèle (par exemple `deepseek-chat`) et enregistre la clé API : elle est conservée par Windows (`AiWin11/DeepSeek`), jamais dans la base ni dans un fichier.
+
 
 Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, cochez l’envoi du texte de la demande à OpenAI, pour cette demande seulement : cet accord n’est jamais mémorisé. Le fournisseur choisi est mémorisé ; Ollama est sélectionné au premier démarrage. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)
 

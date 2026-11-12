@@ -263,6 +263,37 @@ impl Core {
         write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
     }
 
+    /// The cloud provider used for cloud tasks (default OpenAI).
+    #[cfg(windows)]
+    pub fn cloud_vendor(&self) -> openai::Vendor {
+        self.setting("cloud.vendor")
+            .ok()
+            .flatten()
+            .and_then(|code| openai::Vendor::from_code(&code))
+            .unwrap_or(openai::Vendor::OpenAi)
+    }
+
+    #[cfg(windows)]
+    pub fn set_cloud_vendor(&mut self, vendor: openai::Vendor) -> Result<(), &'static str> {
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('cloud.vendor', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [vendor.code()],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.cloud.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, vendor.code()],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// Most tokens one task may spend with a cloud provider (default 50 000, 1 000 to 2 000 000).
     pub fn cloud_token_budget(&self) -> u64 {
         self.setting("routing.cloud_token_budget")

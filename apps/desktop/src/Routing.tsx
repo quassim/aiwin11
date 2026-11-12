@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 type LoadedModel = { name: string; size: number; size_vram: number };
 
 const tasks: { name: string; status: string }[] = [
-  { name: "Texte et actions Windows", status: "Modèle choisi ci-dessous (local ou OpenAI)" },
+  { name: "Texte et actions Windows", status: "Modèle choisi ci-dessous (local ou cloud)" },
   { name: "Vision (description de fenêtre)", status: "Modèle de vision local choisi ci-dessous" },
   { name: "Reconnaissance et synthèse vocale", status: "Pas encore disponible (phase R7)" },
   { name: "Génération d’images", status: "Pas encore disponible (phase R7)" },
@@ -74,13 +74,13 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
           }}
         />
         <span>
-          <strong>Local d’abord, OpenAI en secours</strong> — si Ollama ne répond pas, la demande peut passer à
-          l’identifiant OpenAI saisi plus bas, uniquement si tu coches l’envoi pour cette demande, avant toute action,
-          et jamais en mode privé. Sinon, le modèle choisi est utilisé tel quel.
+          <strong>Local d’abord, cloud en secours</strong> — si Ollama ne répond pas, la demande peut passer à le modèle
+          cloud saisi plus bas, uniquement si tu coches l’envoi pour cette demande, avant toute action, et jamais en
+          mode privé. Sinon, le modèle choisi est utilisé tel quel.
         </span>
       </label>
       <div className="task-form">
-        <label htmlFor="cloud-budget">Budget maximal d’une demande envoyée à OpenAI (jetons)</label>
+        <label htmlFor="cloud-budget">Budget maximal d’une demande envoyée au cloud (jetons)</label>
         <select
           id="cloud-budget"
           value={budget ?? ""}

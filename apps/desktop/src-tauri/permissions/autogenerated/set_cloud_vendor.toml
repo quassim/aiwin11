@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-cloud-vendor"
+description = "Enables the set_cloud_vendor command without any pre-configured scope."
+commands.allow = ["set_cloud_vendor"]
+
+[[permission]]
+identifier = "deny-set-cloud-vendor"
+description = "Denies the set_cloud_vendor command without any pre-configured scope."
+commands.deny = ["set_cloud_vendor"]

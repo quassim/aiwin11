@@ -267,6 +267,10 @@ Deltas are unvalidated model output, shown as a draft and never journaled; the w
 
 Adding a tool requires a catalog entry, an agent registry entry, a host mapping, a policy action and matrix row, a Protobuf operation, a broker capability and rule, and bridge or core support.
 
+## Cloud vendors (OpenAI, DeepSeek)
+
+`cloud.vendor` (`openai` default, `deepseek`; `get_cloud_vendor` / `set_cloud_vendor`, journaled `settings.cloud.changed`) selects the Chat Completions endpoint, the request body and the credential: `AiWin11/OpenAI` or `AiWin11/DeepSeek` in Windows Credential Manager (key commands act on the selected vendor). DeepSeek (`https://api.deepseek.com/chat/completions`) is called without OpenAI-only fields (`store`, `parallel_tool_calls`, strict schemas) and with `max_tokens`. Same rules as OpenAI: approval per request, private mode, token budget, launch tool only, nothing local-only is ever sent. The model identifier is typed by the user (none is hard-coded).
+
 ## Optional OpenAI provider
 
 The host records the cloud authorization decision (`model.cloud.authorized` / `model.cloud.denied`) before inference. OpenAI receives the selected model ID, the fixed agent instructions, the user's request, the previous steps and a catalog limited to `launch_application`, over HTTPS with `store: false`, only when `cloudApproved` is set for that request. No file content, window data or image is ever sent to it. Its response is converted to the same proposal format as Ollama and validated by the Python agent.

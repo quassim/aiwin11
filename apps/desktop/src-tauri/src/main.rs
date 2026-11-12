@@ -213,18 +213,18 @@ async fn run_task(
 }
 
 #[tauri::command]
-fn openai_key_configured() -> Result<bool, &'static str> {
-    openai::has_key()
+fn openai_key_configured(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    openai::has_key(cloud_vendor(&state)?)
 }
 
 #[tauri::command]
-fn save_openai_key(key: String) -> Result<(), &'static str> {
-    openai::save_key(key)
+fn save_openai_key(state: State<'_, Arc<AppState>>, key: String) -> Result<(), &'static str> {
+    openai::save_key(cloud_vendor(&state)?, key)
 }
 
 #[tauri::command]
-fn delete_openai_key() -> Result<(), &'static str> {
-    openai::delete_key()
+fn delete_openai_key(state: State<'_, Arc<AppState>>) -> Result<(), &'static str> {
+    openai::delete_key(cloud_vendor(&state)?)
 }
 
 #[tauri::command]
@@ -320,6 +320,21 @@ fn get_cloud_budget(state: State<'_, Arc<AppState>>) -> Result<u64, &'static str
 #[tauri::command]
 fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_token_budget(tokens)
+}
+
+fn cloud_vendor(state: &State<'_, Arc<AppState>>) -> Result<openai::Vendor, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.cloud_vendor())
+}
+
+#[tauri::command]
+fn get_cloud_vendor(state: State<'_, Arc<AppState>>) -> Result<openai::Vendor, &'static str> {
+    cloud_vendor(&state)
+}
+
+/// Main window only: chooses the cloud provider (each keeps its own key).
+#[tauri::command]
+fn set_cloud_vendor(state: State<'_, Arc<AppState>>, vendor: openai::Vendor) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_cloud_vendor(vendor)
 }
 
 #[tauri::command]
@@ -498,6 +513,8 @@ fn main() {
             get_admin_helper,
             get_privacy,
             get_cloud_fallback,
+            get_cloud_vendor,
+            set_cloud_vendor,
             get_cloud_budget,
             set_cloud_budget,
             set_cloud_fallback,

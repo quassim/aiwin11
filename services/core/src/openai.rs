@@ -13,15 +13,74 @@ use crate::model_gateway::{open_stream, tool_catalog, Proposal, StreamSink, Stre
 
 const INVALID: &str = "CLOUD_PROPOSAL_INVALID";
 
-const TARGET: &str = "AiWin11/OpenAI";
-const ENDPOINT: &str = "https://api.openai.com/v1/chat/completions";
+/// Cloud providers speaking the Chat Completions protocol. One is chosen in the settings
+/// (`cloud.vendor`); each has its own key in Windows Credential Manager.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Vendor {
+    OpenAi,
+    DeepSeek,
+}
 
-pub fn save_key(key: String) -> Result<(), &'static str> {
+impl Vendor {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::DeepSeek => "deepseek",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        [Self::OpenAi, Self::DeepSeek].into_iter().find(|vendor| vendor.code() == code)
+    }
+
+    fn target(self) -> &'static str {
+        match self {
+            Self::OpenAi => "AiWin11/OpenAI",
+            Self::DeepSeek => "AiWin11/DeepSeek",
+        }
+    }
+
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::OpenAi => "https://api.openai.com/v1/chat/completions",
+            Self::DeepSeek => "https://api.deepseek.com/chat/completions",
+        }
+    }
+
+    /// Request body. DeepSeek is called without OpenAI-only fields (`store`,
+    /// `parallel_tool_calls`, strict schemas, `max_completion_tokens`).
+    fn body(self, model: &str, messages: &[Value]) -> Value {
+        match self {
+            Self::OpenAi => json!({
+                "model": model,
+                "store": false,
+                "stream": true,
+                "stream_options": { "include_usage": true },
+                "max_completion_tokens": 1024,
+                "parallel_tool_calls": false,
+                "messages": messages,
+                // No file or window tools: file contents and screen data never go to the cloud.
+                "tools": tool_catalog(true, false, false, false)
+            }),
+            Self::DeepSeek => json!({
+                "model": model,
+                "stream": true,
+                "stream_options": { "include_usage": true },
+                "max_tokens": 1024,
+                "messages": messages,
+                "tools": tool_catalog(false, false, false, false)
+            }),
+        }
+    }
+}
+
+pub fn save_key(vendor: Vendor, key: String) -> Result<(), &'static str> {
     let bytes = key.trim().as_bytes();
     if bytes.is_empty() || bytes.len() > 1024 || !bytes.iter().all(u8::is_ascii_graphic) {
         return Err("INVALID_API_KEY");
     }
-    let mut target = target_name();
+    let mut target = target_name(vendor);
     let entry = CREDENTIALW {
         Type: CRED_TYPE_GENERIC,
         TargetName: target.as_mut_ptr(),
@@ -37,8 +96,8 @@ pub fn save_key(key: String) -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn delete_key() -> Result<(), &'static str> {
-    let target = target_name();
+pub fn delete_key(vendor: Vendor) -> Result<(), &'static str> {
+    let target = target_name(vendor);
     if unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) } == 0
         && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_NOT_FOUND as i32)
     {
@@ -47,12 +106,12 @@ pub fn delete_key() -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn has_key() -> Result<bool, &'static str> {
-    Ok(read_entry()?.is_some())
+pub fn has_key(vendor: Vendor) -> Result<bool, &'static str> {
+    Ok(read_entry(vendor)?.is_some())
 }
 
-fn target_name() -> Vec<u16> {
-    TARGET.encode_utf16().chain([0]).collect()
+fn target_name(vendor: Vendor) -> Vec<u16> {
+    vendor.target().encode_utf16().chain([0]).collect()
 }
 
 struct Credential(*mut CREDENTIALW);
@@ -64,8 +123,8 @@ impl Drop for Credential {
     }
 }
 
-fn read_entry() -> Result<Option<Credential>, &'static str> {
-    let target = target_name();
+fn read_entry(vendor: Vendor) -> Result<Option<Credential>, &'static str> {
+    let target = target_name(vendor);
     let mut entry = ptr::null_mut();
     if unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut entry) } == 0 {
         return if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_NOT_FOUND as i32) {
@@ -82,6 +141,7 @@ fn read_entry() -> Result<Option<Credential>, &'static str> {
 /// Sends one request and returns the proposal with the tokens it used (reported by OpenAI;
 /// when not reported, a conservative estimate: input characters / 3 + the output cap).
 pub(crate) fn propose(
+    vendor: Vendor,
     model: &str,
     messages: &[Value],
     sink: &mut StreamSink<'_>,
@@ -90,7 +150,7 @@ pub(crate) fn propose(
     if !model.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte)) {
         return Err("MODEL_REQUIRED");
     }
-    let credential = read_entry()?.ok_or("CLOUD_KEY_REQUIRED")?;
+    let credential = read_entry(vendor)?.ok_or("CLOUD_KEY_REQUIRED")?;
     // CredReadW returned a live allocation held by credential until the request is built.
     let entry = unsafe { &*credential.0 };
     if entry.CredentialBlob.is_null() || !(1..=1024).contains(&entry.CredentialBlobSize) {
@@ -106,17 +166,7 @@ pub(crate) fn propose(
         .timeout(Duration::from_secs(45))
         .build()
         .map_err(|_| "CLOUD_REQUEST_FAILED")?;
-    let request = client.post(ENDPOINT).bearer_auth(key).json(&json!({
-        "model": model,
-        "store": false,
-        "stream": true,
-        "stream_options": { "include_usage": true },
-        "max_completion_tokens": 1024,
-        "parallel_tool_calls": false,
-        "messages": messages,
-        // No file or window tools: file contents and screen data never go to the cloud.
-        "tools": tool_catalog(true, false, false, false)
-    }));
+    let request = client.post(vendor.endpoint()).bearer_auth(key).json(&vendor.body(model, messages));
     drop(credential);
     let stream = open_stream(request).map_err(|_| "CLOUD_REQUEST_FAILED")?;
     let mut usage = None;
