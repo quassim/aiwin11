@@ -8,7 +8,9 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 **Vérifié** : `verify.ps1` (88 tests Rust) ; état système avec GPU testé en réel. Le reste non testé en réel.
 
-**Prochaine étape** : plan prévisualisé et approbation groupée (« Range ces fichiers ») ; reconnaissance vocale locale (Windows.Media.SpeechRecognition via le pont) ; workflows planifiés ; MCP ; R4 ; R9 (assistant élevé dans Program Files, signature).
+- `ca7a4ee` `organize_files` : plan de renommages prévisualisé, approuvé en une fois ; `fa36792` 16 étapes et 15 minutes max par demande ; `bd9af7b` dictée hors ligne (SAPI, moteur fr-FR présent sur la machine de référence) ; `5320b57` assistant élevé publié en fichier unique, SHA-256 épinglé et fichier verrouillé pendant l’opération.
+
+**Prochaine étape (mise à jour)** : workflows planifiés (R8), client MCP (R6), R4 processus séparés, signature de code (R9). Ancienne liste : plan prévisualisé et approbation groupée (« Range ces fichiers ») ; reconnaissance vocale locale (Windows.Media.SpeechRecognition via le pont) ; workflows planifiés ; MCP ; R4 ; R9 (assistant élevé dans Program Files, signature).
 
 ## 2026-11-12, R6 — mémoire
 
