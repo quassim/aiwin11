@@ -635,6 +635,10 @@ function App() {
         ? "ollama"
         : provider;
   const [dictating, setDictating] = useState(false);
+  // Session memory: earlier exchanges the next request carries (kept in memory by the host).
+  const [contextSize, setContextSize] = useState(0);
+  const refreshContext = () =>
+    void invoke<number>("session_context_size").then(setContextSize, () => setContextSize(0));
   const [floating, setFloating] = useState(false);
   const [agent, setAgent] = useState<"general" | keyof AgentModels>("general");
   const taskCloudFallback =
@@ -1042,6 +1046,7 @@ function App() {
       setRunning(false);
       setStopState((current) => (current === "requested" ? "confirmed" : current));
       refresh();
+      refreshContext();
     }
   }
 
@@ -1321,6 +1326,16 @@ function App() {
                 <button type="submit" disabled={!canSend}>
                   Envoyer
                 </button>
+                {contextSize > 0 && (
+                  <button
+                    type="button"
+                    disabled={running}
+                    title="L’agent reçoit les derniers échanges de cette session ; un modèle cloud ne reçoit que ceux déjà traités dans le cloud."
+                    onClick={() => void invoke("clear_session_context").finally(refreshContext)}
+                  >
+                    Nouvelle conversation ({contextSize} échange{contextSize > 1 ? "s" : ""} en contexte)
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={running || dictating}

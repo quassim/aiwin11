@@ -39,7 +39,7 @@ use crate::{
     Core, ToolCalling,
 };
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Ollama,
@@ -71,6 +71,39 @@ pub struct TaskRequest {
     /// Specialized agent chosen by the user (default: general).
     #[serde(default)]
     pub agent: AgentProfile,
+    /// Earlier exchanges of this session, oldest first (session memory). Set by the trusted
+    /// host, never by the interface; ignored for scheduled runs.
+    #[serde(default)]
+    pub context: Vec<SessionTurn>,
+}
+
+/// One earlier exchange of the session: the user's request and the agent's final answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTurn {
+    pub request: String,
+    pub reply: String,
+    /// Answered by a cloud model: only such turns may be sent to a cloud model again.
+    #[serde(default)]
+    pub cloud: bool,
+}
+
+/// Session memory bounds: the last exchanges only, each cut.
+pub const MAX_SESSION_TURNS: usize = 4;
+const MAX_TURN_CHARS: usize = 600;
+
+/// The context a model may receive: none for unattended runs; for a cloud model, only turns a
+/// cloud model already answered (a local answer may quote local files or the screen).
+fn session_context(request: &TaskRequest, for_cloud: bool) -> Vec<SessionTurn> {
+    if request.scheduled {
+        return Vec::new();
+    }
+    let cut = |text: &str| text.chars().take(MAX_TURN_CHARS).collect::<String>();
+    let turns: Vec<&SessionTurn> = request.context.iter().filter(|turn| turn.cloud || !for_cloud).collect();
+    turns[turns.len().saturating_sub(MAX_SESSION_TURNS)..]
+        .iter()
+        .map(|turn| SessionTurn { request: cut(&turn.request), reply: cut(&turn.reply), cloud: turn.cloud })
+        .collect()
 }
 
 /// What actually happened to one action the agent asked for.
@@ -1007,9 +1040,10 @@ impl TaskSlot {
                         tool_catalog(false, local && files.is_some(), local, run.vision_model.is_some()),
                         request.agent,
                     );
+                    let context = session_context(request, false);
                     let messages = match request.local_runtime {
-                        LocalRuntime::Ollama => ollama_messages(prompt, &history),
-                        LocalRuntime::LmStudio => openai_messages(prompt, &history),
+                        LocalRuntime::Ollama => ollama_messages(&context, prompt, &history),
+                        LocalRuntime::LmStudio => openai_messages(&context, prompt, &history),
                     };
                     match self.local_proposer {
                         Some(propose) => propose(request.local_runtime, &local_model, &messages, tools, &mut sink),
@@ -1055,7 +1089,7 @@ impl TaskSlot {
                     self.cloud_proposer.unwrap_or(openai::propose)(
                         vendor,
                         model,
-                        &openai_messages(prompt, &history),
+                        &openai_messages(&session_context(request, true), prompt, &history),
                         &mut sink,
                     )
                     .map(|(proposal, used)| {
@@ -1726,6 +1760,7 @@ impl TaskSlot {
         let mut sub = TaskRequest {
             agent,
             prompt: request.to_owned(),
+            context: Vec::new(),
             cloud_fallback_model: None,
             cloud_approved: false,
             cloud_vendor: None,
@@ -2676,10 +2711,20 @@ fn profile_code(settings: PolicySettings) -> String {
     format!("{}{}", settings.autonomy.code(), if settings.simulate { "+simulate" } else { "" })
 }
 
+/// Instructions, the session's earlier exchanges (plain text, no tool results), then the request.
+fn opening_messages(context: &[SessionTurn], prompt: &str) -> Vec<Value> {
+    let mut messages = vec![json!({ "role": "system", "content": AGENT_INSTRUCTIONS })];
+    for turn in context {
+        messages.push(json!({ "role": "user", "content": turn.request }));
+        messages.push(json!({ "role": "assistant", "content": turn.reply }));
+    }
+    messages.push(json!({ "role": "user", "content": prompt }));
+    messages
+}
+
 /// Conversation for Ollama: instructions, request, then each tool call and its observation.
-fn ollama_messages(prompt: &str, history: &[StepRecord]) -> Vec<Value> {
-    let mut messages =
-        vec![json!({ "role": "system", "content": AGENT_INSTRUCTIONS }), json!({ "role": "user", "content": prompt })];
+fn ollama_messages(context: &[SessionTurn], prompt: &str, history: &[StepRecord]) -> Vec<Value> {
+    let mut messages = opening_messages(context, prompt);
     for step in history {
         messages.push(json!({
             "role": "assistant", "content": "",
@@ -2691,9 +2736,8 @@ fn ollama_messages(prompt: &str, history: &[StepRecord]) -> Vec<Value> {
 }
 
 /// Same conversation in the Chat Completions format, where tool results refer to call IDs.
-fn openai_messages(prompt: &str, history: &[StepRecord]) -> Vec<Value> {
-    let mut messages =
-        vec![json!({ "role": "system", "content": AGENT_INSTRUCTIONS }), json!({ "role": "user", "content": prompt })];
+fn openai_messages(context: &[SessionTurn], prompt: &str, history: &[StepRecord]) -> Vec<Value> {
+    let mut messages = opening_messages(context, prompt);
     for step in history {
         messages.push(json!({
             "role": "assistant", "content": null,
@@ -4183,16 +4227,45 @@ mod tests {
     }
 
     #[test]
+    fn session_context_is_bounded_and_local_turns_never_reach_the_cloud() {
+        let turn = |request: &str, cloud: bool| SessionTurn { request: request.into(), reply: "ok".repeat(400), cloud };
+        let mut request = TaskRequest {
+            provider: Provider::Ollama,
+            prompt: "Et ensuite ?".into(),
+            model: "m".into(),
+            cloud_approved: false,
+            cloud_vendor: None,
+            local_runtime: LocalRuntime::Ollama,
+            vision_model: None,
+            cloud_fallback_model: None,
+            scheduled: false,
+            agent: AgentProfile::General,
+            context: (0..6).map(|index| turn(&format!("r{index}"), index % 2 == 0)).collect(),
+        };
+        let local = session_context(&request, false);
+        assert_eq!(local.iter().map(|turn| turn.request.as_str()).collect::<Vec<_>>(), ["r2", "r3", "r4", "r5"]);
+        assert!(local.iter().all(|turn| turn.reply.chars().count() == MAX_TURN_CHARS));
+        let cloud = session_context(&request, true);
+        assert_eq!(cloud.iter().map(|turn| turn.request.as_str()).collect::<Vec<_>>(), ["r0", "r2", "r4"]);
+        let messages = openai_messages(&cloud, "Et ensuite ?", &[]);
+        assert_eq!(messages.len(), 1 + 2 * 3 + 1);
+        assert_eq!((messages[1]["role"].as_str(), messages[2]["role"].as_str()), (Some("user"), Some("assistant")));
+        assert_eq!(messages.last().unwrap()["content"], "Et ensuite ?");
+        request.scheduled = true;
+        assert!(session_context(&request, false).is_empty(), "unattended runs get no context");
+    }
+
+    #[test]
     fn conversations_replay_tool_steps_in_each_provider_format() {
         let history = [step("copy_text_file", json!({"source":"a.txt","destination":"b.txt"}), "call_1")];
-        let ollama = ollama_messages("Copie a.txt", &history);
+        let ollama = ollama_messages(&[], "Copie a.txt", &history);
         assert_eq!(ollama.len(), 4);
         assert_eq!(
             ollama[2]["tool_calls"][0]["function"]["arguments"],
             json!({"source":"a.txt","destination":"b.txt"})
         );
         assert_eq!(ollama[3], json!({"role":"tool","tool_name":"copy_text_file","content":"Résultat"}));
-        let openai = openai_messages("Copie a.txt", &history);
+        let openai = openai_messages(&[], "Copie a.txt", &history);
         assert_eq!(openai[2]["tool_calls"][0]["id"], "call_1");
         assert_eq!(openai[2]["tool_calls"][0]["function"]["arguments"], r#"{"destination":"b.txt","source":"a.txt"}"#);
         assert_eq!(openai[3], json!({"role":"tool","tool_call_id":"call_1","content":"Résultat"}));
@@ -4226,6 +4299,7 @@ mod tests {
             cloud_fallback_model: None,
             scheduled: false,
             agent: AgentProfile::General,
+            context: Vec::new(),
         }
     }
 
@@ -4244,6 +4318,7 @@ mod tests {
             vision_model: None,
             scheduled: false,
             agent: AgentProfile::General,
+            context: Vec::new(),
         };
         core.lock().unwrap().set_local_strategy(LocalStrategy::CloudOnly).unwrap();
         assert_eq!(slot.run(&core, None, &local, |_| {}), Err("ROUTING_CLOUD_REQUIRED"));

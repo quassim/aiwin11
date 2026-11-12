@@ -17,7 +17,7 @@ use aiwin11_core::{
     model_gateway::{LocalModelProvider, LocalStrategy, ModelResource, Ollama},
     openai,
     policy::{self, AgentAction, Effect, PolicySettings},
-    task::{StopStatus, TaskRequest, TaskSlot},
+    task::{SessionTurn, StopStatus, TaskRequest, TaskSlot, MAX_SESSION_TURNS},
     windows_bridge::{Capture, Inspection},
     CloudCost, Core, ModelFacts, ModelManifest, ModelPreferences, ToolCalling,
 };
@@ -95,6 +95,8 @@ struct AppState {
     ui_ready_ms: OnceLock<u64>,
     /// Path of the SQLite store; backups live next to it.
     store: std::path::PathBuf,
+    /// Session memory: the last exchanges of this run of AiWin11, in memory only (never stored).
+    turns: Mutex<Vec<SessionTurn>>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -522,10 +524,12 @@ async fn read_capture(
 async fn run_task(
     app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
-    request: TaskRequest,
+    mut request: TaskRequest,
     progress: Channel<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let state = Arc::clone(state.inner());
+    // The context comes from this process only; the core decides what may reach a cloud model.
+    request.context = state.turns.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = run_task_worker(&state, &request, |update| {
             if update.pointer("/update/type").and_then(serde_json::Value::as_str) == Some("approvalRequired") {
@@ -533,6 +537,9 @@ async fn run_task(
             }
             let _ = progress.send(update);
         });
+        if let Ok(outcome) = &result {
+            remember_turn(&state, &request, outcome);
+        }
         match &result {
             Ok(_) => desktop::notify(&app, "Tâche terminée"),
             Err(code) if code == "TASK_CANCELLED" => desktop::notify(&app, "Tâche annulée"),
@@ -543,6 +550,32 @@ async fn run_task(
     })
     .await
     .map_err(|_| "CORE_UNAVAILABLE")?
+}
+
+/// Keeps the exchange for the next requests of this session (session memory).
+fn remember_turn(state: &AppState, request: &TaskRequest, outcome: &serde_json::Value) {
+    let Some(reply) = outcome["reply"].as_str().filter(|reply| !reply.trim().is_empty()) else { return };
+    let mut turns = state.turns.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    turns.push(SessionTurn {
+        request: request.prompt.clone(),
+        reply: reply.to_owned(),
+        cloud: request.provider == aiwin11_core::task::Provider::OpenAi,
+    });
+    let excess = turns.len().saturating_sub(MAX_SESSION_TURNS);
+    turns.drain(..excess);
+}
+
+/// Number of earlier exchanges the next request will carry.
+#[tauri::command]
+fn session_context_size(state: State<'_, Arc<AppState>>) -> usize {
+    state.turns.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
+}
+
+/// "Nouvelle conversation": the next request starts without context.
+#[tauri::command]
+fn clear_session_context(state: State<'_, Arc<AppState>>) {
+    state.turns.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+    let _ = lock_core(&state.core).journal("session.context.cleared", None);
 }
 
 fn run_task_worker(
@@ -1164,6 +1197,7 @@ fn run_scheduler(state: Arc<AppState>) {
                 cloud_fallback_model: None,
                 scheduled: true,
                 agent: aiwin11_core::policy::AgentProfile::General,
+                context: Vec::new(),
             };
             let outcome = run_reserved_task(&state, &request, |_| {});
             let report = match outcome {
@@ -1445,6 +1479,7 @@ fn main() {
                 launched,
                 ui_ready_ms: OnceLock::new(),
                 store,
+                turns: Mutex::new(Vec::new()),
             }));
             let scheduler = Arc::clone(app.state::<Arc<AppState>>().inner());
             std::thread::spawn(move || run_scheduler(scheduler));
@@ -1497,6 +1532,8 @@ fn main() {
             set_speech_recognizer,
             set_workspace,
             get_extra_folders,
+            session_context_size,
+            clear_session_context,
             set_extra_folders,
             get_embedding_model,
             set_embedding_model,

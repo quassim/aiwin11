@@ -80,6 +80,8 @@ fn main() {
         "set_speech_recognizer",
         "set_workspace",
         "get_extra_folders",
+        "session_context_size",
+        "clear_session_context",
         "set_extra_folders",
         "get_embedding_model",
         "set_embedding_model",
