@@ -504,6 +504,43 @@ impl Core {
         })
     }
 
+    /// Agent tool: captures the primary screen once, for a local vision model. Refused when a
+    /// protected window is visible anywhere, since it could appear in the image. The host
+    /// checks the window list itself (its own read, not the agent's) before capturing.
+    pub(crate) fn agent_capture_screen(&mut self, task: &str, policy: Policy) -> Result<Vec<u8>, &'static str> {
+        if !self.protected_windows().is_empty() {
+            let check = Policy::granting(&[crate::broker::Capability::WindowList]);
+            let operation = Operation::ListWindows(ListWindows { exclude_process_id: std::process::id() });
+            let windows = self.agent_bridge_call(task, check, operation, "window.list", |reply| {
+                if reply.ui_tree.is_some() || reply.window_capture.is_some() {
+                    return None;
+                }
+                accept_window_list(reply.window_list?)
+            })?;
+            if windows.iter().any(|window| !window.minimized && self.window_protected(&window.target)) {
+                self.audit(Some(task), "policy.denied", "window_protected").map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+                return Err("WINDOW_PROTECTED");
+            }
+        }
+        let operation = Operation::ListDisplays(Default::default());
+        let primary = self.agent_bridge_call(task, policy, operation, "displays", |reply| {
+            reply
+                .display_list?
+                .displays
+                .into_iter()
+                .find(|display| display.primary && display.width > 0 && display.height > 0)
+        })?;
+        let operation = Operation::CaptureDisplay(aiwin11_contracts::v1::CaptureDisplay { display: Some(primary) });
+        self.agent_bridge_call(task, policy, operation, "display.capture", |reply| {
+            if reply.ui_tree.is_some() || reply.window_info.is_some() || reply.process_id.is_some() {
+                return None;
+            }
+            let frame = reply.window_capture?;
+            ((1..=1024).contains(&frame.width) && (1..=1024).contains(&frame.height) && valid_jpeg(&frame.jpeg))
+                .then_some(frame.jpeg)
+        })
+    }
+
     /// Agent tool: captures exactly that window as a JPEG (at most 1024 px per side, 256 KiB),
     /// for a local vision model. The host grants `Capability::WindowCapture` only after approval.
     pub(crate) fn agent_capture_window(

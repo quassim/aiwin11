@@ -388,6 +388,13 @@ juste avant AiWin11 (capture d’image analysée localement). Tu reçois seuleme
 L’utilisateur doit l’approuver.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
+        functions.push(json!({
+            "name": "describe_screen",
+            "description": "Fait décrire par le modèle de vision local tout ce qu’affiche l’écran principal (capture \
+        analysée localement). Tu reçois seulement la description. Refusé si une fenêtre protégée est visible. \
+        L’utilisateur doit l’approuver.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
     }
     Value::Array(
         functions
@@ -1333,7 +1340,8 @@ mod tests {
                 "click_control",
                 "set_control_value",
                 "type_in_notepad",
-                "describe_window"
+                "describe_window",
+                "describe_screen"
             ]
         );
         assert_eq!(

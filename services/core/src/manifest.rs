@@ -77,6 +77,7 @@ pub enum CapabilityName {
     McpServer,
     ImageGenerate,
     Delegation,
+    ScreenCapture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -107,7 +108,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 32] = [
+pub const MANIFESTS: [ToolManifest; 33] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -568,6 +569,21 @@ pub const MANIFESTS: [ToolManifest; 32] = [
         reversibility: R::NoEffect,
         timeout_ms: 15_000,
         capabilities: &[C::ProcessList],
+    },
+    ToolManifest {
+        action: AgentAction::DescribeScreen,
+        tool: "describe_screen",
+        version: 1,
+        // The whole primary screen: refused when a protected window is visible.
+        risk: Risk::Medium,
+        side_effect: false,
+        reads_screen: true,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 105_000,
+        capabilities: &[C::ScreenCapture],
     },
 ];
 

@@ -78,6 +78,7 @@ type ApprovalAction =
   | { kind: "typeText"; text: string; characters: number }
   | { kind: "listProcesses" }
   | { kind: "inspectProcess"; name: string; process_id: number }
+  | { kind: "describeScreen"; model: string }
   | { kind: "systemStatus" }
   | { kind: "readClipboard" }
   | { kind: "writeClipboard"; text: string; characters: number }
@@ -250,6 +251,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: "L’agent demande à lire l’état du PC",
       detail: "Action : lire la mémoire, la charge du processeur et l’espace libre des disques. Rien n’est modifié.",
+    };
+  }
+  if (action.kind === "describeScreen") {
+    return {
+      title: "L’agent demande à capturer tout l’écran principal",
+      detail: `Image analysée localement par ${action.model}, puis effacée. Tout ce qui est visible à l’écran y figure ; refusé si une fenêtre protégée est visible.`,
     };
   }
   if (action.kind === "inspectProcess") {

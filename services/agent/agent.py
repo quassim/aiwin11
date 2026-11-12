@@ -146,6 +146,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "trash_text_file": {"name": is_text_file_name},
     "inspect_window": {},
     "describe_window": {},
+    "describe_screen": {},
     "type_in_notepad": {"text": is_typed_text},
     "list_processes": {},
     "get_system_status": {},

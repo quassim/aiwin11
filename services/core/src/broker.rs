@@ -80,6 +80,8 @@ pub enum Capability {
     McpServer = 1 << 22,
     /// Generate one image with the user's local engine into AiWin11's images folder.
     ImageGenerate = 1 << 23,
+    /// Capture the primary screen once for the local vision model, after the user's approval.
+    ScreenCapture = 1 << 24,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -226,8 +228,12 @@ impl Policy {
             Some(Operation::Dictate(dictate)) if desktop && (1..=10).contains(&dictate.max_seconds) => Ok("dictate"),
             Some(Operation::AnalyzeCapture(_)) if peer == Peer::DesktopInspector => Ok("analyze_capture"),
             Some(Operation::TranscribeCapture(_)) if peer == Peer::DesktopInspector => Ok("transcribe_capture"),
-            Some(Operation::ListDisplays(_)) if desktop => Ok("list_displays"),
-            Some(Operation::CaptureDisplay(input)) if desktop && input.display.is_some() => Ok("capture_display"),
+            Some(Operation::ListDisplays(_)) if desktop || agent(Capability::ScreenCapture) => Ok("list_displays"),
+            Some(Operation::CaptureDisplay(input))
+                if (desktop || agent(Capability::ScreenCapture)) && input.display.is_some() =>
+            {
+                Ok("capture_display")
+            }
             Some(Operation::PreviewLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("preview_local_text"),
             Some(Operation::ListLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("list_local_text"),
             Some(Operation::CopyLocalText(_)) if desktop || agent(Capability::FileCopy) => Ok("copy_local_text"),

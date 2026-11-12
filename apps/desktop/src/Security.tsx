@@ -57,6 +57,7 @@ const profiles: { id: Autonomy; label: string; description: string }[] = [
 ];
 
 const actionNames: Record<string, string> = {
+  describeScreen: "Décrire l’écran principal",
   inspectProcess: "Détailler un processus",
   findControl: "Chercher un contrôle dans la fenêtre lue",
   launchApplication: "Ouvrir le Bloc-notes",

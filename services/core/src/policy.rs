@@ -105,10 +105,12 @@ pub enum AgentAction {
     FindControl,
     /// Reads the details of one listed process (read-only).
     InspectProcess,
+    /// Describes the primary screen with the local vision model (always asks).
+    DescribeScreen,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -141,6 +143,7 @@ impl AgentAction {
         Self::SearchFiles,
         Self::FindControl,
         Self::InspectProcess,
+        Self::DescribeScreen,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -181,6 +184,7 @@ impl AgentAction {
             Self::SearchFiles => "search_files",
             Self::FindControl => "find_control",
             Self::InspectProcess => "inspect_process",
+            Self::DescribeScreen => "describe_screen",
         }
     }
 
@@ -312,7 +316,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 32] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 33] = [
+    (A::DescribeScreen, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::InspectProcess, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::FindControl, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::Delegate, [E::Allow, E::Allow, E::Allow, E::Allow]),
