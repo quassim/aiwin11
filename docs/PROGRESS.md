@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, soir — suite autonome
+
+**Fait** : `cf2dd43` recherche sémantique dans la mémoire (embeddings locaux Ollama, repli mots-clés) ; `233f33a` lecture à voix haute avec les voix Windows locales seulement ; `57fab10` cartes graphiques détectées par WMI (T-014) ; `5f4835b` diagnostics approuvés en liste fermée (`ipconfig /all`, `netsh wlan show interfaces`, `w32tm /query /status`) ; `aeabf8f` dossier de travail choisi dans le profil (appliqué au démarrage).
+
+**Vérifié** : `verify.ps1` (88 tests Rust) ; état système avec GPU testé en réel. Le reste non testé en réel.
+
+**Prochaine étape** : plan prévisualisé et approbation groupée (« Range ces fichiers ») ; reconnaissance vocale locale (Windows.Media.SpeechRecognition via le pont) ; workflows planifiés ; MCP ; R4 ; R9 (assistant élevé dans Program Files, signature).
+
 ## 2026-11-12, R6 — mémoire
 
 **Fait** : mémoire durable chiffrée (DPAPI) : outils `remember` / `recall` via le broker, page **Mémoire**, migration 004. Vérifié par `verify.ps1` (87 tests Rust, dont le contrôle qu’aucun texte en clair n’est dans le fichier SQLite). Non testé avec un modèle réel.
