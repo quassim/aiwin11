@@ -313,6 +313,18 @@ nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’un
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
+            "name": "inspect_process",
+            "description": "Détaille, en lecture seule, un processus de la dernière liste obtenue avec list_processes \
+        dans cette demande, désigné par son PID : exécutable, éditeur, processus parent, heure de démarrage, mémoire, \
+        threads. Ne lit ni la ligne de commande ni le titre des fenêtres, et n’arrête rien.",
+            "parameters": {
+                "type": "object",
+                "properties": { "process_id": { "type": "integer", "minimum": 1 } },
+                "required": ["process_id"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "inspect_window",
             "description": "Lit la structure (types et noms des contrôles) de la fenêtre que l’utilisateur utilisait \
         juste avant AiWin11. Sans capture d’écran. L’utilisateur doit l’approuver.",
@@ -1315,6 +1327,7 @@ mod tests {
                 "list_services",
                 "get_system_status",
                 "list_processes",
+                "inspect_process",
                 "inspect_window",
                 "find_control",
                 "click_control",
@@ -1344,6 +1357,7 @@ mod tests {
                 "list_services",
                 "get_system_status",
                 "list_processes",
+                "inspect_process",
                 "inspect_window",
                 "find_control",
                 "click_control",

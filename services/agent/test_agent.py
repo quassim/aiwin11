@@ -68,6 +68,14 @@ class AgentProtocolTest(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("find_control", arguments)]}})
 
+    def test_inspect_process_takes_one_positive_process_id(self):
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("inspect_process", {"process_id": 4242})]}})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["arguments"], {"process_id": 4242})
+        for arguments in [{"process_id": 0}, {"process_id": -3}, {"process_id": True}, {"process_id": "12"}, {}]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("inspect_process", arguments)]}})
+
     def test_file_read_tools_are_registered_with_validated_names(self):
         for proposal, arguments in [
             (call("list_text_files", {}), {}),

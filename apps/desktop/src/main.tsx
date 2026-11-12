@@ -77,6 +77,7 @@ type ApprovalAction =
   | { kind: "describeWindow"; application: string; title: string; model: string }
   | { kind: "typeText"; text: string; characters: number }
   | { kind: "listProcesses" }
+  | { kind: "inspectProcess"; name: string; process_id: number }
   | { kind: "systemStatus" }
   | { kind: "readClipboard" }
   | { kind: "writeClipboard"; text: string; characters: number }
@@ -251,6 +252,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       detail: "Action : lire la mémoire, la charge du processeur et l’espace libre des disques. Rien n’est modifié.",
     };
   }
+  if (action.kind === "inspectProcess") {
+    return {
+      title: `L’agent demande à détailler le processus « ${action.name} »`,
+      detail: `PID ${action.process_id}. Action : lire son exécutable, son éditeur, son parent, sa mémoire et ses threads. Rien n’est arrêté.`,
+    };
+  }
   if (action.kind === "listProcesses") {
     return {
       title: "L’agent demande à lister les processus",
@@ -366,6 +373,8 @@ const activityNames: Record<string, string> = {
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
   "history.exported": "Journal d’audit exporté",
+  "process.inspect.completed": "Processus détaillé",
+  "process.inspect.failed": "Détail du processus impossible",
   "process.list.completed": "Processus listés par l’agent",
   "process.list.failed": "Liste des processus impossible",
   "system.status.completed": "État du PC lu par l’agent",

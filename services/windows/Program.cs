@@ -39,7 +39,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
         && command.InvokeControl is null && command.RunDiagnostic is null && command.Dictate is null
-        && command.ListDisplays is null && command.CaptureDisplay is null
+        && command.ListDisplays is null && command.CaptureDisplay is null && command.InspectProcess is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -85,6 +85,17 @@ else if (command.CaptureWindow is { } captureTarget)
         or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
     {
         Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the window.");
+    }
+}
+else if (command.InspectProcess is { } inspectProcess)
+{
+    var details = ProcessLister.Inspect(inspectProcess.ProcessId);
+    if (details is null)
+        Reject(Protocol.Result.Types.Status.Failed, "process_unavailable", "The process does not exist.");
+    else
+    {
+        result.ProcessDetails = details;
+        result.Status = Protocol.Result.Types.Status.Success;
     }
 }
 else if (command.ListProcesses is { } listing)

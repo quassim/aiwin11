@@ -8,6 +8,7 @@ Périmètre fixé avec l’utilisateur : terminer la ligne, y compris arrêt de 
 
 - 🧪 `find_control` : recherche de contrôles par nom ou type dans la fenêtre déjà lue (FindElement), sans nouvelle lecture de l’écran.
 - 🧪 Redimensionnement des fenêtres (`arrange_window` : moitié gauche, moitié droite, centrée) calculé sur l’écran de la fenêtre ; test réel du pont passé sur une Table des caractères ouverte et fermée par le test.
+- 🧪 `inspect_process` : détail en lecture seule d’un processus de la dernière liste (exécutable, éditeur, parent, démarrage, mémoire, threads), jamais la ligne de commande ni les titres de fenêtres.
 
 ## 2026-11-13, statut « test utilisateur à faire »
 

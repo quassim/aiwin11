@@ -58,6 +58,11 @@ def is_search_query(value: object) -> bool:
 MAX_LISTED_WINDOWS = 20
 
 
+def is_process_id(value: object) -> bool:
+    """A real process ID: a positive 32-bit integer (booleans excluded)."""
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 0xFFFFFFFF
+
+
 def is_window_number(value: object) -> bool:
     """Number of a window in the task's last list_windows result: 1 to 20."""
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_LISTED_WINDOWS
@@ -160,6 +165,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     },
     "admin_clean_temp": {},
     "find_control": {"query": is_search_query},
+    "inspect_process": {"process_id": is_process_id},
     "click_control": {"control": is_control_number},
     "remember": {"text": is_note},
     "recall": {},

@@ -12,9 +12,9 @@ use aiwin11_contracts::{
     v1::{
         arrange_window::Arrangement, command::Operation, dictation_result::Status as DictationStatus, result::Status,
         run_diagnostic::Diagnostic, service_entry::StartMode, AnalyzeCapture, ArrangeWindow, CaptureForeground,
-        CaptureWindow, CharacterMapDigit, Command, Dictate, GetSystemStatus, InspectForeground, InspectWindow,
-        InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard, Result as BridgeReply,
-        RunDiagnostic, TypeInNotepad, UiTree, WriteClipboard,
+        CaptureWindow, CharacterMapDigit, Command, Dictate, GetSystemStatus, InspectForeground, InspectProcess,
+        InspectWindow, InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard,
+        Result as BridgeReply, RunDiagnostic, TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -248,6 +248,22 @@ impl Core {
         // Only the title and application name were read: nothing of a protected window is used.
         self.ensure_window_unprotected(task, &located)?;
         Ok(located)
+    }
+
+    /// Agent tool: read-only details of one process the same task listed.
+    pub(crate) fn agent_inspect_process(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        process_id: u32,
+    ) -> Result<ProcessDetails, &'static str> {
+        let operation = Operation::InspectProcess(InspectProcess { process_id });
+        self.agent_bridge_call(task, policy, operation, "process.inspect", |reply| {
+            if reply.ui_tree.is_some() || reply.window_capture.is_some() || reply.process_list.is_some() {
+                return None;
+            }
+            accept_process_details(reply.process_details?, process_id)
+        })
     }
 
     /// Agent tool: read-only snapshot of the processes using the most memory.
@@ -810,6 +826,50 @@ pub(crate) struct ProcessInfo {
     pub working_set_bytes: u64,
     pub cpu_time_ms: u64,
     pub has_window: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessDetails {
+    pub process_id: u32,
+    pub name: String,
+    pub parent_process_id: u32,
+    pub start_time_unix_ms: i64,
+    pub working_set_bytes: u64,
+    pub private_bytes: u64,
+    pub cpu_time_ms: u64,
+    pub threads: u32,
+    pub handles: u32,
+    pub has_window: bool,
+    pub executable_path: String,
+    pub description: String,
+    pub company: String,
+}
+
+/// Validates one process's details: the asked ID, short printable texts.
+fn accept_process_details(details: aiwin11_contracts::v1::ProcessDetails, asked: u32) -> Option<ProcessDetails> {
+    let text = |value: &str, max: usize| value.chars().count() <= max && !value.chars().any(char::is_control);
+    let valid = details.process_id == asked
+        && !details.name.is_empty()
+        && text(&details.name, 64)
+        && text(&details.executable_path, 260)
+        && text(&details.description, 120)
+        && text(&details.company, 120)
+        && details.start_time_unix_ms >= 0;
+    valid.then_some(ProcessDetails {
+        process_id: details.process_id,
+        name: details.name,
+        parent_process_id: details.parent_process_id,
+        start_time_unix_ms: details.start_time_unix_ms,
+        working_set_bytes: details.working_set_bytes,
+        private_bytes: details.private_bytes,
+        cpu_time_ms: details.cpu_time_ms,
+        threads: details.threads,
+        handles: details.handles,
+        has_window: details.has_window,
+        executable_path: details.executable_path,
+        description: details.description,
+        company: details.company,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1386,6 +1446,41 @@ mod tests {
         assert!(status.memory_available_bytes > 0 && !status.drives.is_empty(), "{status:?}");
         let settings = status.settings.expect("Windows settings read");
         assert!(!settings.ui_language.is_empty() && !settings.time_zone.is_empty(), "{settings:?}");
+    }
+
+    #[test]
+    fn process_details_from_the_bridge_are_validated() {
+        let good = aiwin11_contracts::v1::ProcessDetails {
+            process_id: 42,
+            name: "chrome".into(),
+            executable_path: r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
+            description: "Google Chrome".into(),
+            ..Default::default()
+        };
+        assert_eq!(accept_process_details(good.clone(), 42).unwrap().description, "Google Chrome");
+        assert_eq!(accept_process_details(good.clone(), 43), None, "another process");
+        for bad in [
+            aiwin11_contracts::v1::ProcessDetails { name: "".into(), ..good.clone() },
+            aiwin11_contracts::v1::ProcessDetails { description: "a\nb".into(), ..good.clone() },
+            aiwin11_contracts::v1::ProcessDetails { executable_path: "x".repeat(261), ..good.clone() },
+            aiwin11_contracts::v1::ProcessDetails { start_time_unix_ms: -1, ..good.clone() },
+        ] {
+            assert_eq!(accept_process_details(bad, 42), None);
+        }
+    }
+
+    /// Inspects this test process through the broker and the published bridge.
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn inspects_a_process_through_the_broker_and_the_bridge() {
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let own = std::process::id();
+        assert_eq!(core.agent_inspect_process(&task, Policy::default(), own), Err("WINDOW_ACCESS_DENIED"));
+        let grant = Policy::granting(&[crate::broker::Capability::ProcessList]);
+        let details = core.agent_inspect_process(&task, grant, own).unwrap();
+        assert_eq!(details.process_id, own);
+        assert!(details.executable_path.ends_with(".exe") && details.threads > 0, "{details:?}");
     }
 
     #[test]

@@ -214,6 +214,9 @@ impl Policy {
             {
                 Ok("list_processes")
             }
+            Some(Operation::InspectProcess(inspect)) if agent(Capability::ProcessList) && inspect.process_id != 0 => {
+                Ok("inspect_process")
+            }
             Some(Operation::TypeInNotepad(input))
                 if agent(Capability::TypeText) && !input.text.is_empty() && input.text.chars().count() <= 2000 =>
             {

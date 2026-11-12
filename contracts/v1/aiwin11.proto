@@ -48,6 +48,7 @@ message Command {
     GenerateLocalVideo generate_local_video = 43;
     ListDisplays list_displays = 44;
     CaptureDisplay capture_display = 45;
+    InspectProcess inspect_process = 46;
   }
 }
 
@@ -73,6 +74,30 @@ message ListLocalText {}
 
 // Read-only snapshot of the processes using the most memory (at most 25).
 message ListProcesses { uint32 limit = 1; }
+
+// Read-only details of one process (no window title, no command line, nothing opened for writing).
+message InspectProcess { uint32 process_id = 1; }
+
+message ProcessDetails {
+  uint32 process_id = 1;
+  // Executable name without extension, at most 64 characters.
+  string name = 2;
+  // 0 when unknown.
+  uint32 parent_process_id = 3;
+  // Unix milliseconds; 0 when not readable (protected process).
+  int64 start_time_unix_ms = 4;
+  uint64 working_set_bytes = 5;
+  uint64 private_bytes = 6;
+  uint64 cpu_time_ms = 7;
+  uint32 threads = 8;
+  uint32 handles = 9;
+  bool has_window = 10;
+  // Full path of the executable, at most 260 characters; empty when not readable.
+  string executable_path = 11;
+  // From the executable's version resource, at most 120 characters each.
+  string description = 12;
+  string company = 13;
+}
 
 message ProcessList {
   repeated ProcessEntry processes = 1;
@@ -380,6 +405,7 @@ message Result {
   CommandOutput command_output = 15;
   DictationResult dictation = 16;
   DisplayList display_list = 17;
+  ProcessDetails process_details = 18;
 }
 
 message Error {

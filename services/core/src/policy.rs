@@ -103,10 +103,12 @@ pub enum AgentAction {
     SearchFiles,
     /// Finds controls by name or type in the window this task already inspected (no new read).
     FindControl,
+    /// Reads the details of one listed process (read-only).
+    InspectProcess,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -138,6 +140,7 @@ impl AgentAction {
         Self::Delegate,
         Self::SearchFiles,
         Self::FindControl,
+        Self::InspectProcess,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -177,6 +180,7 @@ impl AgentAction {
             Self::Delegate => "delegate",
             Self::SearchFiles => "search_files",
             Self::FindControl => "find_control",
+            Self::InspectProcess => "inspect_process",
         }
     }
 
@@ -272,6 +276,7 @@ impl AgentProfile {
             Self::WindowsAdmin => matches!(
                 action,
                 A::SystemStatus
+                    | A::InspectProcess
                     | A::ListProcesses
                     | A::ListServices
                     | A::RunDiagnostic
@@ -307,7 +312,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 31] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 32] = [
+    (A::InspectProcess, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::FindControl, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::Delegate, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::SearchFiles, [E::Allow, E::Allow, E::Allow, E::Allow]),

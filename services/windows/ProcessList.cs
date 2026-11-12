@@ -63,4 +63,85 @@ static class ProcessLister
             .Take((int)Math.Min(limit, MaxLimit)));
         return list;
     }
+
+    /// <summary>Read-only details of one process; null if it does not exist (any more).</summary>
+    public static Protocol.ProcessDetails? Inspect(uint processId)
+    {
+        if (processId == 0) return null;
+        Process process;
+        try
+        {
+            process = Process.GetProcessById((int)processId);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        using (process)
+        {
+            try
+            {
+                var name = process.ProcessName;
+                if (string.IsNullOrEmpty(name)) return null;
+                var details = new Protocol.ProcessDetails
+                {
+                    ProcessId = processId,
+                    Name = name.Length <= MaxName ? name : name[..MaxName],
+                    WorkingSetBytes = (ulong)Math.Max(0, process.WorkingSet64),
+                    PrivateBytes = (ulong)Math.Max(0, process.PrivateMemorySize64),
+                    Threads = (uint)process.Threads.Count,
+                    Handles = (uint)Math.Max(0, process.HandleCount),
+                };
+                // Each of these may be refused for a protected or elevated process: left empty.
+                Try(() => details.CpuTimeMs = (ulong)process.TotalProcessorTime.TotalMilliseconds);
+                Try(() => details.StartTimeUnixMs = new DateTimeOffset(process.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds());
+                Try(() => details.HasWindow = process.MainWindowHandle != IntPtr.Zero);
+                Try(() =>
+                {
+                    var path = process.MainModule?.FileName ?? "";
+                    if (path.Length <= 260) details.ExecutablePath = path;
+                    if (path.Length > 0)
+                    {
+                        var version = FileVersionInfo.GetVersionInfo(path);
+                        details.Description = Bounded(version.FileDescription);
+                        details.Company = Bounded(version.CompanyName);
+                    }
+                });
+                Try(() => details.ParentProcessId = ParentOf(processId));
+                return details;
+            }
+            catch (InvalidOperationException)
+            {
+                return null; // Exited while being read.
+            }
+        }
+    }
+
+    static string Bounded(string? text)
+    {
+        var value = (text ?? "").Trim();
+        return value.Length <= 120 && !value.Any(char.IsControl) ? value : "";
+    }
+
+    static uint ParentOf(uint processId)
+    {
+        using var searcher = new System.Management.ManagementObjectSearcher(
+            $"SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = {processId}");
+        foreach (var item in searcher.Get())
+            using (item)
+                return item["ParentProcessId"] is uint parent ? parent : 0;
+        return 0;
+    }
+
+    static void Try(Action read)
+    {
+        try
+        {
+            read();
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException or NotSupportedException
+            or UnauthorizedAccessException or System.Management.ManagementException or System.IO.IOException)
+        {
+        }
+    }
 }
