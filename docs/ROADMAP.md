@@ -114,14 +114,14 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
 | Licence : open source, privée ou hybride | ✅ Sans objet (usage personnel) | — |
-| Service privilégié facultatif | 🔷 Voir « Composant administrateur » §6 | R9 |
+| Service privilégié facultatif | ✅ Décidé : assistant élevé **à la demande** (option B, §6), pas de service ; réalisation ❌ | R2 |
 
 ### 2.3 Spécification v1.0 [S1]
 
 | Point | État | Phase |
 |---|---|---|
 | 6 processus (desktop, core, broker, windows, agent, model) | 🟡 desktop+core+broker+model dans Tauri ; windows et agent séparés | R4 |
-| Admin futur via composant dédié limité en durée et périmètre | ❌ | R9 |
+| Admin futur via composant dédié limité en durée et périmètre | ❌ Décidé : assistant élevé à la demande (option B, §6) | R2 |
 | Frontend sans terminal ni système de fichiers direct, commandes Tauri restreintes | ✅ Capacités Tauri par commande | — |
 | Transport : Tauri IPC ✅, **gRPC sur named pipes avec ACL et identité** ❌, Protobuf ✅, flux d’événements ✅, HTTP local pour runtimes ✅ ; rien exposé au LAN ✅ | 🟡 | R4 |
 | Enveloppe avec `payload`, identité attribuée par une couche de confiance | 🟡 Opérations typées ; identité fixée par l’hôte | R4 |
@@ -259,6 +259,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
   - Presse-papiers (lecture et écriture avec approbation) ;
   - SystemService : matériel et métriques ;
   - DesktopService : écrans, capture d’écran complète.
+- **Assistant élevé à la demande** (option B, §6) pour les opérations administrateur d’une liste fermée : double validation AiWin11 + UAC, une opération par lancement, puis arrêt.
 - Changement de méthode (API → UIA → vision → souris/clavier) **sans élargir les autorisations**.
 - Fichiers : plusieurs dossiers autorisés, recherche, autres formats ; restauration et vidage de la corbeille ; sauvegarde avant modification (`require_backup`).
 - Scénarios « Range ces fichiers » (plan prévisualisé, approbation groupée) et « PC lent » (diagnostic, actions sûres, rapport).
@@ -316,8 +317,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Journaux techniques, traces d’agents, statistiques des modèles, ressources, diagnostics ; suivi des coûts avancé.
 - Suite complète de tests de sécurité et de robustesse (AW-024).
 - Catalogue local de plugins (AW-031).
-- **Installateur classique** (NSIS ou MSI via Tauri) embarquant le pont .NET, l’agent Python et leurs runtimes ; mises à jour ; diagnostics (AW-032). Signature de code facultative pour un usage personnel.
-- Composant administrateur : option B (assistant élevé à la demande, invite UAC à chaque action) si la décision §6 la retient.
+- **Installateur classique** (NSIS ou MSI via Tauri) embarquant le pont .NET, l’assistant élevé, l’agent Python et leurs runtimes ; mises à jour ; diagnostics (AW-032). Signature de code facultative pour un usage personnel.
 
 ---
 
@@ -331,6 +331,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 | Licence | **Sans objet** : usage personnel, un seul utilisateur | Aucune action |
 | Installateur | **Classique** (pas de MSIX) | R9 : installateur Tauri NSIS ou MSI, avec le pont .NET, l’agent Python et leur runtime |
 | Chiffrement SQLite | **Pas de chiffrement de la base entière pour l’instant** | Voir ci-dessous |
+| Composant administrateur | **Option B : assistant élevé à la demande** (détail ci-dessous) | Réalisé en R2, avec les actions système |
 | Machine de référence | **Le PC de l’utilisateur** : Intel Core i9-12900K (16 cœurs / 24 threads), 32 Go de RAM, NVIDIA RTX 3090 24 Go (pilote 621.14), SSD Samsung 980 PRO 1 To, Windows 11 Professionnel build 26300 | Toutes les mesures de performance (R1) sont faites et comparées sur cette machine |
 
 **Chiffrement SQLite — justification.** Aujourd’hui la base ne contient aucune donnée sensible : seulement des types d’événements, des codes de décision, des états de tâche et le profil de sécurité. Les demandes, les réponses, les noms et contenus de fichiers, les titres de fenêtres et le texte saisi n’y sont jamais écrits ; la clé API est dans le Gestionnaire d’identifiants Windows. Chiffrer la base entière (SQLCipher) ajouterait une dépendance native et une gestion de clé sans rien protéger de plus. Deux règles à la place :
@@ -344,10 +345,11 @@ Recommandation hors application : activer BitLocker sur le disque système prot�
 
 | Décision | Contexte |
 |---|---|
-| Composant administrateur | Voir l’explication ci-dessous ; à décider avant R2 (actions système) |
 | Design system (Tailwind ou autre) | [S0 §3] ; CSS simple aujourd’hui ; à décider en R5 |
 
-**Composant administrateur — de quoi il s’agit.** AiWin11 tourne avec les droits d’un utilisateur normal, comme exigé par la spécification. Certaines actions Windows exigent les droits administrateur : installer ou désinstaller un logiciel, arrêter ou configurer un service, modifier des réglages système protégés (pare-feu, Defender, registre machine), nettoyer des fichiers système. Pour le scénario « PC lent », par exemple, une partie des optimisations en dépend. Trois options :
+### Composant administrateur — option B retenue
+
+**De quoi il s’agit.** AiWin11 tourne avec les droits d’un utilisateur normal, comme exigé par la spécification. Certaines actions Windows exigent les droits administrateur : installer ou désinstaller un logiciel, arrêter ou configurer un service, modifier des réglages système protégés (pare-feu, Defender, registre machine), nettoyer des fichiers système. Pour le scénario « PC lent », par exemple, une partie des optimisations en dépend. Trois options :
 
 | Option | Fonctionnement | Avantages | Inconvénients |
 |---|---|---|---|
@@ -355,4 +357,12 @@ Recommandation hors application : activer BitLocker sur le disque système prot�
 | B. Assistant élevé à la demande | Un petit programme séparé, lancé seulement pour une action précise, avec l’invite UAC de Windows à chaque fois, puis il s’arrête | Tu valides deux fois (AiWin11 puis Windows) ; rien d’élevé ne reste actif | Développement supplémentaire ; une invite UAC à chaque action |
 | C. Service Windows permanent | Un service installé tourne en permanence avec des droits élevés | Pas d’invite UAC | Surface d’attaque permanente ; contraire à l’esprit de la spécification |
 
-Recommandation : **A maintenant, B plus tard** (R9) si le besoin se confirme. C est déconseillée.
+**Choix : B.** Exigences de conception, en complément de la spécification ([S0 §10], [S1 §2.1]) :
+
+- **Exécutable séparé et minimal** (`AiWin11.Elevated.exe`), sans réseau, sans interface ; il n’accepte qu’**une** opération typée v1 par lancement, depuis une liste fermée (par exemple : arrêter un service, désinstaller un programme identifié, nettoyer les fichiers temporaires système). Jamais de commande libre ni de script.
+- **Double validation** : la politique AiWin11 classe ces opérations comme **critiques** (toujours demandées, dans tous les profils, refusées en Observation), puis Windows affiche l’**invite UAC** au lancement. Refuser l’une ou l’autre annule l’action.
+- **Durée de vie limitée** : lancé pour l’opération, il vérifie son échéance, exécute, renvoie un résultat vérifié et se termine ; rien d’élevé ne reste actif. Pas de service installé, pas de tâche planifiée.
+- **Canal privé** : la commande arrive par un canal hérité ou un named pipe à ACL limitée à l’utilisateur ; l’assistant vérifie l’identité de l’appelant et l’intégrité de la commande.
+- **Audit** : décision, invite UAC acceptée ou refusée, résultat ; jamais de données sensibles.
+- **Installation** : l’assistant est livré par l’installateur classique, à côté du pont, signé si possible pour que l’invite UAC affiche un éditeur identifié.
+- L’option C (service permanent) reste exclue.
