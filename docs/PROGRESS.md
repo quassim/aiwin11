@@ -2,6 +2,16 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, nuit — R8 et MCP
+
+**Fait** : `0f891a3` + `309223f` demandes planifiées chaque jour (modèle local, profil Observation forcé, toute demande d’accord refusée — règle `unattended`, résultats chiffrés) ; `fa69d19` client MCP stdio : page **Extensions** (5 serveurs déclarés, exécutable et arguments fixes), outils `mcp_list_tools` et `mcp_call` (toujours demandé, arguments affichés) via le broker.
+
+**Vérifié** : `verify.ps1` (93 tests Rust). MCP et planification non testés en réel (aucun serveur MCP installé).
+
+**Leçon** : ne jamais écrire de barre oblique inverse dans un heredoc bash contenant du Python (le Bash tool les réinterprète) : passer par un fichier écrit avec l’outil Write.
+
+**Reste** : R4 processus séparés (gRPC), R5 overlay flottant, R7 génération d’images/vidéo (aucun moteur local installé), R8 multi-agents et éditeur visuel, R9 signature du code et mises à jour, tests E2E de l’interface.
+
 ## 2026-11-12, soir — suite autonome
 
 **Fait** : `cf2dd43` recherche sémantique dans la mémoire (embeddings locaux Ollama, repli mots-clés) ; `233f33a` lecture à voix haute avec les voix Windows locales seulement ; `57fab10` cartes graphiques détectées par WMI (T-014) ; `5f4835b` diagnostics approuvés en liste fermée (`ipconfig /all`, `netsh wlan show interfaces`, `w32tm /query /status`) ; `aeabf8f` dossier de travail choisi dans le profil (appliqué au démarrage).
