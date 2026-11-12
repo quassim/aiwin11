@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { type CloudCost, euros, loadCloudCost } from "./CloudCost";
 import { type LoadedModel, placementAdvice, placementLabel } from "./placement";
+import { Backups } from "./Backups";
 import { Updates } from "./Updates";
 
 type Policy = { settings: { autonomy: string; simulate: boolean } };
@@ -188,6 +189,7 @@ export function ControlCenter({
         <p>{loading ? "Recherche des composants…" : "État de l’installation indisponible."}</p>
       )}
       <Updates running={running} />
+      <Backups disabled={running} />
     </section>
   );
 }

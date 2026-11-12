@@ -34,6 +34,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Règles par ressource : fichiers protégés (modèles de noms, page Sécurité) invisibles pour l’agent et refusés à l’exécution (`FILE_PROTECTED`, audité) ; risque du manifeste ajouté à chaque décision journalisée. Vérifié par `verify.ps1`.
 
+- Sauvegardes des données d’AiWin11 (Centre de contrôle) : copie cohérente `VACUUM INTO`, automatique avant chaque migration, 5 gardées ; restauration vérifiée appliquée au démarrage suivant après sauvegarde des données actuelles. Vérifié par `verify.ps1` (4 tests Rust) ; la prochaine ouverture de l’application sur la machine de référence fera la première sauvegarde avant migration.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

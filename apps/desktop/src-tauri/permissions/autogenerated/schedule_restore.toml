@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schedule-restore"
+description = "Enables the schedule_restore command without any pre-configured scope."
+commands.allow = ["schedule_restore"]
+
+[[permission]]
+identifier = "deny-schedule-restore"
+description = "Denies the schedule_restore command without any pre-configured scope."
+commands.deny = ["schedule_restore"]

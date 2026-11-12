@@ -63,7 +63,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Confirmations des opérations sensibles | ✅ | — |
 | Journal d’audit | ✅ | — |
 | Arrêt d’urgence | ✅ Arrêt global « Stoppe toutes les tâches » (demandé / confirmé) | — |
-| Mécanismes de récupération | 🟡 Corbeille, reprise après plantage ; pas de sauvegardes ni points de restauration | R2 |
+| Mécanismes de récupération | 🟡 Corbeille, reprise après plantage, sauvegardes des données d’AiWin11 (manuelles et automatiques avant migration, 5 gardées) avec restauration au démarrage suivant ; pas de points de restauration Windows | R2 |
 | Tableau de bord | ✅ Centre de contrôle | — |
 | Assistant flottant | ✅ Mode flottant (petite fenêtre toujours au premier plan) | — |
 | Raccourcis globaux | ✅ Ctrl+Alt+Espace ouvre le champ de demande | — |
@@ -111,7 +111,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Anti-injection : contenu = données | ✅ Fichiers et fenêtres ; pages web ❌ | R6 |
 | Secrets jamais donnés aux modèles | ✅ | — |
 | Arrêt d’urgence global, distinguer arrêt demandé / confirmé | ✅ `stop_all_tasks` : arrêté, demandé puis confirmé | — |
-| Récupération : points de restauration, sauvegardes ciblées, opérations réversibles 🟡 (corbeille), transactions compensatoires | 🟡 | R2 |
+| Récupération : points de restauration, sauvegardes ciblées 🟡 (données d’AiWin11), opérations réversibles 🟡 (corbeille), transactions compensatoires | 🟡 | R2 |
 | Surfaces : Control Center ✅, Command Palette 🟡 (champ ouvert par raccourci global), Voice Assistant 🟡 (dictée et lecture déclenchées par l’utilisateur), Workflow Studio 🟡 | 🟡 | R5, R7, R8 |
 | UX : mode simple / mode expert | ✅ Bouton mode expert (pages avancées masquées sinon) | — |
 | UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur) | ✅ Indicateur permanent dans la barre latérale (inactif, analyse, planification, attente d’approbation, exécution, pause, nouvel essai, erreur), annoncé aux lecteurs d’écran ; demandes de la fenêtre principale seulement (pas les routines planifiées) | R5 |

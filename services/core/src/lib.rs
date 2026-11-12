@@ -1,5 +1,6 @@
 #[cfg(windows)]
 pub mod admin;
+pub mod backup;
 pub mod broker;
 pub mod grants;
 pub mod images;
@@ -273,7 +274,22 @@ pub struct TaskRecord {
 
 impl Core {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
-        Self::start(Connection::open(path)?)
+        let db = Connection::open(path)?;
+        // Restore point: an existing store about to be migrated is copied first. A failed copy
+        // stops the start rather than migrating without a way back.
+        let version: u32 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version > 0 && (version as usize) < MIGRATIONS.len() {
+            backup::create(&db, &backup::backup_dir(path), backup::Reason::BeforeMigration)
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        }
+        Self::start(db)
+    }
+
+    /// Makes a backup of the store now (journaled `data.backup.created`, code `manual`).
+    pub fn backup(&self, dir: &Path) -> Result<backup::BackupInfo, &'static str> {
+        let info = backup::create(&self.db, dir, backup::Reason::Manual)?;
+        self.journal("data.backup.created", Some("manual")).map_err(|_| "BACKUP_FAILED")?;
+        Ok(info)
     }
 
     fn start(mut db: Connection) -> rusqlite::Result<Self> {

@@ -22,7 +22,11 @@
     "allow-get-cloud-cost",
     "allow-ui-ready",
     "allow-get-local-fallback-model",
-    "allow-get-protected-files", "allow-set-cloud-budget",
+    "allow-get-protected-files",
+    "allow-list-backups",
+    "allow-backup-data",
+    "allow-schedule-restore",
+    "allow-cancel-restore", "allow-set-cloud-budget",
     "allow-set-cloud-cost",
     "allow-set-local-fallback-model",
     "allow-set-protected-files", "allow-set-cloud-fallback", "allow-get-model-resources"

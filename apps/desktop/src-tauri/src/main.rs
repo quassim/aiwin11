@@ -7,6 +7,7 @@ use std::{
 };
 
 use aiwin11_core::{
+    backup,
     grants::Grant,
     local_files::LocalFiles,
     manifest::{ToolManifest, MANIFESTS},
@@ -85,6 +86,8 @@ struct AppState {
     /// Process start, and the time the interface first reported itself rendered (T-001).
     launched: Instant,
     ui_ready_ms: OnceLock<u64>,
+    /// Path of the SQLite store; backups live next to it.
+    store: std::path::PathBuf,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -653,6 +656,40 @@ fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), 
     lock_core(&state.core).set_cloud_token_budget(tokens)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupOverview {
+    backups: Vec<backup::BackupInfo>,
+    /// Backup that will replace the data at the next launch, if any.
+    pending_restore: Option<String>,
+}
+
+#[tauri::command]
+fn list_backups(state: State<'_, Arc<AppState>>) -> BackupOverview {
+    BackupOverview {
+        backups: backup::list(&backup::backup_dir(&state.store)),
+        pending_restore: backup::pending_restore(&state.store),
+    }
+}
+
+#[tauri::command]
+fn backup_data(state: State<'_, Arc<AppState>>) -> Result<backup::BackupInfo, &'static str> {
+    lock_core(&state.core).backup(&backup::backup_dir(&state.store))
+}
+
+#[tauri::command]
+fn schedule_restore(state: State<'_, Arc<AppState>>, name: String) -> Result<(), &'static str> {
+    backup::schedule_restore(&state.store, &name)?;
+    let _ = lock_core(&state.core).journal("data.restore.scheduled", None);
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_restore(state: State<'_, Arc<AppState>>) {
+    backup::cancel_restore(&state.store);
+    let _ = lock_core(&state.core).journal("data.restore.cancelled", None);
+}
+
 #[tauri::command]
 fn get_protected_files(state: State<'_, Arc<AppState>>) -> Vec<String> {
     lock_core(&state.core).protected_files()
@@ -1038,7 +1075,16 @@ fn main() {
         .setup(move |app| {
             let data_dir = app.path().app_local_data_dir()?;
             fs::create_dir_all(&data_dir)?;
-            let core = Core::open(&data_dir.join("aiwin11.sqlite3"))?;
+            let store = data_dir.join("aiwin11.sqlite3");
+            // A restore asked for during the previous run is applied before the store opens.
+            let restored = backup::apply_pending_restore(&store);
+            let core = Core::open(&store)?;
+            if let Some(outcome) = restored {
+                let _ = core.journal(
+                    if outcome.is_ok() { "data.restore.applied" } else { "data.restore.failed" },
+                    Some(outcome.err().unwrap_or("success")),
+                );
+            }
             // The user's folder if one was chosen and is still allowed; otherwise the dedicated one.
             let files = core
                 .workspace()
@@ -1052,6 +1098,7 @@ fn main() {
                 vision: Mutex::new(()),
                 launched,
                 ui_ready_ms: OnceLock::new(),
+                store,
             }));
             // Pay the bridge's first start (runtime load, antivirus scan) now, not within a
             // command's deadline. The spare process waits idle for an authorized command.
@@ -1098,6 +1145,10 @@ fn main() {
             get_cloud_cost,
             get_local_fallback_model,
             get_protected_files,
+            list_backups,
+            backup_data,
+            schedule_restore,
+            cancel_restore,
             get_cloud_usage,
             get_runtime_status,
             ui_ready,
