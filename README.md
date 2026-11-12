@@ -29,7 +29,7 @@ La description de fenêtre et l’analyse d’image exigent qu’Ollama confirme
 
 ## Utiliser l’assistant
 
-1. Dans **Modèles**, détectez les modèles Ollama et choisissez le modèle de l’agent. Facultatif : détectez les modèles de vision et choisissez-en un.
+1. Dans **Modèles**, détectez les modèles Ollama et choisissez le modèle de l’agent. Facultatif : détectez les modèles de vision et choisissez-en un. Ces choix (fournisseur, modèle, modèle de vision, identifiant du modèle OpenAI) sont mémorisés et revérifiés auprès d’Ollama au démarrage suivant.
 2. Dans **Sécurité**, choisissez le profil d’autonomie (voir plus bas). **Assisté** est le profil par défaut.
 3. Dans **Accueil**, écrivez une demande en langage naturel (2 000 caractères au maximum).
 
@@ -63,7 +63,7 @@ Le **mode simulation** remplace toute action avec effet par une simulation : l�
 
 ### Fournisseur cloud optionnel
 
-Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, cochez l’envoi du texte de la demande à OpenAI, pour cette demande seulement. Ollama est sélectionné au démarrage. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)
+Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, cochez l’envoi du texte de la demande à OpenAI, pour cette demande seulement : cet accord n’est jamais mémorisé. Le fournisseur choisi est mémorisé ; Ollama est sélectionné au premier démarrage. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)
 
 ### Journal et reprise
 

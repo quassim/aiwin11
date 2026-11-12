@@ -15,7 +15,37 @@ use std::{path::Path, time::Duration};
 use rusqlite::{params, Connection, TransactionBehavior};
 use uuid::Uuid;
 
+use serde::{Deserialize, Serialize};
+
 use crate::policy::{Autonomy, PolicySettings};
+
+/// Remembered model choices. Only public identifiers: never a key, a prompt or a reply.
+/// The cloud approval is deliberately not remembered: it is given again for each request.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPreferences {
+    /// `ollama` or `openai`.
+    pub provider: String,
+    pub local_model: String,
+    pub cloud_model: String,
+    pub vision_model: String,
+}
+
+const PREFERENCE_KEYS: [&str; 4] = ["model.provider", "model.local", "model.cloud", "model.vision"];
+
+impl ModelPreferences {
+    /// A model identifier: at most 256 characters, printable, no path or control characters.
+    fn valid_identifier(value: &str) -> bool {
+        value.chars().count() <= 256 && value.chars().all(|c| !c.is_control())
+    }
+
+    fn validated(self) -> Option<Self> {
+        let provider_ok = matches!(self.provider.as_str(), "ollama" | "openai");
+        let identifiers_ok = [&self.local_model, &self.cloud_model, &self.vision_model]
+            .iter().all(|value| Self::valid_identifier(value));
+        (provider_ok && identifiers_ok).then_some(self)
+    }
+}
 
 pub struct Core {
     db: Connection,
@@ -137,17 +167,57 @@ impl Core {
         &self.session_id
     }
 
+    fn setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
+        self.db.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
+            .map(Some)
+            .or_else(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                error => Err(error),
+            })
+    }
+
+    /// Remembered model choices; defaults (local provider, nothing chosen) when absent or invalid.
+    pub fn model_preferences(&self) -> ModelPreferences {
+        let mut values = PREFERENCE_KEYS.iter()
+            .map(|key| self.setting(key).ok().flatten().unwrap_or_default());
+        let preferences = ModelPreferences {
+            provider: values.next().unwrap_or_default(),
+            local_model: values.next().unwrap_or_default(),
+            cloud_model: values.next().unwrap_or_default(),
+            vision_model: values.next().unwrap_or_default(),
+        };
+        preferences.validated().unwrap_or(ModelPreferences { provider: "ollama".into(), ..Default::default() })
+    }
+
+    /// Stores the model choices and journals the change (provider code only, never a name).
+    pub fn set_model_preferences(&mut self, preferences: ModelPreferences) -> Result<(), &'static str> {
+        let preferences = preferences.validated().ok_or("SETTINGS_INVALID")?;
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            for (key, value) in PREFERENCE_KEYS.iter().zip([
+                &preferences.provider, &preferences.local_model, &preferences.cloud_model, &preferences.vision_model,
+            ]) {
+                transaction.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                    params![key, value],
+                )?;
+            }
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.models.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), self.session_id, preferences.provider],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// Current policy settings. Missing settings mean the defaults (Assisted, no simulation).
     /// An unreadable store or an unknown value resolves to the most restrictive profile.
     pub fn policy_settings(&self) -> PolicySettings {
-        let read = |key: &str| -> rusqlite::Result<Option<String>> {
-            self.db.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
-                .map(Some)
-                .or_else(|error| match error {
-                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                    error => Err(error),
-                })
-        };
+        let read = |key: &str| self.setting(key);
         let restrictive = PolicySettings { autonomy: Autonomy::Observation, simulate: false };
         let (Ok(autonomy), Ok(simulate)) = (read("policy.autonomy"), read("policy.simulate")) else {
             return restrictive;
@@ -243,6 +313,32 @@ mod tests {
         assert!(recovered.contains(&("a".into(), "dispatching".into())));
         core.task_state("a", "planning", None).unwrap();
         assert_eq!(core.recent_tasks(10).unwrap().iter().find(|task| task.id == "a").unwrap().state, "interrupted");
+        drop(core);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn model_preferences_persist_and_invalid_values_are_refused() {
+        let path = std::env::temp_dir().join(format!("aiwin11-prefs-{}.sqlite3", Uuid::new_v4()));
+        let chosen = ModelPreferences {
+            provider: "openai".into(), local_model: "qwen3:8b".into(),
+            cloud_model: "gpt-x".into(), vision_model: "gemma3:4b".into(),
+        };
+        {
+            let mut core = Core::open(&path).unwrap();
+            assert_eq!(core.model_preferences().provider, "ollama", "local by default");
+            core.set_model_preferences(chosen.clone()).unwrap();
+            let event = &core.activity().unwrap()[0];
+            assert_eq!((event.kind.as_str(), event.code.as_deref()), ("settings.models.changed", Some("openai")));
+            let bad = ModelPreferences { provider: "other".into(), ..chosen.clone() };
+            assert_eq!(core.set_model_preferences(bad), Err("SETTINGS_INVALID"));
+            let bad = ModelPreferences { local_model: "a\nb".into(), ..chosen.clone() };
+            assert_eq!(core.set_model_preferences(bad), Err("SETTINGS_INVALID"));
+        }
+        let core = Core::open(&path).unwrap();
+        assert_eq!(core.model_preferences(), chosen, "remembered across restarts");
+        core.db.execute("UPDATE settings SET value = 'x' WHERE key = 'model.provider'", []).unwrap();
+        assert_eq!(core.model_preferences().provider, "ollama");
         drop(core);
         let _ = std::fs::remove_file(&path);
     }

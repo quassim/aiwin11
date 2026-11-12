@@ -233,7 +233,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 ### R1 — Consolider le produit (prochaine étape)
 
 - Distribution de développement simplifiée : embarquer l’agent Python et le pont .NET, supprimer `AIWIN11_PYTHON` manuel ; script de démarrage unique (`scripts/`).
-- Réglages mémorisés : fournisseur, modèle, modèle de vision.
+- ✅ Réglages mémorisés : fournisseur, modèle, modèle de vision (table `settings`, événement `settings.models.changed`).
 - **Arrêt global** (« Stoppe toutes les tâches ») avec état demandé / confirmé ; bouton toujours visible.
 - **Durée de conservation et effacement** de l’historique ; export du journal d’audit.
 - Événements manquants : `task.started`, `task.progress`, `model.provider.unavailable` ; payload JSON non sensible.

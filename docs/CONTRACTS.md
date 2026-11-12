@@ -135,6 +135,8 @@ Invariants, in order: local-only tools are denied to cloud models (`local_only`)
 
 Settings live in the `settings` table (`policy.autonomy`, `policy.simulate`), are changed through `set_policy_settings` (main window only, journaled as `settings.policy.changed`) and are read once per task (`policy.profile` event): a running task keeps the settings it started with. `get_policy_overview` returns the settings and the decision table computed by the core.
 
+Model preferences (`model.provider` = `ollama`|`openai`, `model.local`, `model.cloud`, `model.vision`) are read with `get_model_preferences` and written with `set_model_preferences` (`ModelPreferences { provider, localModel, cloudModel, visionModel }`; identifiers ≤ 256 characters without control characters, otherwise `SETTINGS_INVALID`), journaled as `settings.models.changed` with the provider code only. The cloud approval and the API key are never stored there. Invalid stored values resolve to the local provider with nothing selected.
+
 ### Gate for one action
 
 1. **Decide.** The engine's decision is journaled as `policy.evaluated` with code `effect:action:rule`. A denial is reported (`denied`) and returned to the model as an observation.

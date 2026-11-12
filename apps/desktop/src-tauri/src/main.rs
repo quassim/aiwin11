@@ -9,7 +9,7 @@ use aiwin11_core::{
     policy::{self, AgentAction, Effect, PolicySettings},
     task::{TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
-    Core,
+    Core, ModelPreferences,
 };
 use serde::Serialize;
 use tauri::{ipc::Channel, Manager, State};
@@ -236,6 +236,18 @@ fn set_policy_settings(state: State<'_, Arc<AppState>>, settings: PolicySettings
         .set_policy_settings(settings).map_err(|_| "SETTINGS_UNAVAILABLE")
 }
 
+#[tauri::command]
+fn get_model_preferences(state: State<'_, Arc<AppState>>) -> Result<ModelPreferences, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.model_preferences())
+}
+
+#[tauri::command]
+fn set_model_preferences(
+    state: State<'_, Arc<AppState>>, preferences: ModelPreferences,
+) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_model_preferences(preferences)
+}
+
 /// The user's answer to the action the agent proposed for the running task.
 #[tauri::command]
 fn resolve_approval(
@@ -262,7 +274,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot, discover_models, run_task, cancel_task, resolve_approval,
-            get_policy_overview, set_policy_settings, get_tasks,
+            get_policy_overview, set_policy_settings, get_tasks, get_model_preferences, set_model_preferences,
             openai_key_configured, save_openai_key, delete_openai_key, inspect_foreground,
             capture_foreground, discover_vision_models, analyze_capture, enter_character_map_digit,
             local_files_root, preview_local_text, copy_local_text,

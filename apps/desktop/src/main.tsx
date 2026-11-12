@@ -8,6 +8,7 @@ import "./style.css";
 
 type Page = "Accueil" | "Modèles" | "Sécurité" | "Inspecteur" | "Fichiers" | "Activité";
 type Provider = "ollama" | "openai";
+type ModelPreferences = { provider: Provider; localModel: string; cloudModel: string; visionModel: string };
 type Activity = { sequence: number; kind: string; timestamp: string; taskId: string | null; code: string | null };
 type TaskEntry = { id: string; state: string; outcome: string | null; createdAt: string; updatedAt: string };
 const taskStateNames: Record<string, string> = {
@@ -283,6 +284,24 @@ function App() {
 
   useEffect(refresh, [refresh]);
   useEffect(() => { void refreshKey(); }, []);
+  useEffect(() => {
+    // Restore the remembered choices, then check them against what is installed locally.
+    void invoke<ModelPreferences>("get_model_preferences").then((saved) => {
+      setProvider(saved.provider === "openai" ? "openai" : "ollama");
+      setModel(saved.localModel);
+      setCloudModel(saved.cloudModel);
+      setVisionModel(saved.visionModel);
+      if (saved.provider !== "openai" && saved.localModel) void discoverModels();
+      if (saved.provider !== "openai" && saved.visionModel) void discoverVisionModels();
+    }, () => undefined);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Remembers an explicit choice of the user (never the cloud approval nor the key). */
+  function rememberModels(change: Partial<ModelPreferences>) {
+    const next: ModelPreferences = { provider, localModel: model, cloudModel, visionModel, ...change };
+    void invoke("set_model_preferences", { preferences: next }).catch(() => undefined);
+  }
   async function discoverVisionModels() {
     setVisionStatus("Recherche en cours…");
     try {
@@ -464,7 +483,9 @@ function App() {
             <div className="task-form">
               <label htmlFor="provider">Fournisseur pour les actions Windows</label>
               <select id="provider" value={provider} disabled={running || keyBusy} onChange={(event) => {
-                setProvider(event.target.value === "openai" ? "openai" : "ollama");
+                const chosen: Provider = event.target.value === "openai" ? "openai" : "ollama";
+                setProvider(chosen);
+                rememberModels({ provider: chosen });
                 resetApproval();
               }}>
                 <option value="ollama">Ollama · Local</option>
@@ -479,7 +500,7 @@ function App() {
             <div className="task-form">
               <label htmlFor="model">Modèle pour les actions Windows</label>
               <select id="model" value={model} disabled={!models.length || running || loadingModels}
-                onChange={(event) => { setModel(event.target.value); resetApproval(); }}>
+                onChange={(event) => { setModel(event.target.value); rememberModels({ localModel: event.target.value }); resetApproval(); }}>
                 <option value="">Sélectionner un modèle</option>
                 {models.map((name) => <option key={name}>{name}</option>)}
               </select>
@@ -491,7 +512,7 @@ function App() {
             <div className="task-form">
               <label htmlFor="vision-model">Modèle de vision local (facultatif)</label>
               <select id="vision-model" value={visionModel} disabled={!visionModels.length || running}
-                onChange={(event) => setVisionModel(event.target.value)}>
+                onChange={(event) => { setVisionModel(event.target.value); rememberModels({ visionModel: event.target.value }); }}>
                 <option value="">Aucun : l’agent ne peut pas décrire de fenêtre</option>
                 {visionModels.map((name) => <option key={name}>{name}</option>)}
               </select>
@@ -500,7 +521,8 @@ function App() {
               <div className="task-form">
                 <label htmlFor="cloud-model">Identifiant du modèle OpenAI</label>
                 <input id="cloud-model" value={cloudModel} maxLength={256} disabled={running}
-                  onChange={(event) => { setCloudModel(event.target.value); resetApproval(); }} />
+                  onChange={(event) => { setCloudModel(event.target.value); resetApproval(); }}
+                  onBlur={() => rememberModels({ cloudModel: cloudModel.trim() })} />
               </div>
               <form className="task-form" autoComplete="off" onSubmit={(event) => {
                 event.preventDefault();
