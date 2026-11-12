@@ -29,6 +29,31 @@ static class SystemStatusReader
             LogicalProcessors = (uint)Environment.ProcessorCount,
             UptimeSeconds = (ulong)(Environment.TickCount64 / 1000),
         };
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT Name, DriverVersion, AdapterRAM FROM Win32_VideoController");
+            foreach (var adapter in searcher.Get())
+            {
+                using (adapter)
+                {
+                    if (status.Gpus.Count >= 4) break;
+                    var name = (adapter["Name"] as string ?? "").Trim();
+                    if (name.Length == 0) continue;
+                    status.Gpus.Add(new Protocol.GpuInfo
+                    {
+                        Name = name.Length <= 120 ? name : name[..120],
+                        DriverVersion = (adapter["DriverVersion"] as string ?? "").Trim() is var v && v.Length <= 40 ? v : "",
+                        MemoryBytes = adapter["AdapterRAM"] is uint ram ? ram : 0,
+                    });
+                }
+            }
+        }
+        catch (Exception error) when (error is System.Management.ManagementException
+            or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+        {
+            // GPU details unavailable: the rest of the status is still reported.
+        }
         foreach (var drive in DriveInfo.GetDrives())
         {
             if (status.Drives.Count >= MaxDrives) break;

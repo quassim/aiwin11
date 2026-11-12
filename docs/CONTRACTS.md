@@ -219,7 +219,7 @@ Strategies: `manual` (default: the chosen model, nothing else) and `local_first`
 
 ## Agent system status
 
-`get_system_status` (no argument, local models only) is a read allowed in every profile. The host sends `GetSystemStatus {}` (agent peer with `Capability::SystemStatus`). The bridge answers `SystemStatus { memory_total_bytes, memory_available_bytes, cpu_load_percent (sampled over 250 ms with GetSystemTimes), logical_processors, uptime_seconds, drives }`, with at most 8 fixed drives `DriveStatus { name, total_bytes, free_bytes }`. The host rejects incoherent figures (available memory above total, load above 100, free space above size). The agent receives rounded figures; journaled as `system.status.completed|failed`.
+`get_system_status` (no argument, local models only) is a read allowed in every profile. The host sends `GetSystemStatus {}` (agent peer with `Capability::SystemStatus`). The bridge answers `SystemStatus { memory_total_bytes, memory_available_bytes, cpu_load_percent (sampled over 250 ms with GetSystemTimes), logical_processors, uptime_seconds, drives }`, with at most 8 fixed drives `DriveStatus { name, total_bytes, free_bytes }` and at most 4 display adapters `GpuInfo { name, driver_version, memory_bytes }` read with WMI `Win32_VideoController` (NuGet `System.Management` 10.0.2; memory as declared by Windows, sometimes capped at 4 GiB). The host rejects incoherent figures (available memory above total, load above 100, free space above size). The agent receives rounded figures; journaled as `system.status.completed|failed`.
 
 ## Agent control click (UI Automation Invoke)
 

@@ -1768,14 +1768,26 @@ fn describe_system(result: Result<SystemSnapshot, &'static str>) -> String {
             format!(
                 "État du PC (lecture seule, rien n’a été modifié) :\n- Mémoire : {} Go disponibles sur {} Go\n\
                  - Processeur : {} % de charge, {} processeurs logiques\n- Démarré depuis : {} h {} min\n\
-                 Disques internes :\n{}",
+                 Disques internes :\n{}\nCartes graphiques :\n{}",
                 gb(status.memory_available_bytes),
                 gb(status.memory_total_bytes),
                 status.cpu_load_percent,
                 status.logical_processors,
                 status.uptime_seconds / 3600,
                 status.uptime_seconds % 3600 / 60,
-                if drives.is_empty() { "- aucun".to_owned() } else { drives.join("\n") }
+                if drives.is_empty() { "- aucun".to_owned() } else { drives.join("\n") },
+                if status.gpus.is_empty() {
+                    "- inconnues".to_owned()
+                } else {
+                    status
+                        .gpus
+                        .iter()
+                        .map(|(name, driver, memory)| {
+                            format!("- {name} (pilote {driver}, {} Go déclarés)", gb(*memory))
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
             )
         }
         Err(code) => format!("État du PC indisponible : {code}. Rien n’a été modifié."),

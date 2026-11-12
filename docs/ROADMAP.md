@@ -225,7 +225,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | T-011 | Mode privé : aucun transfert réseau cloud | 🟡 Garanti par conception ; pas de test réseau ni de mode privé explicite — R3 |
 | T-012 | Reprise après crash | ✅ |
 | T-013 | Multi-écran / DPI | ❌ — R2 |
-| T-014 | Détection GPU NVIDIA/AMD | ❌ — R3 |
+| T-014 | Détection GPU NVIDIA/AMD | 🟡 Cartes, pilote et mémoire déclarée (WMI) dans `get_system_status` ; VRAM utilisée par modèle via Ollama ; backend d’inférence et repli CPU non diagnostiqués — R3 |
 
 ## 4. Exigences non fonctionnelles [S0 §8][S1 §11]
 

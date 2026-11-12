@@ -778,6 +778,8 @@ pub(crate) struct SystemSnapshot {
     pub logical_processors: u32,
     pub uptime_seconds: u64,
     pub drives: Vec<DriveSpace>,
+    /// Adapter name, driver version, memory (WMI).
+    pub gpus: Vec<(String, String, u64)>,
 }
 
 /// Validates the bridge's metrics: coherent memory and drive figures, bounded lists.
@@ -793,7 +795,13 @@ fn accept_system_status(status: aiwin11_contracts::v1::SystemStatus) -> Option<S
         && status.memory_available_bytes <= status.memory_total_bytes
         && status.cpu_load_percent <= 100
         && (1..=1024).contains(&status.logical_processors)
-        && drives_ok;
+        && drives_ok
+        && status.gpus.len() <= 4
+        && status.gpus.iter().all(|gpu| {
+            gpu.name.chars().count() <= 120
+                && gpu.driver_version.chars().count() <= 40
+                && !gpu.name.chars().chain(gpu.driver_version.chars()).any(char::is_control)
+        });
     valid.then(|| SystemSnapshot {
         memory_total_bytes: status.memory_total_bytes,
         memory_available_bytes: status.memory_available_bytes,
@@ -805,6 +813,7 @@ fn accept_system_status(status: aiwin11_contracts::v1::SystemStatus) -> Option<S
             .into_iter()
             .map(|drive| DriveSpace { name: drive.name, total_bytes: drive.total_bytes, free_bytes: drive.free_bytes })
             .collect(),
+        gpus: status.gpus.into_iter().map(|gpu| (gpu.name, gpu.driver_version, gpu.memory_bytes)).collect(),
     })
 }
 
@@ -1052,6 +1061,11 @@ mod tests {
             logical_processors: 24,
             uptime_seconds: 3600,
             drives: vec![DriveStatus { name: "C:\\".into(), total_bytes: 1 << 40, free_bytes: 1 << 39 }],
+            gpus: vec![aiwin11_contracts::v1::GpuInfo {
+                name: "NVIDIA GeForce RTX 3090".into(),
+                driver_version: "32.0".into(),
+                memory_bytes: 4 << 30,
+            }],
         };
         assert_eq!(accept_system_status(good.clone()).unwrap().drives[0].name, "C:\\");
         for bad in [

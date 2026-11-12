@@ -171,6 +171,16 @@ message SystemStatus {
   uint64 uptime_seconds = 5;
   // Fixed drives, at most 8.
   repeated DriveStatus drives = 6;
+  // Display adapters, at most 4 (WMI Win32_VideoController).
+  repeated GpuInfo gpus = 7;
+}
+
+message GpuInfo {
+  // Adapter name, at most 120 characters.
+  string name = 1;
+  string driver_version = 2;
+  // As reported by WMI (capped at 4 GiB by Windows for some adapters).
+  uint64 memory_bytes = 3;
 }
 
 message DriveStatus {
