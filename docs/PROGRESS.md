@@ -2,6 +2,16 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## 2026-11-12, fin de matinée — avec l’utilisateur (développement seul, tests E2E par l’utilisateur)
+
+**Fait**
+- `18012c4` Assistant élevé (option B, liste validée par l’utilisateur) : `services/admin` → `AiWin11.Admin.exe`, lancé via UAC (`runas`) après accord + broker ; services (start/stop/restart, démarrage auto/manuel/désactivé) et nettoyage de `C:\Windows\Temp` (> 1 jour) ; services protégés refusés deux fois ; désactivé par défaut (**Sécurité → Opérations administrateur**). Capacités élargies à `u32`.
+- `2a26a1c` Applications autorisées : Table des caractères et Paint en plus du Bloc-notes.
+
+**Vérifié** : builds, ruff/mypy, ESLint/Prettier, fmt, 82 tests Rust, clippy. **Non vérifié** : UAC réel, lancement réel de Paint/Table des caractères, interface (l’utilisateur teste). Publier l’assistant à côté de l’exécutable (`dotnet publish services/admin/...`, voir README).
+
+**Prochaine étape** : politiques par ressource (dossiers autorisés au-delà du dossier dédié), PowerShell approuvé (liste fermée), plan prévisualisé « Range ces fichiers », puis R3 (hub de modèles).
+
 ## 2026-11-12, matin — session autonome (R1 terminé sauf points manuels, début de R2)
 
 **Fait (commits)**
