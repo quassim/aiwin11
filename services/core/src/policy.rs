@@ -83,10 +83,12 @@ pub enum AgentAction {
     SystemStatus,
     ReadClipboard,
     WriteClipboard,
+    ListWindows,
+    ArrangeWindow,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -100,6 +102,8 @@ impl AgentAction {
         Self::SystemStatus,
         Self::ReadClipboard,
         Self::WriteClipboard,
+        Self::ListWindows,
+        Self::ArrangeWindow,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -121,6 +125,8 @@ impl AgentAction {
             Self::SystemStatus => "system_status",
             Self::ReadClipboard => "read_clipboard",
             Self::WriteClipboard => "write_clipboard",
+            Self::ListWindows => "list_windows",
+            Self::ArrangeWindow => "arrange_window",
         }
     }
 
@@ -177,7 +183,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 13] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 15] = [
+    (A::ListWindows, [E::Ask, E::Ask, E::Ask, E::Ask]),
+    (A::ArrangeWindow, [E::Deny, E::Ask, E::Allow, E::Allow]),
     (A::ReadClipboard, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::WriteClipboard, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::SystemStatus, [E::Allow, E::Allow, E::Allow, E::Allow]),

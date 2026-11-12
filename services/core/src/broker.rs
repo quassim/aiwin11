@@ -48,6 +48,10 @@ pub enum Capability {
     ClipboardRead = 1 << 11,
     /// Replace the clipboard with one approved text.
     ClipboardWrite = 1 << 12,
+    /// List application windows (titles and applications).
+    WindowList = 1 << 13,
+    /// Focus, minimize, restore or maximize one listed window.
+    WindowArrange = 1 << 14,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -121,6 +125,17 @@ impl Policy {
             Some(Operation::CaptureWindow(_)) if agent(Capability::WindowCapture) => Ok("capture_window"),
             Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
             Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
+            Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
+            Some(Operation::ArrangeWindow(arrange))
+                if agent(Capability::WindowArrange)
+                    && arrange.window != 0
+                    && arrange.process_id != 0
+                    && arrange.arrangement
+                        != aiwin11_contracts::v1::arrange_window::Arrangement::Unspecified as i32
+                    && aiwin11_contracts::v1::arrange_window::Arrangement::try_from(arrange.arrangement).is_ok() =>
+            {
+                Ok("arrange_window")
+            }
             Some(Operation::WriteClipboard(input))
                 if agent(Capability::ClipboardWrite)
                     && !input.text.is_empty()
@@ -461,6 +476,29 @@ mod tests {
             let mut command = request(&core);
             command.operation = Some(operation.clone());
             assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
+        }
+    }
+
+    #[test]
+    fn window_listing_and_arrangement_are_separate_bounded_grants() {
+        use aiwin11_contracts::v1::{arrange_window::Arrangement, ArrangeWindow, ListWindows};
+        let list = Policy::granting(&[Capability::WindowList]);
+        let arrange = Policy::granting(&[Capability::WindowArrange]);
+        let arrange_op =
+            |window, arrangement: i32| Operation::ArrangeWindow(ArrangeWindow { window, process_id: 42, arrangement });
+        for (policy, operation, expected) in [
+            (list, Operation::ListWindows(ListWindows { exclude_process_id: 1 }), true),
+            (arrange, Operation::ListWindows(ListWindows { exclude_process_id: 1 }), false),
+            (arrange, arrange_op(7, Arrangement::Minimize as i32), true),
+            (list, arrange_op(7, Arrangement::Minimize as i32), false),
+            (arrange, arrange_op(0, Arrangement::Minimize as i32), false),
+            (arrange, arrange_op(7, Arrangement::Unspecified as i32), false),
+            (arrange, arrange_op(7, 99), false),
+        ] {
+            let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+            let mut command = request(&core);
+            command.operation = Some(operation.clone());
+            assert_eq!(core.authorize_dispatch(policy, Peer::Agent, &command).is_ok(), expected, "{operation:?}");
         }
     }
 

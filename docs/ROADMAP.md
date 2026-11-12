@@ -35,7 +35,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Application facilement paramétrable, UI/UX soignée | 🟡 Pages Accueil, Modèles, Sécurité, Inspecteur, Fichiers, Activité | R5 |
 | Contrôle des fichiers | 🟡 Dossier dédié, `.txt` seulement | R2 |
 | Contrôle des logiciels (lancer, gérer) | 🟡 Bloc-notes seulement | R2 |
-| Contrôle des fenêtres | 🟡 Lecture de la fenêtre précédente ; pas de gestion | R2 |
+| Contrôle des fenêtres | ✅ Lister, premier plan, réduire, restaurer, agrandir (jamais fermer) ; lecture de la fenêtre précédente | — |
 | Paramètres système | ❌ | R2 (lecture) / R9 (modification, composant privilégié) |
 | Terminal / PowerShell | ❌ | R2 |
 | Navigateur | ❌ | R6 (via MCP) ou R2 |
@@ -142,7 +142,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Politique JSON (sujet, actions, **ressources/chemins**, contraintes `max_files`, `require_backup`, `expires_after`) | ❌ | R2 |
 | Chemins canoniques, jonctions, liens | ✅ Fichiers | — |
 | Invariants : action inconnue refusée ✅, pas d’auto-attribution ✅, confirmation précise ✅, pas de transmission entre agents (N/A), LLM jamais autorité ✅, erreur → refus ✅, contournement = défaillance ✅, révocation effective ✅ (autorisations relues à chaque évaluation), vérification juste avant exécution ✅ | 🟡 | R2 |
-| Windows Bridge — WindowService (List, Focus, Resize, Minimize, Close) | ❌ | R2 |
+| Windows Bridge — WindowService (List ✅, Focus ✅, Minimize/Restore/Maximize ✅, Resize ❌, Close ❌ volontairement absent) | 🟡 | R2 |
 | ApplicationService (Discover, Launch, GetStatus) | 🟡 Launch Bloc-notes | R2 |
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ❌) | 🟡 | R2 |
 | ProcessService (List ✅ lecture seule, Inspect ❌, Terminate ❌) | 🟡 | R2 |
@@ -251,7 +251,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Règles critiques explicites (toujours demandées ou refusées) : suppression massive, élévation, sécurité Windows, transactions financières, envoi de données confidentielles, installation de logiciel.
 - Pont Windows :
   - ApplicationService : découverte et lancement d’applications autorisées ;
-  - WindowService : lister, focus, redimensionner, réduire, fermer ;
+  - 🟡 WindowService : lister ✅, focus ✅, réduire/restaurer/agrandir ✅ ; redimensionner ❌ ; fermer ❌ (risque de perte de données, à décider) ;
   - 🟡 ProcessService : lister ✅, inspecter ❌, arrêter (avec approbation) ❌ ;
   - UIAutomationService : FindElement, Invoke, SetValue ;
   - InputService : clic, saisie, raccourcis, en dernier recours ;

@@ -10,9 +10,10 @@ use std::{
 
 use aiwin11_contracts::{
     v1::{
-        command::Operation, result::Status, AnalyzeCapture, CaptureForeground, CaptureWindow, CharacterMapDigit,
-        Command, GetSystemStatus, InspectForeground, InspectWindow, ListProcesses, LocateWindow, ReadClipboard,
-        Result as BridgeReply, TypeInNotepad, UiTree, WriteClipboard,
+        arrange_window::Arrangement, command::Operation, result::Status, AnalyzeCapture, ArrangeWindow,
+        CaptureForeground, CaptureWindow, CharacterMapDigit, Command, GetSystemStatus, InspectForeground,
+        InspectWindow, ListProcesses, ListWindows, LocateWindow, ReadClipboard, Result as BridgeReply, TypeInNotepad,
+        UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -41,6 +42,9 @@ const MAX_TREE_REPLY_BYTES: usize = 32 * 1024;
 const MAX_PROCESS_REPLY_BYTES: usize = 8 * 1024;
 /// 4000 characters of UTF-8 text plus the envelope.
 const MAX_CLIPBOARD_REPLY_BYTES: usize = 20 * 1024;
+/// 20 windows with a 120-character title and a 64-character application name.
+const MAX_WINDOW_LIST_REPLY_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_LISTED_WINDOWS: usize = 20;
 pub(crate) const MAX_CLIPBOARD_READ_CHARS: usize = 4000;
 /// Processes reported to the agent by `list_processes`.
 pub(crate) const AGENT_PROCESS_LIMIT: u32 = 15;
@@ -206,6 +210,61 @@ impl Core {
             }
             accept_process_list(reply.process_list?)
         })
+    }
+
+    /// Agent tool: lists application windows (titles, applications), after the user's approval.
+    pub(crate) fn agent_list_windows(&mut self, task: &str, policy: Policy) -> Result<Vec<ListedWindow>, &'static str> {
+        let operation = Operation::ListWindows(ListWindows { exclude_process_id: std::process::id() });
+        self.agent_bridge_call(task, policy, operation, "window.list", |reply| {
+            if reply.ui_tree.is_some()
+                || reply.window_capture.is_some()
+                || reply.window_info.is_some()
+                || reply.process_id.is_some()
+                || reply.clipboard_content.is_some()
+            {
+                return None;
+            }
+            accept_window_list(reply.window_list?)
+        })
+    }
+
+    /// Agent tool: applies one arrangement to a window the same task listed. Returns whether
+    /// the resulting state was verified.
+    pub(crate) fn agent_arrange_window(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        target: &WindowTarget,
+        arrangement: Arrangement,
+    ) -> Result<bool, &'static str> {
+        let operation = Operation::ArrangeWindow(ArrangeWindow {
+            window: target.window,
+            process_id: target.process_id,
+            arrangement: arrangement as i32,
+        });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
+            _ => "WINDOW_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match dispatch(&command) {
+            Some(reply) if reply.window_list.is_none() && reply.ui_tree.is_none() => {
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Ok(true),
+                    (Status::Partial, Some("state_unverified")) => Ok(false),
+                    (Status::Failed, Some("window_unavailable")) => Err("WINDOW_UNAVAILABLE"),
+                    _ => Err("BRIDGE_FAILED"),
+                }
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(true) => ("window.arrange.completed", "state_verified"),
+            Ok(false) => ("window.arrange.partial", "state_unverified"),
+            Err(code) => ("window.arrange.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        outcome
     }
 
     /// Agent tool: reads the clipboard's text once, after the user's approval.
@@ -564,6 +623,37 @@ fn accept_process_list(list: aiwin11_contracts::v1::ProcessList) -> Option<Proce
     })
 }
 
+/// One window of a `list_windows` result, kept by the task for `arrange_window`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ListedWindow {
+    pub target: WindowTarget,
+    pub minimized: bool,
+}
+
+fn accept_window_list(list: aiwin11_contracts::v1::WindowList) -> Option<Vec<ListedWindow>> {
+    if list.windows.len() > MAX_LISTED_WINDOWS {
+        return None;
+    }
+    let bounded = |text: &str, max: usize| {
+        !text.is_empty() && text.chars().count() <= max && text.chars().all(|c| !c.is_control())
+    };
+    list.windows
+        .into_iter()
+        .map(|info| {
+            (info.window != 0 && info.process_id != 0 && bounded(&info.title, 120) && bounded(&info.process_name, 64))
+                .then_some(ListedWindow {
+                    minimized: info.minimized,
+                    target: WindowTarget {
+                        window: info.window,
+                        process_id: info.process_id,
+                        title: info.title,
+                        process_name: info.process_name,
+                    },
+                })
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ClipboardRead {
     pub text: String,
@@ -662,6 +752,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
         Some(Operation::ReadClipboard(_)) => MAX_CLIPBOARD_REPLY_BYTES,
+        Some(Operation::ListWindows(_)) => MAX_WINDOW_LIST_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -755,6 +846,59 @@ mod tests {
         if !saved.text.is_empty() && !saved.truncated {
             assert_eq!(core.agent_write_clipboard(&task, write, &saved.text), Ok(true), "restore");
         }
+    }
+
+    #[test]
+    fn window_lists_from_the_bridge_are_validated() {
+        use aiwin11_contracts::v1::{WindowInfo, WindowList};
+        let info = |window, title: &str| WindowInfo {
+            window,
+            process_id: 7,
+            title: title.into(),
+            process_name: "notepad".into(),
+            minimized: false,
+        };
+        let listed = accept_window_list(WindowList { windows: vec![info(1, "Sans titre"), info(2, "Notes")] }).unwrap();
+        assert_eq!(listed[1].target.title, "Notes");
+        for bad in [
+            WindowList { windows: vec![info(0, "x")] },
+            WindowList { windows: vec![info(1, "")] },
+            WindowList { windows: vec![info(1, "a\nb")] },
+            WindowList { windows: vec![info(1, &"t".repeat(121))] },
+            WindowList { windows: (1..=21).map(|window| info(window, "x")).collect() },
+        ] {
+            assert_eq!(accept_window_list(bad.clone()), None, "{bad:?}");
+        }
+    }
+
+    /// Lists windows, then minimizes and restores a Character Map window owned by the test.
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn lists_then_arranges_a_window_through_the_broker_and_the_bridge() {
+        use crate::broker::Capability;
+        let system = std::env::var_os("SystemRoot").expect("SystemRoot");
+        let mut charmap = std::process::Command::new(std::path::Path::new(&system).join(r"System32\charmap.exe"))
+            .spawn()
+            .expect("start Character Map");
+        thread::sleep(Duration::from_secs(2));
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let result = (|| {
+            assert_eq!(core.agent_list_windows(&task, Policy::default()), Err("WINDOW_ACCESS_DENIED"));
+            let listed = core.agent_list_windows(&task, Policy::granting(&[Capability::WindowList]))?;
+            let target = listed
+                .iter()
+                .find(|window| window.target.process_id == charmap.id())
+                .map(|window| window.target.clone())
+                .ok_or("CHARMAP_NOT_LISTED")?;
+            let arrange = Policy::granting(&[Capability::WindowArrange]);
+            let minimized = core.agent_arrange_window(&task, arrange, &target, Arrangement::Minimize)?;
+            let restored = core.agent_arrange_window(&task, arrange, &target, Arrangement::Restore)?;
+            Ok::<_, &'static str>((minimized, restored))
+        })();
+        let _ = charmap.kill();
+        let _ = charmap.wait();
+        assert_eq!(result, Ok((true, true)));
     }
 
     #[test]

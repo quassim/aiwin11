@@ -51,7 +51,7 @@ const profiles: { id: Autonomy; label: string; description: string }[] = [
     id: "advanced",
     label: "Avancé",
     description:
-      "Les renommages se font aussi sans demander. La corbeille et la lecture de l’écran demandent toujours ton accord.",
+      "Les renommages se font aussi sans demander. La corbeille, la lecture de l’écran et le presse-papiers demandent toujours ton accord.",
   },
 ];
 
@@ -69,6 +69,8 @@ const actionNames: Record<string, string> = {
   systemStatus: "Lire l’état du PC (lecture seule)",
   readClipboard: "Lire le presse-papiers",
   writeClipboard: "Copier un texte dans le presse-papiers",
+  listWindows: "Lister les fenêtres ouvertes",
+  arrangeWindow: "Réduire, restaurer, agrandir ou mettre au premier plan une fenêtre",
 };
 
 const effectNames: Record<Effect, string> = {

@@ -43,6 +43,14 @@ def is_typed_text(value: object) -> bool:
     return isinstance(value, str) and 0 < len(value) <= MAX_TYPED_CHARS and "\x00" not in value
 
 
+MAX_LISTED_WINDOWS = 20
+
+
+def is_window_number(value: object) -> bool:
+    """Number of a window in the task's last list_windows result: 1 to 20."""
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_LISTED_WINDOWS
+
+
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
 Rule = tuple[str, ...] | Callable[[object], bool]
@@ -60,6 +68,8 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "get_system_status": {},
     "read_clipboard": {},
     "write_clipboard": {"text": is_typed_text},
+    "list_windows": {},
+    "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }
 
 # Tools whose two file names must differ (ignoring case).

@@ -48,7 +48,16 @@ type ApprovalAction =
   | { kind: "listProcesses" }
   | { kind: "systemStatus" }
   | { kind: "readClipboard" }
-  | { kind: "writeClipboard"; text: string; characters: number };
+  | { kind: "writeClipboard"; text: string; characters: number }
+  | { kind: "listWindows" }
+  | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
+type Arrangement = "focus" | "minimize" | "restore" | "maximize";
+const arrangementNames: Record<Arrangement, string> = {
+  focus: "mettre au premier plan",
+  minimize: "réduire",
+  restore: "restaurer",
+  maximize: "agrandir",
+};
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
@@ -69,6 +78,20 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "listWindows") {
+    return {
+      title: "L’agent demande à lister tes fenêtres",
+      detail:
+        "Action : lire le titre et l’application de chaque fenêtre ouverte (20 au plus). Les titres peuvent " +
+        "contenir des noms de documents ou de sites ; ils restent sur ton PC (modèle local).",
+    };
+  }
+  if (action.kind === "arrangeWindow") {
+    return {
+      title: `L’agent propose de ${arrangementNames[action.arrangement]} une fenêtre`,
+      detail: `Fenêtre : « ${action.title} » (application ${action.application}). Elle n’est jamais fermée.`,
     };
   }
   if (action.kind === "readClipboard") {
@@ -172,6 +195,11 @@ const activityNames: Record<string, string> = {
   "system.status.completed": "État du PC lu par l’agent",
   "system.status.failed": "État du PC indisponible",
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
+  "window.list.completed": "Fenêtres listées par l’agent",
+  "window.list.failed": "Liste des fenêtres impossible",
+  "window.arrange.completed": "Fenêtre modifiée par l’agent",
+  "window.arrange.partial": "Modification de fenêtre non vérifiée",
+  "window.arrange.failed": "Modification de fenêtre impossible",
   "clipboard.read.failed": "Lecture du presse-papiers impossible",
   "clipboard.write.completed": "Texte copié dans le presse-papiers",
   "clipboard.write.partial": "Copie dans le presse-papiers non vérifiée",

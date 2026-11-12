@@ -54,6 +54,8 @@ pub enum CapabilityName {
     SystemStatus,
     ClipboardRead,
     ClipboardWrite,
+    WindowList,
+    WindowArrange,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -84,7 +86,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 13] = [
+pub const MANIFESTS: [ToolManifest; 15] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -267,6 +269,34 @@ pub const MANIFESTS: [ToolManifest; 13] = [
         reversibility: R::Irreversible,
         timeout_ms: 15_000,
         capabilities: &[C::ClipboardWrite],
+    },
+    ToolManifest {
+        action: AgentAction::ListWindows,
+        tool: "list_windows",
+        version: 1,
+        risk: Risk::Medium,
+        side_effect: false,
+        reads_screen: true,
+        private_data: false,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 15_000,
+        capabilities: &[C::WindowList],
+    },
+    ToolManifest {
+        action: AgentAction::ArrangeWindow,
+        tool: "arrange_window",
+        version: 1,
+        risk: Risk::Medium,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Reversible,
+        timeout_ms: 15_000,
+        capabilities: &[C::WindowArrange],
     },
 ];
 

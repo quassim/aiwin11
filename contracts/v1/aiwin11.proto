@@ -30,6 +30,8 @@ message Command {
     GetSystemStatus get_system_status = 25;
     ReadClipboard read_clipboard = 26;
     WriteClipboard write_clipboard = 27;
+    ListWindows list_windows = 28;
+    ArrangeWindow arrange_window = 29;
   }
 }
 
@@ -57,6 +59,25 @@ message ProcessList {
   repeated ProcessEntry processes = 1;
   // Number of processes seen, before the limit.
   uint32 total = 2;
+}
+
+// Lists visible, unowned application windows (at most 20), except the host's.
+message ListWindows { uint32 exclude_process_id = 1; }
+
+message WindowList { repeated WindowInfo windows = 1; }
+
+// Changes the state of exactly this window, if it still belongs to this process.
+message ArrangeWindow {
+  enum Arrangement {
+    ARRANGEMENT_UNSPECIFIED = 0;
+    ARRANGEMENT_FOCUS = 1;
+    ARRANGEMENT_MINIMIZE = 2;
+    ARRANGEMENT_RESTORE = 3;
+    ARRANGEMENT_MAXIMIZE = 4;
+  }
+  uint64 window = 1;
+  uint32 process_id = 2;
+  Arrangement arrangement = 3;
 }
 
 // Reads the clipboard's Unicode text (at most 4000 characters), after the user's approval.
@@ -116,6 +137,8 @@ message WindowInfo {
   uint32 process_id = 2;
   string title = 3;
   string process_name = 4;
+  // Filled by ListWindows only.
+  bool minimized = 5;
 }
 
 message InspectForeground {}
@@ -180,6 +203,7 @@ message Result {
   ProcessList process_list = 10;
   SystemStatus system_status = 11;
   ClipboardContent clipboard_content = 12;
+  WindowList window_list = 13;
 }
 
 message Error {

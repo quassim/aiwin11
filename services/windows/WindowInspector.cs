@@ -27,43 +27,111 @@ internal static class WindowInspector
         "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
     };
 
+    private const int MaxListed = 20;
+
     /// <summary>Topmost visible, unowned, uncloaked application window not owned by the host.</summary>
     internal static Protocol.WindowInfo? Locate(uint excludeProcessId)
     {
-        uint self = (uint)Environment.ProcessId;
         for (nint window = GetTopWindow(0); window != 0; window = GetWindow(window, GwHwndNext))
         {
-            if (!IsWindowVisible(window) || IsIconic(window) || GetWindow(window, GwOwner) != 0)
-                continue;
-            long extended = GetWindowLongPtrW(window, GwlExStyle);
-            if ((extended & (WsExTopmost | WsExToolWindow | WsExNoActivate)) != 0)
-                continue;
-            if (DwmGetWindowAttribute(window, DwmwaCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0)
-                continue;
-            if (GetWindowThreadProcessId(window, out uint pid) == 0 || pid == 0 || pid == excludeProcessId || pid == self)
-                continue;
-            if (ShellClasses.Contains(ClassName(window)) || !GetWindowRect(window, out var rect)
-                || rect.Right <= rect.Left || rect.Bottom <= rect.Top)
-                continue;
-            string title = Clean(Text(window), MaxTitle);
-            if (title.Length == 0)
-                continue;
-            string processName;
-            try
-            {
-                using var process = Process.GetProcessById((int)pid);
-                processName = Clean(process.ProcessName, 64);
-            }
-            catch (Exception error) when (error is ArgumentException or InvalidOperationException)
-            {
-                continue;
-            }
-            return new Protocol.WindowInfo
-            {
-                Window = (ulong)window, ProcessId = pid, Title = title, ProcessName = processName,
-            };
+            if (Describe(window, excludeProcessId, allowMinimized: false) is { } info)
+                return info;
         }
         return null;
+    }
+
+    /// <summary>Application windows in Z order (minimized ones included), at most 20.</summary>
+    internal static Protocol.WindowList List(uint excludeProcessId)
+    {
+        var list = new Protocol.WindowList();
+        for (nint window = GetTopWindow(0); window != 0 && list.Windows.Count < MaxListed; window = GetWindow(window, GwHwndNext))
+        {
+            if (Describe(window, excludeProcessId, allowMinimized: true) is { } info)
+                list.Windows.Add(info);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Applies one arrangement to this exact window if it still belongs to the process, then
+    /// checks the resulting state. Null if the window changed hands or disappeared.
+    /// </summary>
+    internal static bool? Arrange(ulong handle, uint processId, Protocol.ArrangeWindow.Types.Arrangement arrangement)
+    {
+        nint window = (nint)handle;
+        if (!OwnedBy(window, processId) || !IsWindowVisible(window))
+            return null;
+        switch (arrangement)
+        {
+            case Protocol.ArrangeWindow.Types.Arrangement.Minimize:
+                ShowWindow(window, SwMinimize);
+                return Settled(() => IsIconic(window));
+            case Protocol.ArrangeWindow.Types.Arrangement.Maximize:
+                ShowWindow(window, SwMaximize);
+                return Settled(() => IsZoomed(window));
+            case Protocol.ArrangeWindow.Types.Arrangement.Restore:
+                ShowWindow(window, SwRestore);
+                return Settled(() => !IsIconic(window) && !IsZoomed(window));
+            case Protocol.ArrangeWindow.Types.Arrangement.Focus:
+                if (IsIconic(window))
+                    ShowWindow(window, SwRestore);
+                // Windows may refuse to change the foreground window; this is then reported.
+                SetForegroundWindow(window);
+                return Settled(() => GetForegroundWindow() == window);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Waits up to one second for a window state change to be visible.</summary>
+    private static bool Settled(Func<bool> done)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < 1000)
+        {
+            if (done())
+                return true;
+            Thread.Sleep(50);
+        }
+        return done();
+    }
+
+    private static Protocol.WindowInfo? Describe(nint window, uint excludeProcessId, bool allowMinimized)
+    {
+        uint self = (uint)Environment.ProcessId;
+        bool minimized = IsIconic(window);
+        if (!IsWindowVisible(window) || (minimized && !allowMinimized) || GetWindow(window, GwOwner) != 0)
+            return null;
+        long extended = GetWindowLongPtrW(window, GwlExStyle);
+        if ((extended & (WsExTopmost | WsExToolWindow | WsExNoActivate)) != 0)
+            return null;
+        if (DwmGetWindowAttribute(window, DwmwaCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0)
+            return null;
+        if (GetWindowThreadProcessId(window, out uint pid) == 0 || pid == 0 || pid == excludeProcessId || pid == self)
+            return null;
+        if (ShellClasses.Contains(ClassName(window)) || !GetWindowRect(window, out var rect)
+            || (!minimized && (rect.Right <= rect.Left || rect.Bottom <= rect.Top)))
+            return null;
+        string title = Clean(Text(window), MaxTitle);
+        if (title.Length == 0)
+            return null;
+        string processName;
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            processName = Clean(process.ProcessName, 64);
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+        if (processName.Length == 0)
+            return null;
+        return new Protocol.WindowInfo
+        {
+            Window = (ulong)window, ProcessId = pid, Title = title, ProcessName = processName,
+            Minimized = minimized && allowMinimized,
+        };
     }
 
     /// <summary>Named control tree of this exact window, or null if it changed hands.</summary>
@@ -155,6 +223,13 @@ internal static class WindowInspector
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
+    [DllImport("user32.dll")] private static extern bool IsZoomed(nint window);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint window);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    private const int SwMaximize = 3;
+    private const int SwMinimize = 6;
+    private const int SwRestore = 9;
     [DllImport("user32.dll")] private static extern long GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out Rect rect);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);

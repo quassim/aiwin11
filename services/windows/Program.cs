@@ -37,6 +37,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.LocateWindow is null && command.InspectWindow is null && command.TypeInNotepad is null
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.ReadClipboard is null && command.WriteClipboard is null
+        && command.ListWindows is null && command.ArrangeWindow is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -91,6 +92,29 @@ else if (command.ListProcesses is { } listing)
         result.ProcessList = ProcessLister.Read(listing.Limit);
         result.Status = Protocol.Result.Types.Status.Success;
     }
+}
+else if (command.ListWindows is { } listWindows)
+{
+    result.WindowList = WindowInspector.List(listWindows.ExcludeProcessId);
+    result.Status = Protocol.Result.Types.Status.Success;
+}
+else if (command.ArrangeWindow is { } arrange)
+{
+    if (arrange.Arrangement == Protocol.ArrangeWindow.Types.Arrangement.Unspecified)
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_arrangement", "Unknown window arrangement.");
+    else
+        switch (WindowInspector.Arrange(arrange.Window, arrange.ProcessId, arrange.Arrangement))
+        {
+            case true:
+                result.Status = Protocol.Result.Types.Status.Success;
+                break;
+            case false:
+                Reject(Protocol.Result.Types.Status.Partial, "state_unverified", "The window state could not be verified.");
+                break;
+            default:
+                Reject(Protocol.Result.Types.Status.Failed, "window_unavailable", "The window is no longer available.");
+                break;
+        }
 }
 else if (command.ReadClipboard is not null)
 {

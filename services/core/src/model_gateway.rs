@@ -101,6 +101,30 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
     }
     if include_windows {
         functions.push(json!({
+            "name": "list_windows",
+            "description": "Liste les fenêtres d’applications ouvertes (titre, application, réduite ou non), numérotées \
+à partir de 1, dans l’ordre d’empilement. L’utilisateur doit l’approuver.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
+            "name": "arrange_window",
+            "description": "Met au premier plan, réduit, restaure ou agrandit une fenêtre de la dernière liste obtenue \
+avec list_windows dans cette demande, désignée par son numéro. Ne ferme jamais de fenêtre.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Numéro dans la liste" },
+                    "arrangement": {
+                        "type": "string",
+                        "enum": ["focus", "minimize", "restore", "maximize"],
+                        "description": "focus = premier plan, minimize = réduire, restore = restaurer, maximize = agrandir"
+                    }
+                },
+                "required": ["window", "arrangement"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "read_clipboard",
             "description": "Lit le texte actuellement dans le presse-papiers Windows (4000 caractères au plus). \
         L’utilisateur doit l’approuver à chaque fois.",
@@ -707,6 +731,8 @@ mod tests {
                 "copy_text_file",
                 "move_text_file",
                 "trash_text_file",
+                "list_windows",
+                "arrange_window",
                 "read_clipboard",
                 "write_clipboard",
                 "get_system_status",
@@ -720,6 +746,8 @@ mod tests {
             names(tool_catalog(false, false, true, false)),
             [
                 "launch_application",
+                "list_windows",
+                "arrange_window",
                 "read_clipboard",
                 "write_clipboard",
                 "get_system_status",

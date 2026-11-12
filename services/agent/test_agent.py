@@ -115,6 +115,24 @@ class AgentProtocolTest(unittest.TestCase):
                 with self.subTest(tool=tool, arguments=arguments):
                     self.assert_rejected({"version": 2, "proposal": {"calls": [call(tool, arguments)]}})
 
+    def test_window_arrangement_takes_a_listed_number_and_a_known_state(self):
+        result = self.invoke(
+            {"version": 2, "proposal": {"calls": [call("arrange_window", {"window": 3, "arrangement": "minimize"})]}}
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["arguments"], {"window": 3, "arrangement": "minimize"})
+        for arguments in [
+            {"window": 0, "arrangement": "focus"},
+            {"window": 21, "arrangement": "focus"},
+            {"window": True, "arrangement": "focus"},
+            {"window": "1", "arrangement": "focus"},
+            {"window": 1, "arrangement": "close"},
+            {"window": 1},
+            {"window": 1, "arrangement": "focus", "process_id": 4},
+        ]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("arrange_window", arguments)]}})
+
     def test_copy_tool_requires_two_distinct_valid_names(self):
         copy = call("copy_text_file", {"source": "a.txt", "destination": "b copie.txt"})
         result = self.invoke({"version": 2, "proposal": {"calls": [copy]}})
