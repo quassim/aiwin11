@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import { AdminToggle } from "./AdminToggle";
+import { AdminToggle, PrivacyToggle } from "./AdminToggle";
 import { Grants } from "./Grants";
 
 type Autonomy = "observation" | "assisted" | "limited" | "advanced";
@@ -188,6 +188,7 @@ export function Security({ onFinished }: { onFinished: () => void }) {
           </tbody>
         </table>
       </div>
+      <PrivacyToggle />
       <AdminToggle />
       <Grants actionNames={actionNames} onChange={onFinished} />
       <h3>Fiche de chaque outil</h3>

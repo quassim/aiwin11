@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-admin-helper"
+description = "Enables the get_admin_helper command without any pre-configured scope."
+commands.allow = ["get_admin_helper"]
+
+[[permission]]
+identifier = "deny-get-admin-helper"
+description = "Denies the get_admin_helper command without any pre-configured scope."
+commands.deny = ["get_admin_helper"]

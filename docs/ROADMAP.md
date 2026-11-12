@@ -19,7 +19,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | ❌ Le cœur tourne dans le processus Tauri |
 | Hub de modèles multi-tâches et routage [V][S0 §4.2][S1 §4] | ❌ Choix manuel d’un seul modèle |
-| Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | ❌ |
+| Expérience bureau (overlay, palette, raccourcis, tray) [V][S0 §6] | 🟡 Zone de notification et raccourci global Ctrl+Alt+Espace ✅ ; overlay et palette ❌ |
 | Mémoire, MCP, voix, image, vidéo, workflows, multi-agents (lots D et E) | ❌ |
 | Distribution (installateur, mises à jour) | ❌ Usage développeur seulement |
 
@@ -189,7 +189,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Limites d’un agent : `max_steps` 30, `max_tool_calls` 50, `max_runtime_seconds` 900, `max_parallel_tools` 2, `retry_limit` 2, `verification_required` | [S1 §5.1] | 🟡 8 étapes max, une action à la fois, vérification par outil ; pas de durée max ni de reprise automatique | R2, R8 |
 | Résilience : la panne d’un provider ou d’un agent ne fait pas tomber le noyau ; « crash d’un agent : core et interface restent fonctionnels » | [S0 §8][S1 §11] | 🟡 Agent Python et pont en processus séparés avec délais ; non testé par injection de pannes | R4, R9 |
 | Plafond de coût par tâche (`max_cost_usd_per_task`), vérification du budget avant chaque appel cloud | [S1 §9] | ❌ | R3 |
-| Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud | [V][S0 §8][S1 §4.3], T-011 | 🟡 Aucun fallback automatique ; pas d’interrupteur « mode privé » global | R3 |
+| Mode privé / local strict : aucun transfert cloud, jamais de bascule local→cloud | [V][S0 §8][S1 §4.3], T-011 | ✅ Interrupteur **Mode privé** (Sécurité), aucun fallback automatique | — |
 | Intégration profonde : agent permanent, interfaces contextuelles, événements Windows, automatisation proactive | [V §7] | ❌ | R5, R8 |
 | Zero-trust entre agents et outils ; un agent ne transmet pas d’autorisation à un autre | [S0 §10][S1 §6.3] | ✅ pour l’agent unique (broker, identité attribuée par le cœur) ; à revalider avec le multi-agents | R8 |
 | Périphériques, terminal, navigateur parmi les capacités | [V §2] | ❌ Navigateur via MCP prévu ; périphériques non planifiés en détail | R2, R6 |

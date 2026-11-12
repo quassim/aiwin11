@@ -206,6 +206,36 @@ impl Core {
         Ok(removed)
     }
 
+    /// Private mode: no request ever goes to a cloud provider (T-011). Off by default; an
+    /// unreadable setting counts as on, the most restrictive choice.
+    pub fn private_mode(&self) -> bool {
+        match self.setting("privacy.strict") {
+            Ok(Some(value)) => value != "false",
+            Ok(None) => false,
+            Err(_) => true,
+        }
+    }
+
+    pub fn set_private_mode(&mut self, enabled: bool) -> Result<(), &'static str> {
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('privacy.strict', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [if enabled { "true" } else { "false" }],
+            )?;
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.privacy.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, if enabled { "strict" } else { "hybrid" }],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// Retention of past sessions, in days.
     pub fn retention_days(&self) -> u32 {
         Self::retention_days_in(&self.db)
@@ -682,6 +712,17 @@ mod tests {
         assert!(!text.contains("hunter2"), "free text written to SQLite");
         assert!(text.contains("REDACTED"));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn private_mode_is_off_by_default_and_persists() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert!(!core.private_mode());
+        core.set_private_mode(true).unwrap();
+        assert!(core.private_mode());
+        assert_eq!(core.activity().unwrap()[0].code.as_deref(), Some("strict"));
+        core.db.execute("DROP TABLE settings", []).unwrap();
+        assert!(core.private_mode(), "an unreadable setting blocks the cloud");
     }
 
     #[test]

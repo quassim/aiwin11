@@ -73,6 +73,10 @@ Toujours dans **Sécurité**, **Autorisations temporaires** permet de laisser un
 
 La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque, possibilité d’annuler, simulation, usage local uniquement et délai maximal. Un outil **critique** demande toujours ton accord.
 
+### Mode privé, zone de notification et raccourci
+
+**Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord. AiWin11 a une icône dans la zone de notification (Ouvrir, Stoppe toutes les tâches, Quitter) et **Ctrl+Alt+Espace** le ramène au premier plan depuis n’importe quelle application.
+
 ### Opérations administrateur (désactivées par défaut)
 
 AiWin11 tourne sans droits administrateur. Dans **Sécurité → Opérations administrateur**, tu peux autoriser l’agent à proposer une liste fermée d’opérations : démarrer, arrêter, redémarrer un service ou changer son démarrage (automatique, manuel, désactivé), et vider les fichiers temporaires de Windows de plus d’un jour. Chaque opération demande ton accord dans AiWin11, puis la confirmation Windows (UAC). Elle est exécutée par un programme séparé, `AiWin11.Admin.exe`, qui fait une seule opération puis s’arrête. Les services de sécurité (Defender, pare-feu), de mise à jour et les services vitaux de Windows sont toujours refusés.

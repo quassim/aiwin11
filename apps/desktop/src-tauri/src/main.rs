@@ -293,6 +293,17 @@ fn create_grant(state: State<'_, Arc<AppState>>, action: AgentAction, minutes: u
 }
 
 #[tauri::command]
+fn get_privacy(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.private_mode())
+}
+
+/// Main window only: private mode blocks every cloud request.
+#[tauri::command]
+fn set_privacy(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_private_mode(enabled)
+}
+
+#[tauri::command]
 fn get_admin_helper(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
     Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.admin_helper_enabled())
 }
@@ -366,6 +377,66 @@ fn resolve_approval(state: State<'_, Arc<AppState>>, approval_id: String, approv
     state.task.resolve_approval(&approval_id, approved)
 }
 
+/// Brings the main window to the front (tray, global shortcut).
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Tray icon (open, stop all tasks, quit) and the global shortcut Ctrl+Alt+Espace that brings
+/// AiWin11 to the front from any application. Nothing here can start an action.
+fn desktop_surfaces(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    };
+    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+
+    let open = MenuItem::with_id(app, "open", "Ouvrir AiWin11", true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop", "Stoppe toutes les tâches", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
+    let mut tray = TrayIconBuilder::with_id("main").tooltip("AiWin11").menu(&menu).show_menu_on_left_click(false);
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.on_menu_event(|app, event| match event.id.as_ref() {
+        "open" => show_main(app),
+        "stop" => {
+            let state = Arc::clone(app.state::<Arc<AppState>>().inner());
+            let status = state.task.stop_all();
+            if let Ok(core) = state.core.lock() {
+                let _ = core.journal("tasks.stop.requested", Some(status.code()));
+            };
+        }
+        "quit" => app.exit(0),
+        _ => {}
+    })
+    .on_tray_icon_event(|tray, event| {
+        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+            show_main(tray.app_handle());
+        }
+    })
+    .build(app)?;
+
+    let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
+    app.handle().plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |app, pressed, event| {
+                if *pressed == shortcut && event.state() == ShortcutState::Pressed {
+                    show_main(app);
+                }
+            })
+            .build(),
+    )?;
+    // Another application may already own the shortcut: the tray still works.
+    let _ = app.global_shortcut().register(shortcut);
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -380,6 +451,7 @@ fn main() {
             // Pay the bridge's first start (runtime load, antivirus scan) now, not within a
             // command's deadline. The spare process waits idle for an authorized command.
             std::thread::spawn(aiwin11_core::windows_bridge::prewarm_bridge);
+            desktop_surfaces(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -390,6 +462,8 @@ fn main() {
             stop_all_tasks,
             get_grants,
             get_admin_helper,
+            get_privacy,
+            set_privacy,
             set_admin_helper,
             create_grant,
             revoke_grant,

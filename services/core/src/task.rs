@@ -489,6 +489,10 @@ impl TaskSlot {
         record(core, task, "task.planning")?;
         progress(TaskUpdate::stage("task.planning"));
         if let Provider::OpenAi = request.provider {
+            if lock(core)?.private_mode() {
+                record_code(core, task, "model.cloud.denied", "private_mode")?;
+                return Err("PRIVATE_MODE");
+            }
             if !request.cloud_approved {
                 record(core, task, "model.cloud.denied")?;
                 return Err("CLOUD_APPROVAL_REQUIRED");

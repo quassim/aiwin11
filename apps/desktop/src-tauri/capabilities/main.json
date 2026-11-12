@@ -7,6 +7,7 @@
     "allow-get-policy-overview", "allow-set-policy-settings", "allow-get-tasks",
     "allow-openai-key-configured", "allow-save-openai-key", "allow-delete-openai-key",
     "allow-inspect-foreground", "allow-capture-foreground", "allow-discover-vision-models", "allow-analyze-capture",
-    "allow-enter-character-map-digit", "allow-local-files-root", "allow-preview-local-text", "allow-copy-local-text"
+    "allow-enter-character-map-digit", "allow-local-files-root", "allow-preview-local-text", "allow-copy-local-text",
+    "allow-stop-all-tasks", "allow-get-grants", "allow-create-grant", "allow-revoke-grant", "allow-get-admin-helper", "allow-set-admin-helper", "allow-get-history-settings", "allow-set-retention-days", "allow-clear-history", "allow-export-audit", "allow-get-model-preferences", "allow-set-model-preferences", "allow-get-privacy", "allow-set-privacy"
   ]
 }

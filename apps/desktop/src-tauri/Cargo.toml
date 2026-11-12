@@ -12,4 +12,5 @@ tauri-build = { version = "=2.5.3", features = [] }
 [dependencies]
 aiwin11-core = { path = "../../../services/core" }
 serde = { version = "=1.0.228", features = ["derive"] }
-tauri = { version = "=2.9.5", features = [] }
+tauri = { version = "=2.9.5", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "=2.3.1"

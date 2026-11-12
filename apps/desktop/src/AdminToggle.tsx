@@ -1,6 +1,31 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
+/** Private mode: no request ever leaves the PC (off by default). */
+export function PrivacyToggle() {
+  const [enabled, setEnabled] = useState<boolean>();
+  useEffect(() => {
+    void invoke<boolean>("get_privacy").then(setEnabled, () => setEnabled(true));
+  }, []);
+  return (
+    <label className="approval">
+      <input
+        type="checkbox"
+        checked={enabled ?? true}
+        disabled={enabled === undefined}
+        onChange={(event) => {
+          const next = event.target.checked;
+          void invoke("set_privacy", { enabled: next }).then(() => setEnabled(next));
+        }}
+      />
+      <span>
+        <strong>Mode privé</strong> — aucune requête n’est envoyée à un fournisseur cloud, même avec ton accord. Seuls
+        les modèles locaux sont utilisés.
+      </span>
+    </label>
+  );
+}
+
 /** Turns the on-demand elevated helper on or off (off by default). */
 export function AdminToggle() {
   const [enabled, setEnabled] = useState<boolean>();

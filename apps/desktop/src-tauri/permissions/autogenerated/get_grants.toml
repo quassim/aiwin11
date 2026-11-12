@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-grants"
+description = "Enables the get_grants command without any pre-configured scope."
+commands.allow = ["get_grants"]
+
+[[permission]]
+identifier = "deny-get-grants"
+description = "Denies the get_grants command without any pre-configured scope."
+commands.deny = ["get_grants"]

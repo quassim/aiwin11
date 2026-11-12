@@ -19,6 +19,20 @@ fn main() {
         "local_files_root",
         "preview_local_text",
         "copy_local_text",
+        "stop_all_tasks",
+        "get_grants",
+        "create_grant",
+        "revoke_grant",
+        "get_admin_helper",
+        "set_admin_helper",
+        "get_history_settings",
+        "set_retention_days",
+        "clear_history",
+        "export_audit",
+        "get_model_preferences",
+        "set_model_preferences",
+        "get_privacy",
+        "set_privacy",
     ])))
     .expect("failed to build the Tauri application");
 }
