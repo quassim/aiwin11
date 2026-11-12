@@ -56,6 +56,7 @@ type ApprovalAction =
   | { kind: "listServices" }
   | { kind: "remember"; text: string }
   | { kind: "recall" }
+  | { kind: "searchMemory" }
   | { kind: "clickControl"; application: string; title: string; control: string }
   | { kind: "setControlValue"; application: string; title: string; control: string; text: string }
   | { kind: "adminService"; service: string; operation: string }
@@ -122,6 +123,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       title: "L’agent propose de retenir une information",
       detail: "Action : enregistrer ce texte, chiffré, dans la mémoire d’AiWin11 (page Mémoire pour l’effacer).",
       quote: action.text,
+    };
+  }
+  if (action.kind === "searchMemory") {
+    return {
+      title: "L’agent demande à chercher dans sa mémoire",
+      detail: "Action : chercher parmi les informations retenues.",
     };
   }
   if (action.kind === "recall") {
@@ -258,6 +265,7 @@ const activityNames: Record<string, string> = {
   "service.list.completed": "Services listés par l’agent",
   "memory.saved": "Information retenue (chiffrée)",
   "memory.deleted": "Mémoire effacée",
+  "settings.embedding.changed": "Recherche dans la mémoire modifiée",
   "control.invoke.completed": "Contrôle cliqué par l’agent",
   "control.invoke.failed": "Clic sur un contrôle impossible",
   "admin.operation.completed": "Opération administrateur effectuée",

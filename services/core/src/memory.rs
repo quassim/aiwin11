@@ -79,7 +79,86 @@ pub fn valid_note(text: &str) -> bool {
     !text.is_empty() && text.chars().count() <= MAX_NOTE_CHARS && !text.contains('\0')
 }
 
+/// Cosine similarity; 0 for empty or mismatched vectors.
+fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let norm = |v: &[f32]| v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let denominator = norm(a) * norm(b);
+    if denominator == 0.0 {
+        0.0
+    } else {
+        dot / denominator
+    }
+}
+
+/// Keyword score: share of the query's words (3 letters or more) found in the note.
+fn keyword_score(query: &str, note: &str) -> f32 {
+    let note = note.to_lowercase();
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3)
+        .map(str::to_owned)
+        .collect();
+    if words.is_empty() {
+        return 0.0;
+    }
+    words.iter().filter(|word| note.contains(word.as_str())).count() as f32 / words.len() as f32
+}
+
+/// Ranks notes for a query: by local embeddings when `vectors` holds the query's vector then
+/// one per note, otherwise by keywords. Returns at most `limit` notes with a positive score.
+pub(crate) fn rank(
+    query: &str,
+    notes: Vec<MemoryEntry>,
+    vectors: Option<&[Vec<f32>]>,
+    limit: usize,
+) -> Vec<MemoryEntry> {
+    let mut scored: Vec<(f32, MemoryEntry)> = notes
+        .into_iter()
+        .enumerate()
+        .map(|(index, note)| {
+            let score = match vectors {
+                Some(vectors) => cosine(&vectors[0], &vectors[index + 1]),
+                None => keyword_score(query, &note.text),
+            };
+            (score, note)
+        })
+        .filter(|(score, _)| *score > 0.0)
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scored.into_iter().take(limit).map(|(_, note)| note).collect()
+}
+
 impl Core {
+    /// Optional local embedding model for semantic memory search (none: keyword search).
+    pub fn embedding_model(&self) -> Option<String> {
+        self.setting("memory.embedding_model")
+            .ok()
+            .flatten()
+            .filter(|model| !model.is_empty() && model.len() <= 256 && model.bytes().all(|b| b.is_ascii_graphic()))
+    }
+
+    pub fn set_embedding_model(&mut self, model: &str) -> Result<(), &'static str> {
+        let model = model.trim();
+        if model.len() > 256 || !model.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err("SETTINGS_INVALID");
+        }
+        self.db
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('memory.embedding_model', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [model],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.journal("settings.embedding.changed", Some(if model.is_empty() { "keywords" } else { "local" }))
+            .map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
     /// Encrypts and stores one note. Returns its ID.
     pub fn remember(&mut self, text: &str) -> Result<String, &'static str> {
         self.store(text, "note")
@@ -197,6 +276,18 @@ mod tests {
         assert_eq!(core.forget(Some(&routine)), Ok(1));
         drop(core);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn notes_are_ranked_by_embeddings_or_keywords() {
+        let note = |text: &str| MemoryEntry { id: text.into(), created_at: String::new(), text: text.into() };
+        let notes = vec![note("Mon chat s'appelle Zéphyrin"), note("Je préfère le thème sombre"), note("Rien")];
+        let found = rank("comment s'appelle mon chat ?", notes.clone(), None, 5);
+        assert_eq!(found[0].text, "Mon chat s'appelle Zéphyrin");
+        assert_eq!(found.len(), 1);
+        let vectors = vec![vec![0.0, 1.0], vec![1.0, 0.0], vec![0.1, 0.9], vec![0.0, 0.0]];
+        let found = rank("thème", notes, Some(&vectors), 1);
+        assert_eq!(found[0].text, "Je préfère le thème sombre");
     }
 
     #[test]

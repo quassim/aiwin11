@@ -100,6 +100,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "click_control": {"control": is_control_number},
     "remember": {"text": is_note},
     "recall": {},
+    "search_memory": {"query": is_note},
     "set_control_value": {"control": is_control_number, "text": is_typed_text},
     "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }

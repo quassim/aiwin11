@@ -349,6 +349,16 @@ fn delete_memory(state: State<'_, Arc<AppState>>, id: Option<String>) -> Result<
 }
 
 #[tauri::command]
+fn get_embedding_model(state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
+    Ok(state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.embedding_model().unwrap_or_default())
+}
+
+#[tauri::command]
+fn set_embedding_model(state: State<'_, Arc<AppState>>, model: String) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_embedding_model(&model)
+}
+
+#[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
 }
@@ -537,6 +547,8 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            get_embedding_model,
+            set_embedding_model,
             save_routine,
             delete_memory,
             get_cloud_vendor,

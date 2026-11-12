@@ -112,6 +112,17 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
             }
         }));
         functions.push(json!({
+            "name": "search_memory",
+            "description": "Cherche dans la mémoire durable les 5 informations les plus proches d’une question \
+        (recherche sémantique locale si un modèle d’embedding est choisi, sinon par mots-clés).",
+            "parameters": {
+                "type": "object",
+                "properties": { "query": { "type": "string" } },
+                "required": ["query"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "recall",
             "description": "Relit les informations que l’utilisateur t’a demandé de retenir.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
@@ -544,6 +555,31 @@ impl Ollama {
     }
 }
 
+#[derive(Deserialize)]
+struct Embeddings {
+    embeddings: Vec<Vec<f32>>,
+}
+
+impl Ollama {
+    /// Local embeddings (`/api/embed`), in batches of 32 texts. Vectors stay in memory only.
+    pub(crate) fn embed(&self, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, GatewayError> {
+        let mut vectors = Vec::with_capacity(texts.len());
+        for batch in texts.chunks(32) {
+            let reply: Embeddings = Self::receive(
+                self.client
+                    .post(format!("{OLLAMA}/api/embed"))
+                    .timeout(LOCAL_INFERENCE_TIMEOUT)
+                    .json(&json!({ "model": model, "input": batch })),
+            )?;
+            if reply.embeddings.len() != batch.len() {
+                return Err(GatewayError::InvalidResponse);
+            }
+            vectors.extend(reply.embeddings);
+        }
+        Ok(vectors)
+    }
+}
+
 /// A model loaded by Ollama, with the memory it uses (from `/api/ps`).
 #[derive(Debug, Deserialize, serde::Serialize)]
 pub struct LoadedModel {
@@ -828,6 +864,7 @@ mod tests {
                 "move_text_file",
                 "trash_text_file",
                 "remember",
+                "search_memory",
                 "recall",
                 "list_windows",
                 "arrange_window",
@@ -850,6 +887,7 @@ mod tests {
             [
                 "launch_application",
                 "remember",
+                "search_memory",
                 "recall",
                 "list_windows",
                 "arrange_window",

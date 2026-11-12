@@ -36,6 +36,8 @@ fn main() {
         "get_cloud_fallback",
         "get_memories",
         "get_routines",
+        "get_embedding_model",
+        "set_embedding_model",
         "save_routine",
         "delete_memory",
         "get_cloud_vendor",

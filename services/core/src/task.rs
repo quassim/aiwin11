@@ -164,6 +164,7 @@ pub enum ApprovalAction {
         text: String,
     },
     Recall,
+    SearchMemory,
     /// Always asks; the full text is shown.
     SetControlValue {
         application: String,
@@ -234,6 +235,7 @@ enum PlannedAction {
     SetControlValue(usize, String),
     Remember(String),
     Recall,
+    SearchMemory(String),
     AdminService {
         service: String,
         action: ServiceAction,
@@ -689,7 +691,11 @@ impl TaskSlot {
             PlannedAction::ClickControl(number) => {
                 ("click_control", json!({ "control": number }), self.click_control(run, number, None)?)
             }
-            PlannedAction::Recall => ("recall", json!({}), self.recall(run)?),
+            PlannedAction::Recall => ("recall", json!({}), self.recall(run, None)?),
+            PlannedAction::SearchMemory(query) => {
+                let observation = self.recall(run, Some(&query))?;
+                ("search_memory", json!({ "query": query }), observation)
+            }
             PlannedAction::Remember(text) => {
                 let observation = self.remember(run, &text)?;
                 ("remember", json!({ "text": text }), observation)
@@ -993,10 +999,13 @@ impl TaskSlot {
         })
     }
 
-    fn recall<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>) -> Result<String, &'static str> {
-        let action = AgentAction::Recall;
-        let summary = "Relire la mémoire d’AiWin11";
-        let grant = match self.gate(run, action, summary, Capability::MemoryRead, ApprovalAction::Recall)? {
+    /// Reads all notes, or with `query` the 5 closest (local embeddings or keywords).
+    fn recall<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, query: Option<&str>) -> Result<String, &'static str> {
+        let (action, summary, approval) = match query {
+            Some(_) => (AgentAction::SearchMemory, "Chercher dans la mémoire d’AiWin11", ApprovalAction::SearchMemory),
+            None => (AgentAction::Recall, "Relire la mémoire d’AiWin11", ApprovalAction::Recall),
+        };
+        let grant = match self.gate(run, action, summary, Capability::MemoryRead, approval)? {
             Gate::Stop(observation) => return Ok(observation),
             Gate::Run(grant) => grant,
         };
@@ -1008,11 +1017,29 @@ impl TaskSlot {
                     core.authorize_dispatch(grant, Peer::Agent, &command).map_err(|_| "MEMORY_ACCESS_DENIED")
                 })
                 .and_then(|_| core.memories())
+                .map(|notes| (notes, core.embedding_model()))
         };
+        let result = result.map(|(notes, model)| match query {
+            None => notes,
+            Some(query) => {
+                let texts: Vec<String> =
+                    std::iter::once(query.to_owned()).chain(notes.iter().map(|note| note.text.clone())).collect();
+                // Local embeddings only; any failure falls back to keyword search.
+                let vectors =
+                    model.and_then(|model| Ollama::connect().and_then(|ollama| ollama.embed(&model, &texts)).ok());
+                crate::memory::rank(query, notes, vectors.as_deref(), 5)
+            }
+        });
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(match result {
-            Ok(notes) if notes.is_empty() => "La mémoire d’AiWin11 est vide.".into(),
+            Ok(notes) if notes.is_empty() => {
+                if query.is_some() {
+                    "Aucune information retenue ne correspond.".into()
+                } else {
+                    "La mémoire d’AiWin11 est vide.".into()
+                }
+            }
             Ok(notes) => {
                 let lines: Vec<_> = notes.iter().map(|note| format!("- {}", note.text)).collect();
                 format!(
@@ -1961,6 +1988,12 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
             Ok(PlannedAction::ListServices)
         }
         ("tool", Some("recall"), Some(arguments), None) if arguments.is_empty() => Ok(PlannedAction::Recall),
+        ("tool", Some("search_memory"), Some(arguments), None) if arguments.len() == 1 => arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .filter(|query| crate::memory::valid_note(query))
+            .map(|query| PlannedAction::SearchMemory(query.trim().to_owned()))
+            .ok_or("AGENT_REJECTED"),
         ("tool", Some("remember"), Some(arguments), None) if arguments.len() == 1 => arguments
             .get("text")
             .and_then(Value::as_str)

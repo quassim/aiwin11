@@ -8,6 +8,7 @@ export function Memory() {
   const [notes, setNotes] = useState<MemoryEntry[]>();
   const [status, setStatus] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [embedding, setEmbedding] = useState("");
 
   async function load() {
     try {
@@ -19,6 +20,7 @@ export function Memory() {
 
   useEffect(() => {
     void load();
+    void invoke<string>("get_embedding_model").then(setEmbedding, () => undefined);
   }, []);
 
   async function remove(id: string | null) {
@@ -64,6 +66,22 @@ export function Memory() {
         ) : (
           <button onClick={() => setConfirming(true)}>Tout effacer…</button>
         ))}
+      <div className="task-form">
+        <label htmlFor="embedding-model">Modèle d’embedding local pour la recherche (facultatif)</label>
+        <input
+          id="embedding-model"
+          value={embedding}
+          maxLength={256}
+          placeholder="par exemple nomic-embed-text ; vide = recherche par mots-clés"
+          onChange={(event) => setEmbedding(event.target.value)}
+          onBlur={() => {
+            void invoke("set_embedding_model", { model: embedding.trim() }).then(
+              () => setStatus("Recherche mise à jour."),
+              () => setStatus("Identifiant de modèle invalide."),
+            );
+          }}
+        />
+      </div>
       <p role="status">{status}</p>
     </section>
   );

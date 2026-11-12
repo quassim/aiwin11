@@ -74,6 +74,7 @@ const actionNames: Record<string, string> = {
   listServices: "Lister les services Windows (lecture seule)",
   remember: "Retenir une information (mémoire chiffrée)",
   recall: "Relire la mémoire",
+  searchMemory: "Chercher dans la mémoire",
   clickControl: "Cliquer sur un bouton d’une fenêtre lue (UI Automation)",
   setControlValue: "Remplir un champ d’une fenêtre lue (UI Automation)",
   adminService: "Démarrer, arrêter ou configurer un service (administrateur)",
