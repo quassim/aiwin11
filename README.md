@@ -4,6 +4,8 @@ Application personnelle pour Windows 11 x64. Une interface Tauri/React dialogue 
 
 ## Démarrer sous Windows 11
 
+**Raccourci (machine déjà préparée)** : double-clique sur `Ollama.cmd` (laisse la fenêtre ouverte), puis sur `AiWin11.cmd`. Ou dans PowerShell : `scripts\ollama.ps1` puis `scripts\start.ps1`. Détail ci-dessous.
+
 Installez Node.js 24 avec npm, Rustup avec la cible MSVC x64, les outils Visual Studio C++ (charge de travail « Développement Desktop en C++ »), WebView2 et le SDK .NET 10 pour le pont Windows. Rustup lit la version de Rust dans `rust-toolchain.toml`. Cargo et NuGet fournissent le compilateur Protobuf. [Prérequis Tauri](https://v2.tauri.app/start/prerequisites/)
 
 Installez aussi Python 3.13 et Ollama, puis préparez un modèle local qui gère les appels d’outils (validé avec `qwen3:8b`) et, si vous voulez que l’agent puisse décrire une fenêtre, un modèle de vision local (par exemple `gemma3:4b`). Depuis la racine du projet, dans PowerShell :
