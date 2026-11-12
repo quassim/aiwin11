@@ -59,6 +59,7 @@ pub enum CapabilityName {
     ServiceList,
     AdminOperation,
     LaunchAllowedApp,
+    ControlInvoke,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -89,7 +90,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 18] = [
+pub const MANIFESTS: [ToolManifest; 19] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -343,6 +344,21 @@ pub const MANIFESTS: [ToolManifest; 18] = [
         reversibility: R::Irreversible,
         timeout_ms: 90_000,
         capabilities: &[C::AdminOperation],
+    },
+    ToolManifest {
+        action: AgentAction::ClickControl,
+        tool: "click_control",
+        version: 1,
+        // A button can do anything in its application (send, delete, pay): always asks.
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Irreversible,
+        timeout_ms: 15_000,
+        capabilities: &[C::ControlInvoke],
     },
 ];
 

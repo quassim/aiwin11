@@ -12,8 +12,8 @@ use aiwin11_contracts::{
     v1::{
         arrange_window::Arrangement, command::Operation, result::Status, service_entry::StartMode, AnalyzeCapture,
         ArrangeWindow, CaptureForeground, CaptureWindow, CharacterMapDigit, Command, GetSystemStatus,
-        InspectForeground, InspectWindow, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard,
-        Result as BridgeReply, TypeInNotepad, UiTree, WriteClipboard,
+        InspectForeground, InspectWindow, InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow,
+        ReadClipboard, Result as BridgeReply, TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -212,6 +212,47 @@ impl Core {
             }
             accept_process_list(reply.process_list?)
         })
+    }
+
+    /// Agent tool: clicks control `index` (1-based) of the inspected window, if it still has
+    /// the same type and name.
+    pub(crate) fn agent_invoke_control(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        target: &WindowTarget,
+        index: u32,
+        node: &NamedNode,
+    ) -> Result<(), &'static str> {
+        let operation = Operation::InvokeControl(InvokeControl {
+            window: target.window,
+            process_id: target.process_id,
+            index,
+            control_type: node.control_type,
+            name: node.name.clone(),
+        });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
+            _ => "WINDOW_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match dispatch(&command) {
+            Some(reply) if reply.ui_tree.is_none() => {
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Ok(()),
+                    (Status::Failed, Some("not_invokable")) => Err("CONTROL_NOT_INVOKABLE"),
+                    (Status::Failed, Some("control_changed")) => Err("CONTROL_CHANGED"),
+                    _ => Err("BRIDGE_FAILED"),
+                }
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(()) => ("control.invoke.completed", "invoked"),
+            Err(code) => ("control.invoke.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        outcome
     }
 
     /// Agent tool: read-only snapshot of Windows services.

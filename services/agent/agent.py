@@ -51,6 +51,11 @@ def is_window_number(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_LISTED_WINDOWS
 
 
+def is_control_number(value: object) -> bool:
+    """Number [n] of a control in the task's last inspect_window result: 1 to 80."""
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 80
+
+
 def is_service_name(value: object) -> bool:
     """Windows service key name: 1 to 64 ASCII letters, digits, '_', '.' or '-'."""
     return (
@@ -84,6 +89,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
         "operation": ("start", "stop", "restart", "automatic", "manual", "disabled"),
     },
     "admin_clean_temp": {},
+    "click_control": {"control": is_control_number},
     "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
 }
 

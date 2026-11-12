@@ -51,6 +51,7 @@ type ApprovalAction =
   | { kind: "writeClipboard"; text: string; characters: number }
   | { kind: "listWindows" }
   | { kind: "listServices" }
+  | { kind: "clickControl"; application: string; title: string; control: string }
   | { kind: "adminService"; service: string; operation: string }
   | { kind: "adminCleanTemp" }
   | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
@@ -95,6 +96,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
           ? `Action : ${action.operation} sur le service « ${action.service} ».`
           : "Action : supprimer les fichiers temporaires de Windows de plus d’un jour (C:\\Windows\\Temp).") +
         " Si tu autorises, Windows te demandera aussi une confirmation (UAC). Une seule opération, puis l’assistant s’arrête.",
+    };
+  }
+  if (action.kind === "clickControl") {
+    return {
+      title: "L’agent propose de cliquer dans une fenêtre",
+      detail: `Action : cliquer sur ${action.control} dans « ${action.title} » (application ${action.application}). Le clic est fait par UI Automation, sans souris.`,
     };
   }
   if (action.kind === "listServices") {
@@ -221,6 +228,8 @@ const activityNames: Record<string, string> = {
   "clipboard.read.completed": "Presse-papiers lu par l’agent",
   "window.list.completed": "Fenêtres listées par l’agent",
   "service.list.completed": "Services listés par l’agent",
+  "control.invoke.completed": "Contrôle cliqué par l’agent",
+  "control.invoke.failed": "Clic sur un contrôle impossible",
   "admin.operation.completed": "Opération administrateur effectuée",
   "admin.operation.failed": "Opération administrateur échouée ou refusée",
   "settings.admin.changed": "Opérations administrateur activées ou désactivées",

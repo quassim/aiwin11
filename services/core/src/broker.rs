@@ -58,6 +58,8 @@ pub enum Capability {
     AdminOperation = 1 << 16,
     /// Start Character Map or Paint (fixed executables, no arguments).
     LaunchAllowedApp = 1 << 17,
+    /// Click one control of the window the same task inspected (UI Automation Invoke).
+    ControlInvoke = 1 << 18,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -138,6 +140,14 @@ impl Policy {
             Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
             Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
             Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
+            Some(Operation::InvokeControl(control))
+                if agent(Capability::ControlInvoke)
+                    && control.window != 0
+                    && control.process_id != 0
+                    && (1..=80).contains(&control.index) =>
+            {
+                Ok("invoke_control")
+            }
             Some(Operation::AdminService(_) | Operation::AdminCleanTemp(_)) if agent(Capability::AdminOperation) => {
                 Ok("admin_operation")
             }

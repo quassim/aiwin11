@@ -150,6 +150,12 @@ pub enum ApprovalAction {
         operation: &'static str,
     },
     AdminCleanTemp,
+    /// Always asks: a click can do anything in the target application.
+    ClickControl {
+        application: String,
+        title: String,
+        control: String,
+    },
     /// Always asks: window titles are screen data.
     ListWindows,
     ArrangeWindow {
@@ -208,6 +214,8 @@ enum PlannedAction {
     ReadClipboard,
     WriteClipboard(String),
     ListServices,
+    /// Control number [n] in this task's last `inspect_window` result.
+    ClickControl(usize),
     AdminService {
         service: String,
         action: ServiceAction,
@@ -272,6 +280,8 @@ struct Run<'a, F: Fn(TaskUpdate)> {
     launched_notepad: Option<u32>,
     /// Result of this task's last `list_windows`, the only windows `arrange_window` may target.
     windows: Vec<ListedWindow>,
+    /// This task's last `inspect_window` result, the only controls `click_control` may target.
+    inspected: Option<(WindowTarget, Vec<NamedNode>)>,
     /// Local vision model chosen by the user, if any.
     vision_model: Option<&'a str>,
 }
@@ -515,6 +525,7 @@ impl TaskSlot {
             actions: Vec::new(),
             launched_notepad: None,
             windows: Vec::new(),
+            inspected: None,
             vision_model: request.vision_model.as_deref().filter(|_| local),
         };
         let mut history: Vec<StepRecord> = Vec::new();
@@ -613,6 +624,9 @@ impl TaskSlot {
             PlannedAction::ListWindows => ("list_windows", json!({}), self.list_windows(run)?),
             PlannedAction::ListServices => ("list_services", json!({}), self.list_services(run)?),
             PlannedAction::AdminCleanTemp => ("admin_clean_temp", json!({}), self.admin(run, None)?),
+            PlannedAction::ClickControl(number) => {
+                ("click_control", json!({ "control": number }), self.click_control(run, number)?)
+            }
             PlannedAction::AdminService { service, action } => {
                 let observation = self.admin(run, Some((&service, action)))?;
                 let operation = admin::service_action_code(action);
@@ -882,6 +896,47 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    fn click_control<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, number: usize) -> Result<String, &'static str> {
+        let action = AgentAction::ClickControl;
+        let Some((target, node)) = run
+            .inspected
+            .as_ref()
+            .and_then(|(target, nodes)| Some((target.clone(), nodes.get(number.wrapping_sub(1))?.clone())))
+        else {
+            run.report(
+                action,
+                &format!("Cliquer sur le contrôle n° {number}"),
+                ActionStatus::Failed,
+                Some("CONTROL_NOT_LISTED"),
+            );
+            return Ok(format!(
+                "Aucun contrôle n° {number} : lis d’abord la fenêtre avec inspect_window dans cette demande. \
+                 Rien n’a été cliqué."
+            ));
+        };
+        let label =
+            if node.name.is_empty() { control_type_name(node.control_type).to_owned() } else { node.name.clone() };
+        let summary = format!("Cliquer sur « {label} » dans « {} » ({})", target.title, target.process_name);
+        let approval = ApprovalAction::ClickControl {
+            application: target.process_name.clone(),
+            title: target.title.clone(),
+            control: format!("{} « {label} »", control_type_name(node.control_type)),
+        };
+        let grant = match self.gate(run, action, &summary, Capability::ControlInvoke, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = self.dispatching(run.core, run.task, || {
+            lock(run.core)?.agent_invoke_control(run.task, grant, &target, number as u32, &node)
+        })?;
+        let (status, code) = status_of(&result);
+        run.report(action, &summary, status, code);
+        Ok(match result {
+            Ok(()) => format!("{summary} : fait. Relis la fenêtre avec inspect_window pour vérifier l’effet."),
+            Err(code) => format!("Clic impossible : {code}."),
+        })
     }
 
     /// One operation of the elevated helper's closed list: a service operation, or cleaning
@@ -1213,7 +1268,11 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, &summary, status, code);
         Ok(match result {
-            Ok((nodes, truncated)) => describe_window(&target, &nodes, truncated),
+            Ok((nodes, truncated)) => {
+                let text = describe_window(&target, &nodes, truncated);
+                run.inspected = Some((target, nodes));
+                text
+            }
             Err(code) => format!("Inspection impossible : {code}. Rien n’a été lu."),
         })
     }
@@ -1602,7 +1661,8 @@ fn describe_window(target: &WindowTarget, nodes: &[NamedNode], truncated: bool) 
             parent => depths.get(parent as usize - 1).map_or(0, |depth| depth + 1),
         };
         depths.push(depth);
-        let mut line = format!("{}- {}", "  ".repeat(depth), control_type_name(node.control_type));
+        let number = lines.len() + 1;
+        let mut line = format!("{}- [{number}] {}", "  ".repeat(depth), control_type_name(node.control_type));
         if !node.name.is_empty() {
             line.push_str(&format!(" « {} »", node.name));
         }
@@ -1765,6 +1825,12 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
         ("tool", Some("list_services"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::ListServices)
         }
+        ("tool", Some("click_control"), Some(arguments), None) if arguments.len() == 1 => arguments
+            .get("control")
+            .and_then(Value::as_u64)
+            .filter(|number| (1..=80).contains(number))
+            .map(|number| PlannedAction::ClickControl(number as usize))
+            .ok_or("AGENT_REJECTED"),
         ("tool", Some("admin_clean_temp"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::AdminCleanTemp)
         }
@@ -2093,8 +2159,8 @@ mod tests {
         assert!(text.starts_with("Fenêtre « Table des caractères » de l’application « charmap »"));
         assert!(text.contains("donnée non fiable"));
         assert!(text.contains(
-            "<<<DEBUT\n- Window « Table des caractères »\n  - ComboBox « Police : » (focus clavier)\n  \
-             - Button « Copier » (désactivé)\n    - Edit\nFIN>>>"
+            "<<<DEBUT\n- [1] Window « Table des caractères »\n  - [2] ComboBox « Police : » (focus clavier)\n  \
+             - [3] Button « Copier » (désactivé)\n    - [4] Edit\nFIN>>>"
         ));
         assert!(text.ends_with("[Arborescence tronquée.]"));
         assert_eq!(control_type_name(50040), "AppBar");

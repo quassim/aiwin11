@@ -135,7 +135,44 @@ internal static class WindowInspector
     }
 
     /// <summary>Named control tree of this exact window, or null if it changed hands.</summary>
-    internal static Protocol.UiTree? Inspect(ulong handle, uint processId, long deadline)
+    internal static Protocol.UiTree? Inspect(ulong handle, uint processId, long deadline) =>
+        Inspect(handle, processId, deadline, null);
+
+    /// <summary>
+    /// Invokes control number `index` of the same walk as Inspect, if its type and name still
+    /// match. Null: window or control gone or changed; false: the control cannot be invoked.
+    /// </summary>
+    internal static bool? Invoke(ulong handle, uint processId, uint index, uint controlType, string name, long deadline)
+    {
+        var elements = new List<AutomationElement>();
+        var tree = Inspect(handle, processId, deadline, elements);
+        if (tree is null || index == 0 || index > elements.Count)
+            return null;
+        var node = tree.Nodes[(int)index - 1];
+        if (node.ControlType != controlType || node.Name != name)
+            return null;
+        var element = elements[(int)index - 1];
+        if (!element.Current.IsEnabled)
+            return false;
+        if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
+        {
+            ((InvokePattern)invoke).Invoke();
+            return true;
+        }
+        if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
+        {
+            ((TogglePattern)toggle).Toggle();
+            return true;
+        }
+        if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var select))
+        {
+            ((SelectionItemPattern)select).Select();
+            return true;
+        }
+        return false;
+    }
+
+    private static Protocol.UiTree? Inspect(ulong handle, uint processId, long deadline, List<AutomationElement>? elements)
     {
         nint window = (nint)handle;
         if (!OwnedBy(window, processId))
@@ -159,6 +196,7 @@ internal static class WindowInspector
             if (current.ProcessId != processId)
                 return;
 
+            elements?.Add(element);
             tree.Nodes.Add(new Protocol.UiNode
             {
                 Parent = parent,

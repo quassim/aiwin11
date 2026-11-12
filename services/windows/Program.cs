@@ -38,6 +38,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
         && command.ReadClipboard is null && command.WriteClipboard is null
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
+        && command.InvokeControl is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -93,6 +94,31 @@ else if (command.ListProcesses is { } listing)
     {
         result.ProcessList = ProcessLister.Read(listing.Limit);
         result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.InvokeControl is { } control)
+{
+    try
+    {
+        switch (WindowInspector.Invoke(control.Window, control.ProcessId, control.Index, control.ControlType,
+                    control.Name, command.DeadlineMs))
+        {
+            case true:
+                result.Status = Protocol.Result.Types.Status.Success;
+                break;
+            case false:
+                Reject(Protocol.Result.Types.Status.Failed, "not_invokable", "The control cannot be clicked.");
+                break;
+            default:
+                Reject(Protocol.Result.Types.Status.Failed, "control_changed", "The window or control changed.");
+                break;
+        }
+    }
+    catch (Exception error) when (error is System.Windows.Automation.ElementNotAvailableException
+        or System.Windows.Automation.ElementNotEnabledException or InvalidOperationException
+        or System.Runtime.InteropServices.COMException)
+    {
+        Reject(Protocol.Result.Types.Status.Failed, "control_changed", "The window or control changed.");
     }
 }
 else if (command.ListServices is { } listServices)

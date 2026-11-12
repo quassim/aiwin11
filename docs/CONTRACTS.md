@@ -213,6 +213,10 @@ The desktop Inspector page is unchanged: it still reads the foreground window's 
 
 `get_system_status` (no argument, local models only) is a read allowed in every profile. The host sends `GetSystemStatus {}` (agent peer with `Capability::SystemStatus`). The bridge answers `SystemStatus { memory_total_bytes, memory_available_bytes, cpu_load_percent (sampled over 250 ms with GetSystemTimes), logical_processors, uptime_seconds, drives }`, with at most 8 fixed drives `DriveStatus { name, total_bytes, free_bytes }`. The host rejects incoherent figures (available memory above total, load above 100, free space above size). The agent receives rounded figures; journaled as `system.status.completed|failed`.
 
+## Agent control click (UI Automation Invoke)
+
+`inspect_window` now numbers each control `[n]` (1-based, walk order) and the task keeps the result. `click_control { control: n }` targets only a control of that result; the approval shows the window, the application and the control. Critical and irreversible in its manifest (a button can send, delete or pay): always asks. The broker accepts `InvokeControl { window, process_id, index 1..80, control_type, name }` with `Capability::ControlInvoke`; the bridge re-walks the same window, checks that control `index` still has the same type and name (`control_changed` otherwise), then uses the Invoke, Toggle or SelectionItem pattern (`not_invokable` if none). Events `control.invoke.completed|failed`.
+
 ## Agent window management
 
 `list_windows` (no argument) reads window titles, so the manifest marks it `readsScreen`: it asks in every profile (`screen_data`) and is never grantable. The bridge walks the Z order with the same filters as `LocateWindow` (visible, unowned, not cloaked, not topmost/tool windows, not the host nor the bridge, a title), minimized windows included, and returns `WindowList { windows }` (at most 20 `WindowInfo` with `minimized`). The host validates the list and keeps it in the task; the model sees numbered lines framed as untrusted data.

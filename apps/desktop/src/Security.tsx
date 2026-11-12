@@ -72,6 +72,7 @@ const actionNames: Record<string, string> = {
   writeClipboard: "Copier un texte dans le presse-papiers",
   listWindows: "Lister les fenêtres ouvertes",
   listServices: "Lister les services Windows (lecture seule)",
+  clickControl: "Cliquer sur un bouton d’une fenêtre lue (UI Automation)",
   adminService: "Démarrer, arrêter ou configurer un service (administrateur)",
   adminCleanTemp: "Vider les fichiers temporaires de Windows (administrateur)",
   arrangeWindow: "Réduire, restaurer, agrandir ou mettre au premier plan une fenêtre",

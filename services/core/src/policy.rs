@@ -88,10 +88,11 @@ pub enum AgentAction {
     ListServices,
     AdminService,
     AdminCleanTemp,
+    ClickControl,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -110,6 +111,7 @@ impl AgentAction {
         Self::ListServices,
         Self::AdminService,
         Self::AdminCleanTemp,
+        Self::ClickControl,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -136,6 +138,7 @@ impl AgentAction {
             Self::ListServices => "list_services",
             Self::AdminService => "admin_service",
             Self::AdminCleanTemp => "admin_clean_temp",
+            Self::ClickControl => "click_control",
         }
     }
 
@@ -192,7 +195,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 18] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 19] = [
+    (A::ClickControl, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::AdminService, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::AdminCleanTemp, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListServices, [E::Allow, E::Allow, E::Allow, E::Allow]),
