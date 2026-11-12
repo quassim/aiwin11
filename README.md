@@ -83,6 +83,10 @@ La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque,
 
 **Modèles** affiche le modèle de chaque tâche et les modèles chargés par Ollama (mémoire GPU). L’option **Local d’abord, OpenAI en secours** permet, si Ollama ne répond pas, de continuer la demande avec OpenAI : seulement si tu coches l’envoi pour cette demande, avant toute action, et jamais en mode privé.
 
+### Mode flottant
+
+**Mode flottant** (barre latérale) réduit AiWin11 à une petite fenêtre toujours au premier plan, dans le coin de l’écran, pour lui parler pendant que tu travailles ailleurs. Le même bouton rétablit la fenêtre normale.
+
 ### Mode privé, zone de notification et raccourci
 
 **Sécurité → Mode privé** bloque toute requête vers un fournisseur cloud, même avec ton accord. AiWin11 a une icône dans la zone de notification (Ouvrir, Stoppe toutes les tâches, Quitter) et **Ctrl+Alt+Espace** le ramène au premier plan depuis n’importe quelle application, directement sur le champ de demande (palette de commandes).

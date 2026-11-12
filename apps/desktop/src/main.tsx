@@ -431,6 +431,7 @@ function App() {
   const [cloudApproved, setCloudApproved] = useState(false);
   const [cloudFallback, setCloudFallback] = useState(false);
   const [dictating, setDictating] = useState(false);
+  const [floating, setFloating] = useState(false);
   const [dictationStatus, setDictationStatus] = useState("");
   const [vendor, setVendor] = useState<"openai" | "deepseek">("openai");
   const vendorName = vendor === "deepseek" ? "DeepSeek" : "OpenAI";
@@ -680,6 +681,19 @@ function App() {
           <span aria-hidden="true" />
           {provider === "ollama" ? "Ollama · Local" : `${vendorName} · Cloud`}
         </div>
+        <button
+          className="link-button"
+          aria-pressed={floating}
+          onClick={() => {
+            const next = !floating;
+            void invoke("set_floating", { enabled: next }).then(() => {
+              setFloating(next);
+              if (next) setPage("Accueil");
+            });
+          }}
+        >
+          {floating ? "Quitter le mode flottant" : "Mode flottant"}
+        </button>
         <button className="stop-all" onClick={() => void stopAll()} aria-describedby="stop-status">
           Stoppe toutes les tâches
         </button>

@@ -36,6 +36,7 @@ fn main() {
         "get_cloud_fallback",
         "get_memories",
         "get_routines",
+        "set_floating",
         "get_mcp_servers",
         "set_mcp_servers",
         "get_reports",

@@ -445,6 +445,28 @@ fn set_mcp_servers(
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_mcp_servers(servers)
 }
 
+/// Floating mode: a small always-on-top window in the bottom-right corner of its screen, or
+/// back to the normal window.
+#[tauri::command]
+fn set_floating(app: tauri::AppHandle, enabled: bool) -> Result<(), &'static str> {
+    use tauri::{LogicalSize, PhysicalPosition};
+    let window = app.get_webview_window("main").ok_or("WINDOW_UNAVAILABLE")?;
+    window.set_always_on_top(enabled).map_err(|_| "WINDOW_UNAVAILABLE")?;
+    let size = if enabled { LogicalSize::new(440.0, 620.0) } else { LogicalSize::new(1060.0, 700.0) };
+    window.set_size(size).map_err(|_| "WINDOW_UNAVAILABLE")?;
+    if enabled {
+        if let (Ok(Some(monitor)), Ok(outer)) = (window.current_monitor(), window.outer_size()) {
+            let area = monitor.work_area();
+            let x = area.position.x + area.size.width as i32 - outer.width as i32 - 16;
+            let y = area.position.y + area.size.height as i32 - outer.height as i32 - 16;
+            let _ = window.set_position(PhysicalPosition::new(x.max(area.position.x), y.max(area.position.y)));
+        }
+    } else {
+        let _ = window.center();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
@@ -642,6 +664,7 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            set_floating,
             get_mcp_servers,
             set_mcp_servers,
             get_reports,
