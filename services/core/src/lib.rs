@@ -2,6 +2,7 @@
 pub mod admin;
 pub mod broker;
 pub mod grants;
+pub mod images;
 #[cfg(windows)]
 pub mod local_files;
 pub mod manifest;

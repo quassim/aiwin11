@@ -97,10 +97,11 @@ pub enum AgentAction {
     OrganizeFiles,
     McpListTools,
     McpCall,
+    GenerateImage,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -128,6 +129,7 @@ impl AgentAction {
         Self::OrganizeFiles,
         Self::McpListTools,
         Self::McpCall,
+        Self::GenerateImage,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -163,6 +165,7 @@ impl AgentAction {
             Self::OrganizeFiles => "organize_files",
             Self::McpListTools => "mcp_list_tools",
             Self::McpCall => "mcp_call",
+            Self::GenerateImage => "generate_image",
         }
     }
 
@@ -248,6 +251,7 @@ impl AgentProfile {
                     | A::Remember
                     | A::Recall
                     | A::SearchMemory
+                    | A::GenerateImage
             ),
             Self::WindowsAdmin => matches!(
                 action,
@@ -286,7 +290,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 27] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 28] = [
+    (A::GenerateImage, [E::Deny, E::Ask, E::Allow, E::Allow]),
     (A::McpListTools, [E::Ask, E::Ask, E::Allow, E::Allow]),
     (A::McpCall, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::OrganizeFiles, [E::Deny, E::Ask, E::Ask, E::Ask]),

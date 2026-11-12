@@ -124,6 +124,10 @@ Sous chaque réponse, **Lire à voix haute** utilise une voix Windows installée
 
 Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ; un clic sur une demande enregistrée la remet dans le champ, tu n’as plus qu’à l’envoyer. Avec une heure et **Planifier**, AiWin11 l’exécute seul chaque jour (s’il est ouvert), avec le modèle local et en lecture seule : aucune action modifiante, aucun envoi au cloud. Les résultats s’affichent dans **Résultats des demandes planifiées**.
 
+### Images
+
+Si tu fais tourner un moteur Stable Diffusion local (AUTOMATIC1111 lancé avec `--api`), indique son adresse dans **Modèles** (par exemple `http://127.0.0.1:7860`). L’agent peut alors générer des images, enregistrées dans le dossier d’images d’AiWin11 (**Ouvrir le dossier d’images**). Seules les adresses locales sont acceptées.
+
 ### Extensions MCP
 
 La page **Extensions** déclare jusqu’à 5 serveurs MCP locaux : un nom, le chemin complet de l’exécutable et ses arguments (par exemple `C:\Program Files\nodejs\node.exe` et le chemin du script du serveur). L’agent peut lister leurs outils puis, avec ton accord à chaque appel (arguments affichés), en utiliser un. N’ajoute que des extensions de confiance.

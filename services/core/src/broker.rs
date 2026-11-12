@@ -68,6 +68,8 @@ pub enum Capability {
     Diagnostic = 1 << 21,
     /// Start a user-declared MCP server for one request.
     McpServer = 1 << 22,
+    /// Generate one image with the user's local engine into AiWin11's images folder.
+    ImageGenerate = 1 << 23,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -150,6 +152,7 @@ impl Policy {
             Some(Operation::ListWindows(_)) if agent(Capability::WindowList) => Ok("list_windows"),
             Some(Operation::RememberNote(_)) if agent(Capability::MemoryWrite) => Ok("remember_note"),
             Some(Operation::McpRequest(_)) if agent(Capability::McpServer) => Ok("mcp_request"),
+            Some(Operation::GenerateImage(_)) if agent(Capability::ImageGenerate) => Ok("generate_image"),
             Some(Operation::RunDiagnostic(run))
                 if agent(Capability::Diagnostic)
                     && aiwin11_contracts::v1::run_diagnostic::Diagnostic::try_from(run.diagnostic)

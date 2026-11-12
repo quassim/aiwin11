@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-image-engine"
+description = "Enables the set_image_engine command without any pre-configured scope."
+commands.allow = ["set_image_engine"]
+
+[[permission]]
+identifier = "deny-set-image-engine"
+description = "Denies the set_image_engine command without any pre-configured scope."
+commands.deny = ["set_image_engine"]

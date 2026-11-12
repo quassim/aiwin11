@@ -57,6 +57,7 @@ type ApprovalAction =
   | { kind: "listWindows" }
   | { kind: "listServices" }
   | { kind: "mcpListTools"; server: string }
+  | { kind: "generateImage"; prompt: string }
   | { kind: "mcpCall"; server: string; tool: string; arguments: string }
   | { kind: "organizeFiles"; moves: [string, string][] }
   | { kind: "runDiagnostic"; diagnostic: string }
@@ -151,6 +152,13 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       title: `L’agent propose de ranger ${action.moves.length} fichier(s)`,
       detail: "Plan complet, approuvé en une fois. Aucun fichier existant ne sera remplacé :",
       quote: action.moves.map(([source, destination]) => `${source} → ${destination}`).join("\n"),
+    };
+  }
+  if (action.kind === "generateImage") {
+    return {
+      title: "L’agent propose de générer une image",
+      detail: "Action : générer une image avec ton moteur local et l’enregistrer dans le dossier d’images d’AiWin11.",
+      quote: action.prompt,
     };
   }
   if (action.kind === "mcpListTools") {
@@ -303,6 +311,9 @@ const activityNames: Record<string, string> = {
   "window.list.completed": "Fenêtres listées par l’agent",
   "service.list.completed": "Services listés par l’agent",
   "mcp.request.completed": "Extension MCP utilisée",
+  "image.generated": "Image générée localement",
+  "image.failed": "Génération d’image impossible",
+  "settings.image.changed": "Moteur d’images modifié",
   "mcp.request.failed": "Échec d’une extension MCP",
   "settings.mcp.changed": "Extensions MCP modifiées",
   "diagnostic.run.completed": "Diagnostic Windows effectué",

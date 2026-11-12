@@ -230,6 +230,17 @@ sécurité, de mise à jour et les services vitaux de Windows sont toujours refu
             }
         }));
         functions.push(json!({
+            "name": "generate_image",
+            "description": "Génère une image 512×512 avec le moteur d’images local de l’utilisateur (Stable \
+Diffusion sur ce PC) à partir d’une description, et l’enregistre dans le dossier d’images d’AiWin11.",
+            "parameters": {
+                "type": "object",
+                "properties": { "prompt": { "type": "string", "description": "Description de l’image, en anglais de préférence" } },
+                "required": ["prompt"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "mcp_list_tools",
             "description": "Liste les outils d’un serveur MCP déclaré par l’utilisateur (page Extensions).",
             "parameters": {
@@ -936,6 +947,7 @@ mod tests {
                 "admin_service",
                 "admin_clean_temp",
                 "run_diagnostic",
+                "generate_image",
                 "mcp_list_tools",
                 "mcp_call",
                 "list_services",
@@ -962,6 +974,7 @@ mod tests {
                 "admin_service",
                 "admin_clean_temp",
                 "run_diagnostic",
+                "generate_image",
                 "mcp_list_tools",
                 "mcp_call",
                 "list_services",

@@ -468,6 +468,42 @@ fn set_floating(app: tauri::AppHandle, enabled: bool) -> Result<(), &'static str
     Ok(())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageEngine {
+    endpoint: String,
+    available: bool,
+}
+
+#[tauri::command]
+async fn get_image_engine(state: State<'_, Arc<AppState>>) -> Result<ImageEngine, &'static str> {
+    let endpoint = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.image_endpoint().unwrap_or_default();
+    let probe = endpoint.clone();
+    let available = tauri::async_runtime::spawn_blocking(move || aiwin11_core::images::engine_available(&probe))
+        .await
+        .unwrap_or(false);
+    Ok(ImageEngine { endpoint, available })
+}
+
+/// Main window only: the local image engine (loopback HTTP only), or none.
+#[tauri::command]
+fn set_image_engine(state: State<'_, Arc<AppState>>, endpoint: String) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_image_endpoint(&endpoint)
+}
+
+/// Opens AiWin11's images folder in Explorer (fixed executable, fixed folder).
+#[tauri::command]
+fn open_images_folder(app: tauri::AppHandle) -> Result<(), &'static str> {
+    let folder = app.path().app_local_data_dir().map_err(|_| "IMAGE_WRITE_FAILED")?.join("images");
+    fs::create_dir_all(&folder).map_err(|_| "IMAGE_WRITE_FAILED")?;
+    let windows = std::env::var_os("SystemRoot").ok_or("IMAGE_WRITE_FAILED")?;
+    std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe"))
+        .arg(&folder)
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "IMAGE_WRITE_FAILED")
+}
+
 #[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
@@ -665,6 +701,9 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            get_image_engine,
+            set_image_engine,
+            open_images_folder,
             set_floating,
             get_mcp_servers,
             set_mcp_servers,

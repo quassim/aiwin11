@@ -75,6 +75,7 @@ const actionNames: Record<string, string> = {
   listServices: "Lister les services Windows (lecture seule)",
   mcpListTools: "Lister les outils d’une extension MCP",
   mcpCall: "Appeler un outil d’une extension MCP",
+  generateImage: "Générer une image (moteur local)",
   runDiagnostic: "Diagnostic Windows de la liste fermée (réseau, Wi-Fi, heure)",
   remember: "Retenir une information (mémoire chiffrée)",
   recall: "Relire la mémoire",

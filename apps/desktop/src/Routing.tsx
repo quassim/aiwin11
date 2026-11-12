@@ -8,7 +8,7 @@ const tasks: { name: string; status: string }[] = [
   { name: "Vision (description de fenêtre)", status: "Modèle de vision local choisi ci-dessous" },
   { name: "Synthèse vocale", status: "Voix Windows locale (français si installée)" },
   { name: "Reconnaissance vocale", status: "Moteur Windows local (SAPI), bouton Dicter de l’Accueil" },
-  { name: "Génération d’images", status: "Pas encore disponible (phase R7)" },
+  { name: "Génération d’images", status: "Moteur Stable Diffusion local (configuré ci-dessous)" },
   { name: "Génération vidéo", status: "Pas encore disponible (phase R7)" },
 ];
 
@@ -20,6 +20,20 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
   const [loaded, setLoaded] = useState<LoadedModel[]>();
   const [status, setStatus] = useState("");
   const [budget, setBudget] = useState<number>();
+  const [imageEndpoint, setImageEndpoint] = useState("");
+  const [imageStatus, setImageStatus] = useState("");
+
+  async function checkImageEngine() {
+    try {
+      const engine = await invoke<{ endpoint: string; available: boolean }>("get_image_engine");
+      setImageEndpoint(engine.endpoint);
+      setImageStatus(
+        engine.endpoint ? (engine.available ? "Moteur d’images détecté." : "Moteur d’images injoignable.") : "",
+      );
+    } catch {
+      setImageStatus("");
+    }
+  }
 
   async function refreshResources() {
     try {
@@ -37,6 +51,7 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
       onFallbackChange(enabled);
     });
     void invoke<number>("get_cloud_budget").then(setBudget);
+    void checkImageEngine();
     void refreshResources();
   }, [onFallbackChange]);
 
@@ -97,6 +112,28 @@ export function Routing({ onFallbackChange }: { onFallbackChange: (enabled: bool
             </option>
           ))}
         </select>
+      </div>
+      <div className="task-form">
+        <label htmlFor="image-endpoint">Moteur d’images local (API AUTOMATIC1111, sur ce PC uniquement)</label>
+        <input
+          id="image-endpoint"
+          value={imageEndpoint}
+          placeholder="http://127.0.0.1:7860 ; vide = aucun"
+          onChange={(event) => setImageEndpoint(event.target.value)}
+          onBlur={() => {
+            void invoke("set_image_engine", { endpoint: imageEndpoint }).then(
+              () => void checkImageEngine(),
+              () =>
+                setImageStatus("Adresse refusée : seul http://127.0.0.1:port ou http://localhost:port est accepté."),
+            );
+          }}
+        />
+        <div className="section-header">
+          <button type="button" onClick={() => void invoke("open_images_folder")}>
+            Ouvrir le dossier d’images
+          </button>
+        </div>
+        <p role="status">{imageStatus}</p>
       </div>
       <div className="section-header">
         <h3>Ressources des modèles locaux</h3>

@@ -64,6 +64,7 @@ pub enum CapabilityName {
     MemoryRead,
     Diagnostic,
     McpServer,
+    ImageGenerate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -94,7 +95,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 27] = [
+pub const MANIFESTS: [ToolManifest; 28] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -482,6 +483,21 @@ pub const MANIFESTS: [ToolManifest; 27] = [
         timeout_ms: 60_000,
         capabilities: &[C::McpServer],
     },
+    ToolManifest {
+        action: AgentAction::GenerateImage,
+        tool: "generate_image",
+        version: 1,
+        // Writes one new PNG into AiWin11's own images folder; deletable by the user.
+        risk: Risk::Medium,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Reversible,
+        timeout_ms: 180_000,
+        capabilities: &[C::ImageGenerate],
+    },
 ];
 
 /// The manifest of an action. Every action has one (checked by a test).
@@ -503,7 +519,7 @@ mod tests {
         for manifest in MANIFESTS {
             let name = manifest.tool;
             assert!(!manifest.capabilities.is_empty(), "{name}: a tool needs a broker capability");
-            assert!(manifest.timeout_ms > 0 && manifest.timeout_ms <= 120_000, "{name}");
+            assert!(manifest.timeout_ms > 0 && manifest.timeout_ms <= 180_000, "{name}");
             // A read has no effect to undo; a side effect must say how it is undone.
             assert_eq!(manifest.side_effect, manifest.reversibility != Reversibility::NoEffect, "{name}");
             // Every side effect can be simulated, so simulation mode never runs it for real.

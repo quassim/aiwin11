@@ -155,6 +155,10 @@ pub enum ApprovalAction {
     McpListTools {
         server: String,
     },
+    /// The full description is shown.
+    GenerateImage {
+        prompt: String,
+    },
     /// The server, the tool and its full arguments are shown.
     McpCall {
         server: String,
@@ -261,6 +265,7 @@ enum PlannedAction {
     SearchMemory(String),
     OrganizeFiles(Vec<(String, String)>),
     McpListTools(String),
+    GenerateImage(String),
     McpCall {
         server: String,
         tool: String,
@@ -745,6 +750,10 @@ impl TaskSlot {
                 ("click_control", json!({ "control": number }), self.click_control(run, number, None)?)
             }
             PlannedAction::Recall => ("recall", json!({}), self.recall(run, None)?),
+            PlannedAction::GenerateImage(prompt) => {
+                let observation = self.generate_image(run, &prompt)?;
+                ("generate_image", json!({ "prompt": prompt }), observation)
+            }
             PlannedAction::McpListTools(server) => {
                 let observation = self.mcp(run, &server, None)?;
                 ("mcp_list_tools", json!({ "server": server }), observation)
@@ -1047,6 +1056,46 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    fn generate_image<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, prompt: &str) -> Result<String, &'static str> {
+        let action = AgentAction::GenerateImage;
+        let summary = "Générer une image avec le moteur local";
+        let (endpoint, folder) = {
+            let core = lock(run.core)?;
+            (core.image_endpoint(), run.files.map(|files| files.trash().with_file_name("images")))
+        };
+        let (Some(endpoint), Some(folder)) = (endpoint, folder) else {
+            run.report(action, summary, ActionStatus::Failed, Some("IMAGE_ENGINE_NOT_CONFIGURED"));
+            return Ok("Aucun moteur d’images local n’est configuré (page Modèles). Rien n’a été généré.".into());
+        };
+        let approval = ApprovalAction::GenerateImage { prompt: prompt.to_owned() };
+        let grant = match self.gate(run, action, summary, Capability::ImageGenerate, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result = self.dispatching(run.core, run.task, || {
+            {
+                let mut core = lock(run.core)?;
+                let command = core
+                    .agent_command(run.task, Operation::GenerateImage(Default::default()))
+                    .map_err(|_| "IMAGE_ENGINE_UNAVAILABLE")?;
+                core.authorize_dispatch(grant, Peer::Agent, &command).map_err(|_| "IMAGE_ACCESS_DENIED")?;
+            }
+            crate::images::generate(&endpoint, prompt, &folder)
+        })?;
+        let (status, code) = status_of(&result);
+        run.report(action, summary, status, code);
+        record_code(
+            run.core,
+            run.task,
+            if result.is_ok() { "image.generated" } else { "image.failed" },
+            code.unwrap_or("ok"),
+        )?;
+        Ok(match result {
+            Ok(name) => format!("Image générée et enregistrée sous « {name} » dans le dossier d’images d’AiWin11."),
+            Err(code) => format!("Génération d’image impossible : {code}."),
+        })
     }
 
     /// Lists a declared MCP server's tools (`call` = `None`) or calls one of them. The core
@@ -2229,6 +2278,12 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
             Ok(PlannedAction::ListServices)
         }
         ("tool", Some("recall"), Some(arguments), None) if arguments.is_empty() => Ok(PlannedAction::Recall),
+        ("tool", Some("generate_image"), Some(arguments), None) if arguments.len() == 1 => arguments
+            .get("prompt")
+            .and_then(Value::as_str)
+            .filter(|prompt| crate::memory::valid_note(prompt))
+            .map(|prompt| PlannedAction::GenerateImage(prompt.trim().to_owned()))
+            .ok_or("AGENT_REJECTED"),
         ("tool", Some("mcp_list_tools"), Some(arguments), None) if arguments.len() == 1 => arguments
             .get("server")
             .and_then(Value::as_str)
