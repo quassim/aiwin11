@@ -646,6 +646,7 @@ function App() {
     (localStrategy === "manual" && cloudFallback) ||
     (localStrategy === "balanced" && agent === "general" && localRuntime.runtime === "ollama");
   const [dictationStatus, setDictationStatus] = useState("");
+  const [microphone, setMicrophone] = useState(false);
   const [vendor, setVendor] = useState("openai");
   const [cloudProviders, setCloudProviders] = useState<CloudProvider[]>([]);
   const vendorName = cloudProviders.find((entry) => entry.id === vendor)?.label ?? vendor;
@@ -687,6 +688,46 @@ function App() {
     !!selectedModel &&
     !!prompt.trim() &&
     (taskProvider === "ollama" || (cloudApproved && keyConfigured && !keyBusy && vendorEnabled));
+
+  // Voice request: listen once, send what was recognized, read the reply aloud (local voice).
+  const canVoice =
+    !running &&
+    !dictating &&
+    !!selectedModel &&
+    (taskProvider === "ollama" || (cloudApproved && keyConfigured && !keyBusy && vendorEnabled));
+
+  async function voiceRequest() {
+    if (!canVoice) {
+      setDictationStatus("Demande vocale indisponible : une tâche est en cours ou aucun modèle n’est prêt.");
+      return;
+    }
+    setDictating(true);
+    setDictationStatus("Parle maintenant : ta demande sera envoyée telle quelle (10 secondes au plus)…");
+    let text = "";
+    try {
+      text = (await invoke<string>("dictate")).trim();
+      setDictationStatus(text ? `Entendu : « ${text} »` : "");
+    } catch (failure) {
+      setDictationStatus(dictationErrors[String(failure)] ?? "La dictée a échoué.");
+    } finally {
+      setDictating(false);
+    }
+    if (text) {
+      setPrompt(text);
+      await runTask(text, true);
+    }
+  }
+  const voiceRequestRef = useRef(voiceRequest);
+  voiceRequestRef.current = voiceRequest;
+
+  useEffect(() => {
+    const microphoneEvents = listen<boolean>("desktop-microphone", (event) => setMicrophone(event.payload));
+    const voiceEvents = listen("desktop-voice-request", () => void voiceRequestRef.current());
+    return () => {
+      for (const subscription of [microphoneEvents, voiceEvents])
+        void subscription.then((unlisten) => unlisten()).catch(() => undefined);
+    };
+  }, []);
 
   function resetApproval() {
     setCloudApproved(false);
@@ -989,12 +1030,12 @@ function App() {
     return () => window.clearInterval(timer);
   }, [replayTask, running]);
 
-  async function runTask() {
+  async function runTask(text = prompt, speakReply = false) {
     localTaskInvocation.current = true;
     taskCursor.current = { runId: "", sequence: 0 };
     setRunning(true);
     resetApproval();
-    setLastPrompt(prompt);
+    setLastPrompt(text);
     setTaskStatus("Demande en cours…");
     setTaskProgress("");
     setRoutingExplanation("");
@@ -1012,7 +1053,7 @@ function App() {
     try {
       const outcome = await invoke<TaskOutcome>("run_task", {
         request: {
-          prompt,
+          prompt: text,
           model: selectedModel,
           provider: taskProvider,
           cloudApproved,
@@ -1030,7 +1071,7 @@ function App() {
         progress,
       });
       setAgentReply(outcome.reply);
-      if (autoSpeak()) speak(outcome.reply);
+      if (speakReply || autoSpeak()) speak(outcome.reply);
       setActionReports(outcome.actions);
       setTaskStatus("");
       setPrompt("");
@@ -1114,6 +1155,9 @@ function App() {
                 <span aria-hidden="true" className="agent-state-dot" /> Agent : {agentStateLabels[state]}
               </p>
               {transfer && <p className={sentToCloud ? "transfer transfer-cloud" : "transfer"}>{transfer}</p>}
+              {microphone && (
+                <p className="transfer microphone">🎤 Micro actif : AiWin11 écoute (10 s au plus, traitement local)</p>
+              )}
             </div>
           );
         })()}
@@ -1355,6 +1399,15 @@ function App() {
                   }}
                 >
                   {dictating ? "Écoute…" : "🎤 Dicter"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!canVoice}
+                  aria-label="Demande vocale : dicter, envoyer et lire la réponse (Ctrl+Alt+V)"
+                  title="Ctrl+Alt+V depuis n’importe où"
+                  onClick={() => void voiceRequest()}
+                >
+                  🎙 Demande vocale
                 </button>
                 {running && (
                   <button type="button" aria-pressed={pauseState !== ""} onClick={() => void togglePause()}>

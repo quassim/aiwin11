@@ -43,6 +43,7 @@ pub(super) struct DesktopState {
     opening: Mutex<Option<Instant>>,
     palette_shortcut: AtomicBool,
     stop_shortcut: AtomicBool,
+    voice_shortcut: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -51,6 +52,7 @@ pub(super) struct OverlayStatus {
     task: aiwin11_model_ipc::TaskPresence,
     palette_shortcut: bool,
     stop_shortcut: bool,
+    voice_shortcut: bool,
 }
 
 pub(super) fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
@@ -107,6 +109,7 @@ pub(super) fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let modifiers = Some(Modifiers::CONTROL | Modifiers::ALT);
     let palette_shortcut = Shortcut::new(modifiers, Code::Space);
     let stop_shortcut = Shortcut::new(modifiers, Code::Backspace);
+    let voice_shortcut = Shortcut::new(modifiers, Code::KeyV);
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
@@ -121,6 +124,11 @@ pub(super) fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 } else if *shortcut == stop_shortcut {
                     stop_tasks(app);
+                } else if *shortcut == voice_shortcut {
+                    // A voice request: the main window comes forward and starts listening.
+                    let _ = overlay_dismiss(app.clone());
+                    show_main(app);
+                    let _ = app.emit_to("main", "desktop-voice-request", ());
                 }
             })
             .build(),
@@ -128,6 +136,7 @@ pub(super) fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<Arc<AppState>>();
     state.desktop.palette_shortcut.store(app.global_shortcut().register(palette_shortcut).is_ok(), Ordering::Release);
     state.desktop.stop_shortcut.store(app.global_shortcut().register(stop_shortcut).is_ok(), Ordering::Release);
+    state.desktop.voice_shortcut.store(app.global_shortcut().register(voice_shortcut).is_ok(), Ordering::Release);
     Ok(())
 }
 
@@ -163,6 +172,7 @@ pub(super) fn overlay_status(state: State<'_, Arc<AppState>>) -> OverlayStatus {
         task: state.task_worker.presence(),
         palette_shortcut: state.desktop.palette_shortcut.load(Ordering::Acquire),
         stop_shortcut: state.desktop.stop_shortcut.load(Ordering::Acquire),
+        voice_shortcut: state.desktop.voice_shortcut.load(Ordering::Acquire),
     }
 }
 
@@ -228,6 +238,14 @@ fn stop_tasks(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Microphone indicator: the notification area and every window know while AiWin11 listens.
+pub(super) fn microphone(app: &AppHandle, active: bool) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(if active { "AiWin11 · 🎤 Micro actif" } else { "AiWin11" }));
+    }
+    let _ = app.emit("desktop-microphone", active);
 }
 
 pub(super) fn notify(app: &AppHandle, message: &'static str) {

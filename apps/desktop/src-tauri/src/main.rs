@@ -1131,13 +1131,16 @@ fn set_extra_folders(state: State<'_, Arc<AppState>>, paths: Vec<String>) -> Res
     Ok(stored)
 }
 
-/// The user clicked the microphone: one phrase, recognized offline by Windows.
+/// The user clicked the microphone (or pressed Ctrl+Alt+V): one phrase, recognized offline by
+/// Windows. While it listens, every window and the notification area show it.
 #[tauri::command]
-async fn dictate(state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
+async fn dictate(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, &'static str> {
     let state = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || state.core.try_lock().map_err(|_| "CORE_BUSY")?.dictate())
-        .await
-        .map_err(|_| "DICTATION_FAILED")?
+    desktop::microphone(&app, true);
+    let result =
+        tauri::async_runtime::spawn_blocking(move || state.core.try_lock().map_err(|_| "CORE_BUSY")?.dictate()).await;
+    desktop::microphone(&app, false);
+    result.map_err(|_| "DICTATION_FAILED")?
 }
 
 #[tauri::command]

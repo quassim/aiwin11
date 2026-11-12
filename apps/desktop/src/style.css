@@ -403,3 +403,8 @@ button:disabled {
   border-radius: 0.55rem;
   padding: 0.7rem;
 }
+
+.agent-state .microphone {
+  font-weight: 600;
+  color: var(--danger, #c42b1c);
+}

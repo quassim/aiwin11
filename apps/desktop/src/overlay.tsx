@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./overlay.css";
 
-type OverlayStatus = { task: "idle" | "running" | "approval"; paletteShortcut: boolean; stopShortcut: boolean };
+type OverlayStatus = {
+  task: "idle" | "running" | "approval";
+  paletteShortcut: boolean;
+  stopShortcut: boolean;
+  voiceShortcut: boolean;
+};
 const destinations = [
   { target: "home", title: "Accueil" },
   { target: "dashboard", title: "Centre de contrôle" },
@@ -178,10 +183,14 @@ function Palette() {
           <kbd>Échap</kbd> Fermer
         </span>
       </footer>
-      {status && (!status.paletteShortcut || !status.stopShortcut) && (
+      {status && (!status.paletteShortcut || !status.stopShortcut || !status.voiceShortcut) && (
         <p className="warning">
           Raccourci indisponible ·{" "}
-          {[!status.paletteShortcut && "Ctrl+Alt+Espace", !status.stopShortcut && "Ctrl+Alt+Retour arrière"]
+          {[
+            !status.paletteShortcut && "Ctrl+Alt+Espace",
+            !status.stopShortcut && "Ctrl+Alt+Retour arrière",
+            !status.voiceShortcut && "Ctrl+Alt+V",
+          ]
             .filter(Boolean)
             .join(", ")}
         </p>
