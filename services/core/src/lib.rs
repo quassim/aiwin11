@@ -94,6 +94,65 @@ impl ModelPreferences {
     }
 }
 
+/// Tool-calling status of a model manifest ([S1 §4.2]: `unverified` until a test says otherwise).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolCalling {
+    Unverified,
+    /// The provider does not advertise tool calling for this model.
+    NotAdvertised,
+    /// The synthetic tool-call probe succeeded.
+    Verified,
+    /// Tool calling is advertised but the probe failed.
+    Failed,
+}
+
+impl ToolCalling {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Unverified => "unverified",
+            Self::NotAdvertised => "not_advertised",
+            Self::Verified => "verified",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        [Self::Unverified, Self::NotAdvertised, Self::Verified, Self::Failed]
+            .into_iter()
+            .find(|status| status.code() == code)
+    }
+}
+
+/// What is known about one local model.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelManifest {
+    pub name: String,
+    pub tool_calling: ToolCalling,
+    pub vision_advertised: bool,
+    pub probe_ms: Option<u64>,
+    pub probed_at: Option<String>,
+}
+
+/// Public model identifiers as Ollama lists them: letters, digits and `-_.:/`, 1 to 256 bytes.
+fn valid_model_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 256
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.:/".contains(&byte))
+}
+
+/// Schema migrations in order; migration N sets `user_version` to N.
+const MIGRATIONS: [&str; 7] = [
+    include_str!("../migrations/001.sql"),
+    include_str!("../migrations/002.sql"),
+    include_str!("../migrations/003.sql"),
+    include_str!("../migrations/004.sql"),
+    include_str!("../migrations/005.sql"),
+    include_str!("../migrations/006.sql"),
+    include_str!("../migrations/007.sql"),
+];
+
 pub struct Core {
     db: Connection,
     session_id: String,
@@ -137,40 +196,13 @@ impl Core {
         db.pragma_update(None, "foreign_keys", true)?;
         let transaction = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: u32 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        match version {
-            0 => {
-                transaction.execute_batch(include_str!("../migrations/001.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/002.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/003.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/005.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
-            }
-            1 => {
-                transaction.execute_batch(include_str!("../migrations/002.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/003.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/005.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
-            }
-            2 => {
-                transaction.execute_batch(include_str!("../migrations/003.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/005.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
-            }
-            3 => {
-                transaction.execute_batch(include_str!("../migrations/004.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/005.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
-            }
-            4 => {
-                transaction.execute_batch(include_str!("../migrations/005.sql"))?;
-                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
-            }
-            5 => transaction.execute_batch(include_str!("../migrations/006.sql"))?,
-            6 => {}
-            _ => return Err(rusqlite::Error::InvalidQuery),
+        // Each migration sets `user_version` to its own number; apply every one above the
+        // current version, in order, inside this transaction.
+        if version > MIGRATIONS.len() as u32 {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        for migration in &MIGRATIONS[version as usize..] {
+            transaction.execute_batch(migration)?;
         }
         let session_id = Uuid::new_v4().to_string();
         transaction.execute("INSERT INTO sessions (id) VALUES (?1)", [&session_id])?;
@@ -278,6 +310,82 @@ impl Core {
     /// the request's cloud approval and never in private mode. Off by default.
     pub fn cloud_fallback_enabled(&self) -> bool {
         matches!(self.setting("routing.cloud_fallback"), Ok(Some(value)) if value == "true")
+    }
+
+    /// Records what a tool-call probe established about a local model ([S1 §4.2] manifest).
+    /// Identifiers are checked; the event holds the status code only.
+    pub fn record_model_probe(
+        &self,
+        name: &str,
+        tool_calling: ToolCalling,
+        vision: Option<bool>,
+        probe_ms: u64,
+    ) -> Result<(), &'static str> {
+        if !valid_model_name(name) {
+            return Err("MODEL_REQUIRED");
+        }
+        self.db
+            .execute(
+                "INSERT INTO models (id, provider, name, tool_calling, vision, probe_ms, probed_at)
+                 VALUES (?1, 'ollama', ?2, ?3, COALESCE(?4, 'not_advertised'), ?5,
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET tool_calling = excluded.tool_calling,
+                 vision = COALESCE(?4, models.vision),
+                 probe_ms = excluded.probe_ms, probed_at = excluded.probed_at,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                params![
+                    format!("ollama:{name}"),
+                    name,
+                    tool_calling.code(),
+                    vision.map(|advertised| if advertised { "advertised" } else { "not_advertised" }),
+                    i64::try_from(probe_ms).unwrap_or(i64::MAX)
+                ],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.db
+            .execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'model.manifest.updated', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), self.session_id, tool_calling.code()],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        Ok(())
+    }
+
+    /// Known local model manifests, most recently probed first.
+    pub fn model_manifests(&self) -> rusqlite::Result<Vec<ModelManifest>> {
+        let mut statement = self.db.prepare(
+            "SELECT name, tool_calling, vision, probe_ms, probed_at FROM models
+             WHERE provider = 'ollama' ORDER BY probed_at DESC, name LIMIT 64",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let tool_calling: String = row.get(1)?;
+            let vision: String = row.get(2)?;
+            Ok(ModelManifest {
+                name: row.get(0)?,
+                tool_calling: ToolCalling::from_code(&tool_calling).unwrap_or(ToolCalling::Unverified),
+                vision_advertised: vision == "advertised",
+                probe_ms: row.get::<_, Option<i64>>(3)?.and_then(|ms| u64::try_from(ms).ok()),
+                probed_at: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Local models whose last probe failed or that do not advertise tool calling: routing
+    /// strategies never switch to them. An unreadable store excludes nothing.
+    pub fn unusable_local_models(&self) -> Vec<String> {
+        self.model_manifests()
+            .map(|manifests| {
+                manifests
+                    .into_iter()
+                    .filter(|manifest| {
+                        matches!(manifest.tool_calling, ToolCalling::Failed | ToolCalling::NotAdvertised)
+                    })
+                    .map(|manifest| manifest.name)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// How interactive Ollama tasks pick their local model. Falls back to the older
@@ -875,6 +983,15 @@ mod tests {
             "memory_entries.kind",
             "memory_entries.last_run",
             "memory_entries.schedule",
+            // Model manifests: public model identifiers, status codes, a duration, timestamps.
+            "models.id",
+            "models.name",
+            "models.probe_ms",
+            "models.probed_at",
+            "models.provider",
+            "models.tool_calling",
+            "models.updated_at",
+            "models.vision",
             "events.code",
             "events.id",
             "events.kind",
@@ -989,9 +1106,38 @@ mod tests {
     }
 
     #[test]
+    fn model_manifests_record_probe_results_and_exclude_unusable_models() {
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert!(core.model_manifests().unwrap().is_empty());
+        core.record_model_probe("qwen3:8b", ToolCalling::Verified, Some(false), 1_200).unwrap();
+        core.record_model_probe("qwen3:0.6b", ToolCalling::Failed, Some(false), 900).unwrap();
+        core.record_model_probe("gemma3:4b", ToolCalling::NotAdvertised, Some(true), 0).unwrap();
+        core.record_model_probe("gemma3:4b", ToolCalling::NotAdvertised, None, 0).unwrap();
+        core.record_model_probe("qwen3:8b", ToolCalling::Verified, None, 800).unwrap();
+        let manifests = core.model_manifests().unwrap();
+        assert_eq!(manifests.len(), 3, "one row per model");
+        let qwen = manifests.iter().find(|manifest| manifest.name == "qwen3:8b").unwrap();
+        assert_eq!((qwen.tool_calling, qwen.probe_ms), (ToolCalling::Verified, Some(800)));
+        // `None` keeps what the last full probe said about vision.
+        assert!(manifests.iter().find(|manifest| manifest.name == "gemma3:4b").unwrap().vision_advertised);
+        let mut unusable = core.unusable_local_models();
+        unusable.sort();
+        assert_eq!(unusable, ["gemma3:4b", "qwen3:0.6b"]);
+        for invalid in ["", "a b", "x\u{0}", &"m".repeat(257)] {
+            assert_eq!(core.record_model_probe(invalid, ToolCalling::Verified, None, 1), Err("MODEL_REQUIRED"));
+        }
+        let event = &core.activity().unwrap()[0];
+        assert_eq!((event.kind.as_str(), event.code.as_deref()), ("model.manifest.updated", Some("verified")));
+        for status in [ToolCalling::Unverified, ToolCalling::NotAdvertised, ToolCalling::Verified, ToolCalling::Failed]
+        {
+            assert_eq!(ToolCalling::from_code(status.code()), Some(status));
+        }
+    }
+
+    #[test]
     fn a_newer_database_is_rejected() {
         let db = Connection::open_in_memory().unwrap();
-        db.pragma_update(None, "user_version", 7).unwrap();
+        db.pragma_update(None, "user_version", 8).unwrap();
         assert!(Core::start(db).is_err());
     }
 
@@ -1002,7 +1148,7 @@ mod tests {
         db.execute("INSERT INTO sessions (id) VALUES ('old')", []).unwrap();
         let core = Core::start(db).unwrap();
         let version: u32 = core.db.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, MIGRATIONS.len() as u32);
         let sessions: u32 = core.db.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0)).unwrap();
         assert_eq!(sessions, 2, "existing data is kept");
         assert_eq!(core.policy_settings(), PolicySettings::default());

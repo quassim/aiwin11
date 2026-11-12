@@ -29,7 +29,7 @@ use crate::{
     openai,
     policy::{self, ActionContext, AgentAction, AgentProfile, Effect, PolicySettings},
     windows_bridge::{ListedWindow, NamedNode, ProcessSnapshot, SystemSnapshot, WindowTarget, MAX_LISTED_WINDOWS},
-    Core,
+    Core, ToolCalling,
 };
 
 #[derive(Clone, Copy, Deserialize)]
@@ -668,8 +668,12 @@ impl TaskSlot {
             if matches!(routed.provider, Provider::Ollama) && !routed.scheduled && strategy != LocalStrategy::Manual {
                 routed.cloud_fallback_model = None;
                 progress(TaskUpdate::stage("model.routing"));
-                let candidate = Ollama::connect().and_then(|ollama| ollama.route_local(strategy, &routed.model));
+                let excluded = lock(core)?.unusable_local_models();
+                let candidate =
+                    Ollama::connect().and_then(|ollama| ollama.route_local(strategy, &routed.model, &excluded));
                 let reason = if let Ok(Some((model, reason))) = candidate {
+                    // The candidate just passed the probe: its manifest is now verified.
+                    let _ = lock(core)?.record_model_probe(&model, ToolCalling::Verified, None, 0);
                     routed.model = model;
                     reason
                 } else {

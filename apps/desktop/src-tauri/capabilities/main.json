@@ -13,6 +13,7 @@
     "allow-move-local-text", "allow-trash-local-text", "allow-list-trash", "allow-list-local-text", "allow-restore-local-text",
     "allow-update-routine",
     "allow-probe-local-model",
+    "allow-get-model-manifests",
     "allow-get-cloud-usage", "allow-get-runtime-status",
     "allow-video-status", "allow-start-video",
     "allow-get-local-strategy", "allow-set-local-strategy",

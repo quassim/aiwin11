@@ -140,7 +140,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Types `task.started`, `task.progress`, `model.provider.unavailable` | ✅ | — |
 | Ordre par tâche ✅ ; tolérance aux doublons après reconnexion | 🟡 | R4 |
 | Model Gateway : ProviderRegistry, ModelCatalog 🟡, ModelRouter (Resolve, Rank, Select, **ExplainSelection**), InferenceService (Generate, Stream ✅, Cancel 🟡), ResourceMonitor, UsageService | 🟡 | R3 |
-| Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | ❌ | R3 |
+| Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | 🟡 table `models` (migration 007) : appels d’outils `unverified`/`not_advertised`/`verified`/`failed`, vision, durée et date du dernier test ; modèles en échec exclus du routage. Limites de contexte et matériel requis non encore relevés | R3 |
 | Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first ✅, cost_optimized ✅, adaptive ✅ ; élimination (capacité d’appel d’outil, sonde) puis classement | ✅ Pour les modèles locaux ; pas encore de classement mixte local/cloud | R3 |
 | Aucun repli local → cloud en mode privé strict | ✅ Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
 | HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | ❌ | R3 |

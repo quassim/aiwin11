@@ -1,12 +1,40 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Probe = { toolCallVerified: boolean; toolCallAdvertised: boolean; visionAdvertised: boolean; elapsedMs: number };
+type ToolCalling = "unverified" | "notAdvertised" | "verified" | "failed";
+type Manifest = {
+  name: string;
+  toolCalling: ToolCalling;
+  visionAdvertised: boolean;
+  probeMs: number | null;
+  probedAt: string | null;
+};
+
+export const toolCallingLabels: Record<ToolCalling, string> = {
+  unverified: "Non vérifiés",
+  notAdvertised: "Non annoncés (exclu du routage)",
+  verified: "Vérifiés",
+  failed: "Test échoué (exclu du routage)",
+};
 
 export function ModelProbe({ model, disabled }: { model: string; disabled: boolean }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Probe>();
   const [error, setError] = useState("");
+  const [manifests, setManifests] = useState<Manifest[]>([]);
+
+  async function loadManifests() {
+    try {
+      setManifests(await invoke<Manifest[]>("get_model_manifests"));
+    } catch {
+      setManifests([]);
+    }
+  }
+
+  useEffect(() => {
+    void loadManifests();
+  }, []);
 
   async function testModel() {
     setBusy(true);
@@ -18,6 +46,7 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
       setError("Le test a échoué. Vérifie que le modèle est installé et qu’Ollama est accessible.");
     } finally {
       setBusy(false);
+      void loadManifests();
     }
   }
 
@@ -51,6 +80,29 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
           </ul>
         )}
       </div>
+      {manifests.length > 0 && (
+        <table>
+          <caption>Manifestes des modèles locaux testés</caption>
+          <thead>
+            <tr>
+              <th scope="col">Modèle</th>
+              <th scope="col">Appels d’outils</th>
+              <th scope="col">Vision</th>
+              <th scope="col">Dernier test</th>
+            </tr>
+          </thead>
+          <tbody>
+            {manifests.map((manifest) => (
+              <tr key={manifest.name}>
+                <th scope="row">{manifest.name}</th>
+                <td>{toolCallingLabels[manifest.toolCalling]}</td>
+                <td>{manifest.visionAdvertised ? "Annoncée" : "Non annoncée"}</td>
+                <td>{manifest.probedAt ? new Date(manifest.probedAt).toLocaleString("fr-FR") : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

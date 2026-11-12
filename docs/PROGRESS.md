@@ -12,6 +12,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Pause et reprise d’une demande (état `paused`, au prochain point sûr, temps de pause exclu de la limite, arrêt après 30 minutes) ; étape Recover : un nouvel essai unique des lectures système après un échec passager du pont (état `recovering`). Vérifié par `verify.ps1` (109 tests Rust), non testé à la main.
 
+- Manifestes de modèles persistés (migration 007, table `models`) : résultat du test d’appel d’outils et vision par modèle local, tableau dans **Modèles** ; les modèles en échec sont exclus du routage. Vérifié par `verify.ps1`, non testé avec Ollama réel.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

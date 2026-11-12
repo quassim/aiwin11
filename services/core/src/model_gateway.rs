@@ -755,16 +755,6 @@ impl Ollama {
         let running: Running = Self::receive(self.client.get(format!("{OLLAMA}/api/ps")))?;
         Ok(running.models.into_iter().take(16).collect())
     }
-
-    /// Probes at most one candidate. Only use a different model if the synthetic tool call succeeds.
-    pub(crate) fn adaptive_model(&self, preferred: &str) -> Result<Option<String>, GatewayError> {
-        let loaded = self.loaded_models()?;
-        let Some(candidate) = gpu_candidate(&loaded, preferred) else { return Ok(None) };
-        if candidate == preferred || !self.probe_tool_calling(candidate)? {
-            return Ok(None);
-        }
-        Ok(Some(candidate.to_owned()))
-    }
 }
 
 impl Ollama {
@@ -784,24 +774,36 @@ impl Ollama {
     /// Applies `strategy` to an interactive local task. Returns the model to use instead of
     /// `preferred`, with the reason journaled, or `None` to keep the configured model. A
     /// different model is returned only after it advertises tool calling and passes the probe.
+    /// `excluded`: models whose manifest says they failed the probe or lack tool calling.
     pub(crate) fn route_local(
         &self,
         strategy: LocalStrategy,
         preferred: &str,
+        excluded: &[String],
     ) -> Result<Option<(String, &'static str)>, GatewayError> {
+        let usable = |name: &str| !excluded.iter().any(|model| model == name);
         let candidate = match strategy {
             LocalStrategy::Manual => return Ok(None),
-            LocalStrategy::Adaptive => return Ok(self.adaptive_model(preferred)?.map(|model| (model, "gpu_verified"))),
+            // Probes at most one candidate.
+            LocalStrategy::Adaptive => {
+                let loaded: Vec<_> = self.loaded_models()?.into_iter().filter(|model| usable(&model.name)).collect();
+                let Some(candidate) = gpu_candidate(&loaded, preferred) else { return Ok(None) };
+                if candidate == preferred || !self.probe_tool_calling(candidate)? {
+                    return Ok(None);
+                }
+                return Ok(Some((candidate.to_owned(), "gpu_verified")));
+            }
             LocalStrategy::QualityFirst => {
                 let installed = self.installed_sizes()?;
                 let capable: Vec<_> = installed
                     .into_iter()
+                    .filter(|(name, _)| usable(name))
                     .filter(|(name, _)| self.describe(name).is_ok_and(|model| model.tool_calling_advertised))
                     .collect();
                 largest_candidate(&capable).map(str::to_owned)
             }
             LocalStrategy::CostOptimized => {
-                let loaded = self.loaded_models()?;
+                let loaded: Vec<_> = self.loaded_models()?.into_iter().filter(|model| usable(&model.name)).collect();
                 cheapest_loaded(&loaded, preferred).map(str::to_owned)
             }
         };

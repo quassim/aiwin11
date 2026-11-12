@@ -3,6 +3,7 @@ fn main() {
         "get_snapshot",
         "discover_models",
         "probe_local_model",
+        "get_model_manifests",
         "run_task",
         "cancel_task",
         "pause_task",

@@ -14,7 +14,7 @@ use aiwin11_core::{
     policy::{self, AgentAction, Effect, PolicySettings},
     task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
     windows_bridge::{Capture, Inspection},
-    Core, ModelPreferences,
+    Core, ModelManifest, ModelPreferences, ToolCalling,
 };
 use serde::Serialize;
 use tauri::{ipc::Channel, Manager, State};
@@ -536,22 +536,41 @@ struct ModelProbe {
 }
 
 #[tauri::command]
-async fn probe_local_model(model: String) -> Result<ModelProbe, &'static str> {
+async fn probe_local_model(state: State<'_, Arc<AppState>>, model: String) -> Result<ModelProbe, &'static str> {
+    let state = Arc::clone(&state);
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
         let ollama = Ollama::connect().map_err(|_| "MODEL_PROVIDER_UNAVAILABLE")?;
         let details = ollama.describe(&model).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?;
         let verified = details.tool_calling_advertised
             && ollama.probe_tool_calling(&model).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?;
+        let elapsed_ms = started.elapsed().as_millis();
+        let status = match (details.tool_calling_advertised, verified) {
+            (false, _) => ToolCalling::NotAdvertised,
+            (true, true) => ToolCalling::Verified,
+            (true, false) => ToolCalling::Failed,
+        };
+        lock_core(&state.core).record_model_probe(
+            &model,
+            status,
+            Some(details.vision_advertised),
+            u64::try_from(elapsed_ms).unwrap_or(u64::MAX),
+        )?;
         Ok(ModelProbe {
             tool_call_verified: verified,
             tool_call_advertised: details.tool_calling_advertised,
             vision_advertised: details.vision_advertised,
-            elapsed_ms: started.elapsed().as_millis(),
+            elapsed_ms,
         })
     })
     .await
     .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?
+}
+
+/// Persisted model manifests: last probe result per local model.
+#[tauri::command]
+fn get_model_manifests(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelManifest>, &'static str> {
+    lock_core(&state.core).model_manifests().map_err(|_| "SETTINGS_UNAVAILABLE")
 }
 
 /// Models loaded by Ollama and their RAM/VRAM use.
@@ -1022,6 +1041,7 @@ fn main() {
             set_cloud_fallback,
             get_model_resources,
             probe_local_model,
+            get_model_manifests,
             set_privacy,
             set_admin_helper,
             create_grant,
