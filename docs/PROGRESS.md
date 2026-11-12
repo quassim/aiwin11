@@ -7,6 +7,7 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 Périmètre fixé avec l’utilisateur : terminer la ligne, y compris arrêt de processus approuvé, souris/clavier en dernier recours et PowerShell depuis une liste fermée. Avancement, un élément par commit :
 
 - 🧪 `find_control` : recherche de contrôles par nom ou type dans la fenêtre déjà lue (FindElement), sans nouvelle lecture de l’écran.
+- 🧪 Redimensionnement des fenêtres (`arrange_window` : moitié gauche, moitié droite, centrée) calculé sur l’écran de la fenêtre ; test réel du pont passé sur une Table des caractères ouverte et fermée par le test.
 
 ## 2026-11-13, statut « test utilisateur à faire »
 

@@ -172,16 +172,18 @@ dossier d’AiWin11 (lecture seule). Renvoie au plus 20 fichiers avec trois lign
         }));
         functions.push(json!({
             "name": "arrange_window",
-            "description": "Met au premier plan, réduit, restaure ou agrandit une fenêtre de la dernière liste obtenue \
-avec list_windows dans cette demande, désignée par son numéro. Ne ferme jamais de fenêtre.",
+            "description": "Met au premier plan, réduit, restaure, agrandit ou redimensionne une fenêtre de la dernière \
+liste obtenue avec list_windows dans cette demande, désignée par son numéro. Redimensionner : moitié gauche ou droite \
+de son écran, ou centrée aux deux tiers. Ne ferme jamais de fenêtre.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "window": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Numéro dans la liste" },
                     "arrangement": {
                         "type": "string",
-                        "enum": ["focus", "minimize", "restore", "maximize"],
-                        "description": "focus = premier plan, minimize = réduire, restore = restaurer, maximize = agrandir"
+                        "enum": ["focus", "minimize", "restore", "maximize", "snap_left", "snap_right", "center"],
+                        "description": "focus = premier plan, minimize = réduire, restore = restaurer, maximize = agrandir, \
+snap_left / snap_right = moitié gauche / droite de l’écran, center = centrée aux deux tiers"
                     }
                 },
                 "required": ["window", "arrangement"],

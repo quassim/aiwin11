@@ -95,12 +95,15 @@ type ApprovalAction =
   | { kind: "adminService"; service: string; operation: string }
   | { kind: "adminCleanTemp" }
   | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
-type Arrangement = "focus" | "minimize" | "restore" | "maximize";
+type Arrangement = "focus" | "minimize" | "restore" | "maximize" | "snap_left" | "snap_right" | "center";
 const arrangementNames: Record<Arrangement, string> = {
   focus: "mettre au premier plan",
   minimize: "réduire",
   restore: "restaurer",
   maximize: "agrandir",
+  snap_left: "placer sur la moitié gauche de l’écran",
+  snap_right: "placer sur la moitié droite de l’écran",
+  center: "centrer en taille moyenne",
 };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =

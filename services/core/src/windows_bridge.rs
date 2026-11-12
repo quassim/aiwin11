@@ -1249,7 +1249,8 @@ mod tests {
         }
     }
 
-    /// Lists windows, then minimizes and restores a Character Map window owned by the test.
+    /// Lists windows, then minimizes, restores, centers and snaps a Character Map window owned by
+    /// the test (and closed by it).
     #[test]
     #[ignore = "requires the published bridge and an interactive Windows session"]
     fn lists_then_arranges_a_window_through_the_broker_and_the_bridge() {
@@ -1272,6 +1273,10 @@ mod tests {
             let arrange = Policy::granting(&[Capability::WindowArrange]);
             let minimized = core.agent_arrange_window(&task, arrange, &target, Arrangement::Minimize)?;
             let restored = core.agent_arrange_window(&task, arrange, &target, Arrangement::Restore)?;
+            // Character Map has a fixed size: the move is applied and the size may be reported
+            // unverified (`false`), but never an error.
+            core.agent_arrange_window(&task, arrange, &target, Arrangement::Center)?;
+            core.agent_arrange_window(&task, arrange, &target, Arrangement::SnapLeft)?;
             Ok::<_, &'static str>((minimized, restored))
         })();
         let _ = charmap.kill();

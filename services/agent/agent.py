@@ -165,7 +165,10 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "recall": {},
     "search_memory": {"query": is_note},
     "set_control_value": {"control": is_control_number, "text": is_typed_text},
-    "arrange_window": {"window": is_window_number, "arrangement": ("focus", "minimize", "restore", "maximize")},
+    "arrange_window": {
+        "window": is_window_number,
+        "arrangement": ("focus", "minimize", "restore", "maximize", "snap_left", "snap_right", "center"),
+    },
 }
 
 # Tools whose two file names must differ (ignoring case).

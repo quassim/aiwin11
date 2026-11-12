@@ -93,6 +93,11 @@ message ArrangeWindow {
     ARRANGEMENT_MINIMIZE = 2;
     ARRANGEMENT_RESTORE = 3;
     ARRANGEMENT_MAXIMIZE = 4;
+    // Resizes within the work area of the window's own screen (no free coordinates).
+    ARRANGEMENT_SNAP_LEFT = 5;
+    ARRANGEMENT_SNAP_RIGHT = 6;
+    // Two thirds of the work area, centered.
+    ARRANGEMENT_CENTER = 7;
   }
   uint64 window = 1;
   uint32 process_id = 2;

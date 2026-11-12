@@ -72,6 +72,10 @@ internal static class WindowInspector
             case Protocol.ArrangeWindow.Types.Arrangement.Restore:
                 ShowWindow(window, SwRestore);
                 return Settled(() => !IsIconic(window) && !IsZoomed(window));
+            case Protocol.ArrangeWindow.Types.Arrangement.SnapLeft:
+            case Protocol.ArrangeWindow.Types.Arrangement.SnapRight:
+            case Protocol.ArrangeWindow.Types.Arrangement.Center:
+                return Resize(window, arrangement);
             case Protocol.ArrangeWindow.Types.Arrangement.Focus:
                 if (IsIconic(window))
                     ShowWindow(window, SwRestore);
@@ -81,6 +85,41 @@ internal static class WindowInspector
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Places the window in a layout computed from its own screen's work area, so it always stays
+    /// visible. False when the window kept another size (applications may enforce a minimum).
+    /// </summary>
+    private static bool? Resize(nint window, Protocol.ArrangeWindow.Types.Arrangement arrangement)
+    {
+        if (IsIconic(window) || IsZoomed(window))
+            ShowWindow(window, SwRestore);
+        nint monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == 0 || !GetMonitorInfoW(monitor, ref info))
+            return null;
+        var area = info.Work;
+        int width = area.Right - area.Left, height = area.Bottom - area.Top;
+        var target = arrangement switch
+        {
+            Protocol.ArrangeWindow.Types.Arrangement.SnapLeft => new Rect { Left = area.Left, Top = area.Top, Right = area.Left + width / 2, Bottom = area.Bottom },
+            Protocol.ArrangeWindow.Types.Arrangement.SnapRight => new Rect { Left = area.Left + width / 2, Top = area.Top, Right = area.Right, Bottom = area.Bottom },
+            _ => new Rect
+            {
+                Left = area.Left + width / 6,
+                Top = area.Top + height / 6,
+                Right = area.Left + width / 6 + width * 2 / 3,
+                Bottom = area.Top + height / 6 + height * 2 / 3,
+            },
+        };
+        if (!SetWindowPos(window, 0, target.Left, target.Top, target.Right - target.Left, target.Bottom - target.Top,
+                SwpNoZOrder | SwpNoActivate))
+            return false;
+        // Invisible borders make the rectangle a few pixels larger than asked.
+        return Settled(() => GetWindowRect(window, out var rect)
+            && Math.Abs(rect.Left - target.Left) <= 16 && Math.Abs(rect.Top - target.Top) <= 16
+            && Math.Abs(rect.Right - target.Right) <= 16 && Math.Abs(rect.Bottom - target.Bottom) <= 16);
     }
 
     /// <summary>Waits up to one second for a window state change to be visible.</summary>
@@ -264,6 +303,17 @@ internal static class WindowInspector
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo { public int Size; public Rect Monitor; public Rect Work; public uint Flags; }
+
+    private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint window, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool GetMonitorInfoW(nint monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
 
     [DllImport("user32.dll")] private static extern nint GetTopWindow(nint window);
     [DllImport("user32.dll")] private static extern nint GetWindow(nint window, int command);

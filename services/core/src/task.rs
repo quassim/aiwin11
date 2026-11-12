@@ -2412,6 +2412,9 @@ fn arrangement_code(arrangement: Arrangement) -> &'static str {
         Arrangement::Minimize => "minimize",
         Arrangement::Restore => "restore",
         Arrangement::Maximize => "maximize",
+        Arrangement::SnapLeft => "snap_left",
+        Arrangement::SnapRight => "snap_right",
+        Arrangement::Center => "center",
         Arrangement::Unspecified => "unspecified",
     }
 }
@@ -2422,6 +2425,9 @@ fn arrangement_label(arrangement: Arrangement) -> &'static str {
         Arrangement::Minimize => "Réduire",
         Arrangement::Restore => "Restaurer",
         Arrangement::Maximize => "Agrandir",
+        Arrangement::SnapLeft => "Placer sur la moitié gauche de l’écran",
+        Arrangement::SnapRight => "Placer sur la moitié droite de l’écran",
+        Arrangement::Center => "Centrer en taille moyenne",
         Arrangement::Unspecified => "Modifier",
     }
 }
@@ -2973,6 +2979,9 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
                 Some("minimize") => Some(Arrangement::Minimize),
                 Some("restore") => Some(Arrangement::Restore),
                 Some("maximize") => Some(Arrangement::Maximize),
+                Some("snap_left") => Some(Arrangement::SnapLeft),
+                Some("snap_right") => Some(Arrangement::SnapRight),
+                Some("center") => Some(Arrangement::Center),
                 _ => None,
             };
             match (window, arrangement) {
