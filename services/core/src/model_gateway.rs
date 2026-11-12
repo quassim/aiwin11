@@ -794,6 +794,55 @@ struct Running {
     models: Vec<LoadedModel>,
 }
 
+/// Where a loaded model runs, from the share of its memory on the GPU (ROADMAP R3, HAL).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Placement {
+    /// Entirely in GPU memory.
+    Gpu,
+    /// Partly offloaded to the CPU: slower, usually because the model does not fit in free VRAM.
+    Partial,
+    /// Nothing in GPU memory: CPU fallback (no supported GPU, driver issue or VRAM exhausted).
+    Cpu,
+    /// Inconsistent figures from the provider.
+    Unknown,
+}
+
+impl LoadedModel {
+    /// Percentage of the model in GPU memory, if the figures are consistent.
+    pub fn gpu_percent(&self) -> Option<u8> {
+        if self.size == 0 || self.size_vram > self.size {
+            return None;
+        }
+        u8::try_from(u128::from(self.size_vram) * 100 / u128::from(self.size)).ok()
+    }
+
+    pub fn placement(&self) -> Placement {
+        match self.gpu_percent() {
+            None => Placement::Unknown,
+            Some(_) if self.size_vram == self.size => Placement::Gpu,
+            Some(_) if self.size_vram == 0 => Placement::Cpu,
+            // Anything not fully on the GPU is partial, even when it rounds to 100 %.
+            Some(_) => Placement::Partial,
+        }
+    }
+}
+
+/// A loaded model with its placement, for the Control Center and the Models page.
+#[derive(Debug, serde::Serialize)]
+pub struct ModelResource {
+    #[serde(flatten)]
+    pub model: LoadedModel,
+    pub placement: Placement,
+    pub gpu_percent: Option<u8>,
+}
+
+impl From<LoadedModel> for ModelResource {
+    fn from(model: LoadedModel) -> Self {
+        Self { placement: model.placement(), gpu_percent: model.gpu_percent(), model }
+    }
+}
+
 impl Ollama {
     /// Models currently loaded and their RAM/VRAM footprint, as reported by Ollama.
     pub fn loaded_models(&self) -> Result<Vec<LoadedModel>, GatewayError> {
@@ -1106,6 +1155,22 @@ mod tests {
         .unwrap();
         let model = describe("odd:latest", details).unwrap();
         assert_eq!((model.context_length, model.parameter_size, model.quantization), (None, None, None));
+    }
+
+    #[test]
+    fn placement_tells_gpu_partial_cpu_fallback_and_inconsistent_figures_apart() {
+        let model = |size: u64, size_vram: u64| LoadedModel { name: "m".into(), size, size_vram };
+        assert_eq!((model(100, 100).placement(), model(100, 100).gpu_percent()), (Placement::Gpu, Some(100)));
+        assert_eq!((model(100, 60).placement(), model(100, 60).gpu_percent()), (Placement::Partial, Some(60)));
+        assert_eq!(model(1_000, 999).placement(), Placement::Partial, "99.9 % is still partial");
+        assert_eq!((model(100, 0).placement(), model(100, 0).gpu_percent()), (Placement::Cpu, Some(0)));
+        assert_eq!(model(0, 0).placement(), Placement::Unknown);
+        assert_eq!(model(10, 20).placement(), Placement::Unknown);
+        let resource = serde_json::to_value(ModelResource::from(model(100, 60))).unwrap();
+        assert_eq!(
+            resource,
+            json!({ "name": "m", "size": 100, "size_vram": 60, "placement": "partial", "gpu_percent": 60 })
+        );
     }
 
     #[test]

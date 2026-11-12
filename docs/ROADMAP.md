@@ -143,7 +143,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Manifeste de modèle (modalités, capacités, matériel, limites, statut `unverified`) | ✅ table `models` (migration 007) : appels d’outils `unverified`/`not_advertised`/`verified`/`failed`, vision, durée et date du dernier test ; fenêtre de contexte, nombre de paramètres, quantification et taille sur disque (migration 008), débit mesuré pendant le test et VRAM utilisée une fois chargé (migration 009) ; modèles en échec exclus du routage | R3 |
 | Stratégies : manual ✅, local_only ✅ (mode privé), cloud_only 🟡 (choix du fournisseur cloud), local_first ✅ (secours cloud explicite), quality_first ✅, cost_optimized ✅, adaptive ✅ ; élimination (capacité d’appel d’outil, sonde) puis classement | ✅ Pour les modèles locaux ; pas encore de classement mixte local/cloud | R3 |
 | Aucun repli local → cloud en mode privé strict | ✅ Aucun repli n’existe ; à garantir quand le repli arrivera | R3 |
-| HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | ❌ | R3 |
+| HAL NVIDIA/AMD : GPU, pilotes, VRAM, backend, modèles chargés, repli CPU, diagnostic d’incompatibilité | 🟡 Cartes, pilote et mémoire (WMI) ✅, modèles chargés et VRAM ✅, placement par modèle (GPU, partiel, processeur seul) avec conseil ✅ ; backend d’inférence (CUDA/ROCm) non lu | R3 |
 | Agent défini en YAML (rôle, profil de modèle, capacités, limites, vérification, `retry_limit`, profil de politique) | ❌ Limites fixes dans le code | R8 |
 | États : CREATED ✅, PLANNING ✅, RUNNING ✅ (`dispatching`), AWAITING_APPROVAL ✅, COMPLETED ✅, FAILED ✅, CANCELLED ✅, **PAUSED** ✅, **RECOVERING** ✅ (nouvel essai unique des lectures système), CANCELLING 🟡 (arrêt « demandé » pendant une action, confirmé à sa fin) ; `interrupted` après un plantage | ✅ | — |
 | Cycle Understand → Plan → Authorize ✅ → Execute ✅ → Observe ✅ → **Verify** 🟡 → **Recover** 🟡 (un nouvel essai des lectures système après un échec passager du pont ; jamais d’effet rejoué) → Report ✅ | 🟡 | R2 |
@@ -233,7 +233,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | T-011 | Mode privé : aucun transfert réseau cloud | 🟡 Garanti par conception ; pas de test réseau ni de mode privé explicite — R3 |
 | T-012 | Reprise après crash | ✅ |
 | T-013 | Multi-écran / DPI | ❌ — R2 |
-| T-014 | Détection GPU NVIDIA/AMD | 🟡 Cartes, pilote et mémoire déclarée (WMI) dans `get_system_status` ; VRAM utilisée par modèle via Ollama ; backend d’inférence et repli CPU non diagnostiqués — R3 |
+| T-014 | Détection GPU NVIDIA/AMD | 🟡 Cartes, pilote et mémoire déclarée (WMI) dans `get_system_status` ; VRAM utilisée par modèle via Ollama ; repli CPU détecté par modèle (placement) ; backend d’inférence non diagnostiqué — R3 |
 
 ## 4. Exigences non fonctionnelles [S0 §8][S1 §11]
 

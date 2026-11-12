@@ -9,7 +9,7 @@ use aiwin11_core::{
     grants::Grant,
     local_files::LocalFiles,
     manifest::{ToolManifest, MANIFESTS},
-    model_gateway::{LocalModelProvider, LocalStrategy, Ollama},
+    model_gateway::{LocalModelProvider, LocalStrategy, ModelResource, Ollama},
     openai,
     policy::{self, AgentAction, Effect, PolicySettings},
     task::{StopStatus, TaskOutcome, TaskRequest, TaskSlot, TaskUpdate},
@@ -584,9 +584,12 @@ fn get_model_manifests(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelManif
 
 /// Models loaded by Ollama and their RAM/VRAM use.
 #[tauri::command]
-async fn get_model_resources() -> Result<Vec<aiwin11_core::model_gateway::LoadedModel>, &'static str> {
+async fn get_model_resources() -> Result<Vec<ModelResource>, &'static str> {
     tauri::async_runtime::spawn_blocking(|| {
-        Ollama::connect().and_then(|provider| provider.loaded_models()).map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")
+        Ollama::connect()
+            .and_then(|provider| provider.loaded_models())
+            .map(|models| models.into_iter().map(ModelResource::from).collect())
+            .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")
     })
     .await
     .map_err(|_| "MODEL_UNAVAILABLE_OR_INVALID")?

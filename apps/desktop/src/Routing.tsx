@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-
-type LoadedModel = { name: string; size: number; size_vram: number };
+import { placementAdvice, placementLabel, type LoadedModel } from "./placement";
 
 const tasks: { name: string; status: string }[] = [
   { name: "Texte et actions Windows", status: "Modèle choisi ci-dessous (local ou cloud)" },
@@ -204,12 +203,13 @@ export function Routing({
             <li key={model.name}>
               <span>{model.name}</span>
               <span>
-                {gb(model.size)} Go dont {gb(model.size_vram)} Go en mémoire GPU
+                {gb(model.size)} Go dont {gb(model.size_vram)} Go en mémoire GPU · {placementLabel(model)}
               </span>
             </li>
           ))}
         </ul>
       )}
+      {loaded && placementAdvice(loaded) && <p role="note">{placementAdvice(loaded)}</p>}
       <p role="status">{status}</p>
     </section>
   );

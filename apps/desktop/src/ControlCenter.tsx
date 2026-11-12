@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { type LoadedModel, placementAdvice, placementLabel } from "./placement";
 import { Updates } from "./Updates";
 
-type LoadedModel = { name: string; size_vram: number };
 type Policy = { settings: { autonomy: string; simulate: boolean } };
 type CloudUsage = { tokens: number; tasks: number };
 type RuntimeStatus = {
@@ -111,14 +111,20 @@ export function ControlCenter({
       {loading ? (
         <p role="status">Actualisation…</p>
       ) : loaded?.length ? (
-        <ul>
-          {loaded.map(({ name, size_vram }) => (
-            <li key={name}>
-              {name}{" "}
-              <span>{(size_vram / 1024 ** 3).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Gio de VRAM</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul>
+            {loaded.map((model) => (
+              <li key={model.name}>
+                {model.name}{" "}
+                <span>
+                  {(model.size_vram / 1024 ** 3).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Gio de VRAM ·{" "}
+                  {placementLabel(model)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {placementAdvice(loaded) && <p role="note">{placementAdvice(loaded)}</p>}
+        </>
       ) : (
         <p>{loaded ? "Aucun modèle chargé." : "Ollama est indisponible."}</p>
       )}
