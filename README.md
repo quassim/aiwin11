@@ -71,7 +71,7 @@ Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant d
 
 **Activité** liste les demandes récentes avec leur état, et le journal de la session avec le code de chaque événement (décision de la politique, règle appliquée, résultat). Si AiWin11 s’arrête pendant une demande, celle-ci apparaît au démarrage suivant comme **interrompue** ; rien n’est relancé automatiquement. Si elle était en train d’exécuter une action, vérifie son résultat. Le journal est enregistré dans `%LOCALAPPDATA%\app.aiwin11.desktop\aiwin11.sqlite3`.
 
-Dans **Activité**, la section **Historique et journal d’audit** règle la durée de conservation des sessions passées (90 jours par défaut ; les plus anciennes sont supprimées au démarrage), exporte le journal en JSON dans `%LOCALAPPDATA%pp.aiwin11.desktop\exports` et efface l’historique des sessions passées après confirmation (irréversible).
+Dans **Activité**, la section **Historique et journal d’audit** règle la durée de conservation des sessions passées (90 jours par défaut ; les plus anciennes sont supprimées au démarrage), exporte le journal en JSON dans `%LOCALAPPDATA%\app.aiwin11.desktop\exports` et efface l’historique des sessions passées après confirmation (irréversible).
 
 ### Pages Inspecteur et Fichiers
 
