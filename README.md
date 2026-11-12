@@ -118,9 +118,7 @@ Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ;
 
 ### Extensions MCP
 
-La page **Extensions** déclare jusqu’à 5 serveurs MCP locaux : un nom, le chemin complet de l’exécutable et ses arguments (par exemple `C:\Program Files
-odejs
-ode.exe` et le chemin du script du serveur). L’agent peut lister leurs outils puis, avec ton accord à chaque appel (arguments affichés), en utiliser un. N’ajoute que des extensions de confiance.
+La page **Extensions** déclare jusqu’à 5 serveurs MCP locaux : un nom, le chemin complet de l’exécutable et ses arguments (par exemple `C:\Program Files\nodejs\node.exe` et le chemin du script du serveur). L’agent peut lister leurs outils puis, avec ton accord à chaque appel (arguments affichés), en utiliser un. N’ajoute que des extensions de confiance.
 
 ### Mémoire
 
