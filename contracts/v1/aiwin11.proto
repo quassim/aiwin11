@@ -28,6 +28,8 @@ message Command {
     TrashLocalText trash_local_text = 23;
     ListProcesses list_processes = 24;
     GetSystemStatus get_system_status = 25;
+    ReadClipboard read_clipboard = 26;
+    WriteClipboard write_clipboard = 27;
   }
 }
 
@@ -55,6 +57,18 @@ message ProcessList {
   repeated ProcessEntry processes = 1;
   // Number of processes seen, before the limit.
   uint32 total = 2;
+}
+
+// Reads the clipboard's Unicode text (at most 4000 characters), after the user's approval.
+message ReadClipboard {}
+
+// Replaces the clipboard with this text (1 to 2000 characters), after the user's approval.
+message WriteClipboard { string text = 1; }
+
+message ClipboardContent {
+  string text = 1;
+  bool truncated = 2;
+  bool has_text = 3;
 }
 
 // Read-only system metrics: memory, processor load, uptime, fixed drives.
@@ -165,6 +179,7 @@ message Result {
   WindowInfo window_info = 9;
   ProcessList process_list = 10;
   SystemStatus system_status = 11;
+  ClipboardContent clipboard_content = 12;
 }
 
 message Error {

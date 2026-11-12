@@ -81,10 +81,12 @@ pub enum AgentAction {
     TypeText,
     ListProcesses,
     SystemStatus,
+    ReadClipboard,
+    WriteClipboard,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 13] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -96,6 +98,8 @@ impl AgentAction {
         Self::TypeText,
         Self::ListProcesses,
         Self::SystemStatus,
+        Self::ReadClipboard,
+        Self::WriteClipboard,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -115,6 +119,8 @@ impl AgentAction {
             Self::TypeText => "type_text",
             Self::ListProcesses => "list_processes",
             Self::SystemStatus => "system_status",
+            Self::ReadClipboard => "read_clipboard",
+            Self::WriteClipboard => "write_clipboard",
         }
     }
 
@@ -131,6 +137,11 @@ impl AgentAction {
     /// Never offered to, nor run for, a cloud model: file contents and screen data stay local.
     pub fn local_only(self) -> bool {
         manifest(self).local_only
+    }
+
+    /// Reads private data the user did not hand over (the clipboard): always asks.
+    pub fn private_data(self) -> bool {
+        manifest(self).private_data
     }
 
     /// Always asks, in every profile: the manifest rates it critical.
@@ -150,7 +161,7 @@ pub struct ActionContext {
 /// A temporary grant can only relax an `Ask` for a side effect that is neither critical nor
 /// a screen read.
 pub fn grantable(action: AgentAction) -> bool {
-    action.has_side_effect() && !action.critical() && !action.reads_screen()
+    action.has_side_effect() && !action.critical() && !action.reads_screen() && !action.private_data()
 }
 
 /// An effect and the rule that produced it, for the audit trail and the UI.
@@ -166,7 +177,9 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 11] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 13] = [
+    (A::ReadClipboard, [E::Ask, E::Ask, E::Ask, E::Ask]),
+    (A::WriteClipboard, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::SystemStatus, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ListFiles, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ListProcesses, [E::Allow, E::Allow, E::Allow, E::Allow]),
@@ -210,6 +223,9 @@ pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionCo
     }
     if action.reads_screen() {
         return Decision { effect: E::Ask, rule: "screen_data" };
+    }
+    if action.private_data() {
+        return Decision { effect: E::Ask, rule: "private_data" };
     }
     if action.critical() {
         return Decision { effect: E::Ask, rule: "critical_action" };
@@ -278,7 +294,8 @@ mod tests {
     fn assisted_is_the_default_and_asks_for_every_side_effect() {
         assert_eq!(PolicySettings::default(), PolicySettings { autonomy: P::Assisted, simulate: false });
         for action in AgentAction::ALL {
-            let expected = if action.has_side_effect() || action.reads_screen() { E::Ask } else { E::Allow };
+            let asks = action.has_side_effect() || action.reads_screen() || action.private_data();
+            let expected = if asks { E::Ask } else { E::Allow };
             assert_eq!(effect(P::Assisted, false, action, LOCAL), expected, "{action:?}");
         }
     }

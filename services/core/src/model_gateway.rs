@@ -101,6 +101,23 @@ pub(crate) fn tool_catalog(strict: bool, include_files: bool, include_windows: b
     }
     if include_windows {
         functions.push(json!({
+            "name": "read_clipboard",
+            "description": "Lit le texte actuellement dans le presse-papiers Windows (4000 caractères au plus). \
+        L’utilisateur doit l’approuver à chaque fois.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
+            "name": "write_clipboard",
+            "description": "Remplace le contenu du presse-papiers Windows par ce texte (2000 caractères au plus), \
+        pour que l’utilisateur le colle où il veut. L’ancien contenu est perdu. L’utilisateur doit l’approuver.",
+            "parameters": {
+                "type": "object",
+                "properties": { "text": { "type": "string", "description": "Texte à copier" } },
+                "required": ["text"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "get_system_status",
             "description": "Lit, en lecture seule, l’état du PC : mémoire totale et disponible, charge du processeur, \
         nombre de processeurs logiques, durée depuis le démarrage, espace libre des disques internes. Ne modifie rien.",
@@ -690,6 +707,8 @@ mod tests {
                 "copy_text_file",
                 "move_text_file",
                 "trash_text_file",
+                "read_clipboard",
+                "write_clipboard",
                 "get_system_status",
                 "list_processes",
                 "inspect_window",
@@ -699,7 +718,15 @@ mod tests {
         );
         assert_eq!(
             names(tool_catalog(false, false, true, false)),
-            ["launch_application", "get_system_status", "list_processes", "inspect_window", "type_in_notepad"]
+            [
+                "launch_application",
+                "read_clipboard",
+                "write_clipboard",
+                "get_system_status",
+                "list_processes",
+                "inspect_window",
+                "type_in_notepad"
+            ]
         );
         let catalog = tool_catalog(true, false, false, false);
         assert_eq!(catalog[0]["function"]["parameters"]["properties"]["application"]["enum"], json!(["notepad"]));

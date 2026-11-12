@@ -132,7 +132,7 @@ File names are flat ASCII `.txt` names (letters, digits, space, `-`, `_`; no res
 | rename | Deny | Ask | Ask | Allow |
 | trash | Deny | Ask | Ask | Ask |
 
-Invariants, in order: local-only tools are denied to cloud models (`local_only`); a profile denial stays a denial; with **simulation mode** every remaining side effect becomes a dry run (`simulation_mode`); screen reading always asks (`screen_data`); trash always asks (`critical_action`). Unknown or unreadable settings resolve to Observation.
+Invariants, in order: local-only tools are denied to cloud models (`local_only`); a profile denial stays a denial; with **simulation mode** every remaining side effect becomes a dry run (`simulation_mode`); screen reading always asks (`screen_data`); reading private data such as the clipboard always asks (`private_data`); critical actions (trash, clipboard write) always ask (`critical_action`); a temporary grant may then turn a remaining `Ask` into `Allow` (`temporary_grant`). Unknown or unreadable settings resolve to Observation.
 
 Settings live in the `settings` table (`policy.autonomy`, `policy.simulate`), are changed through `set_policy_settings` (main window only, journaled as `settings.policy.changed`) and are read once per task (`policy.profile` event): a running task keeps the settings it started with. `get_policy_overview` returns the settings and the decision table computed by the core.
 
@@ -196,6 +196,10 @@ The desktop Inspector page is unchanged: it still reads the foreground window's 
 ## Agent system status
 
 `get_system_status` (no argument, local models only) is a read allowed in every profile. The host sends `GetSystemStatus {}` (agent peer with `Capability::SystemStatus`). The bridge answers `SystemStatus { memory_total_bytes, memory_available_bytes, cpu_load_percent (sampled over 250 ms with GetSystemTimes), logical_processors, uptime_seconds, drives }`, with at most 8 fixed drives `DriveStatus { name, total_bytes, free_bytes }`. The host rejects incoherent figures (available memory above total, load above 100, free space above size). The agent receives rounded figures; journaled as `system.status.completed|failed`.
+
+## Agent clipboard tools
+
+`read_clipboard` (no argument) and `write_clipboard { text }` (1 to 2000 characters, no NUL) are offered to local models only. Their manifests make the read `private_data` (asks in every profile, rule `private_data`, never grantable) and the write `critical` and `irreversible` (the previous content is lost: asks in every profile, never grantable, denied in Observation). The approval for a write shows the full text. The bridge uses the Win32 clipboard API (Unicode text only, retried until the deadline when another application holds the clipboard): `ReadClipboard {}` returns `ClipboardContent { text (≤ 4000 characters), truncated, has_text }`; `WriteClipboard { text }` empties the clipboard, sets the text, reads it back and answers `Success` or `Partial` (`text_unverified`). Capabilities `ClipboardRead` and `ClipboardWrite` are separate. The text read is framed as untrusted data for the model and never journaled; events `clipboard.read.completed|failed`, `clipboard.write.completed|partial|failed`.
 
 ## Agent text input in Notepad
 

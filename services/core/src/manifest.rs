@@ -52,6 +52,8 @@ pub enum CapabilityName {
     TypeText,
     ProcessList,
     SystemStatus,
+    ClipboardRead,
+    ClipboardWrite,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -66,6 +68,8 @@ pub struct ToolManifest {
     pub side_effect: bool,
     /// Reads what another application shows on screen.
     pub reads_screen: bool,
+    /// Reads private data the user did not hand over (clipboard): always asks, never grantable.
+    pub private_data: bool,
     /// Never offered to, nor run for, a cloud model.
     pub local_only: bool,
     /// The host can describe the effect without performing it (simulation mode).
@@ -80,7 +84,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 11] = [
+pub const MANIFESTS: [ToolManifest; 13] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -88,6 +92,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Medium,
         side_effect: true,
         reads_screen: false,
+        private_data: false,
         local_only: false,
         dry_run: true,
         reversibility: R::Reversible,
@@ -101,6 +106,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Low,
         side_effect: false,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: false,
         reversibility: R::NoEffect,
@@ -114,6 +120,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Low,
         side_effect: false,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: false,
         reversibility: R::NoEffect,
@@ -127,6 +134,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Medium,
         side_effect: true,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: true,
         reversibility: R::Reversible,
@@ -140,6 +148,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::High,
         side_effect: true,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: true,
         reversibility: R::Reversible,
@@ -153,6 +162,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Critical,
         side_effect: true,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: true,
         reversibility: R::Recoverable,
@@ -166,6 +176,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Medium,
         side_effect: false,
         reads_screen: true,
+        private_data: false,
         local_only: true,
         dry_run: false,
         reversibility: R::NoEffect,
@@ -179,6 +190,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Medium,
         side_effect: false,
         reads_screen: true,
+        private_data: false,
         local_only: true,
         dry_run: false,
         reversibility: R::NoEffect,
@@ -192,6 +204,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Medium,
         side_effect: true,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: true,
         reversibility: R::Reversible,
@@ -205,6 +218,7 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Low,
         side_effect: false,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: false,
         reversibility: R::NoEffect,
@@ -218,11 +232,41 @@ pub const MANIFESTS: [ToolManifest; 11] = [
         risk: Risk::Low,
         side_effect: false,
         reads_screen: false,
+        private_data: false,
         local_only: true,
         dry_run: false,
         reversibility: R::NoEffect,
         timeout_ms: 15_000,
         capabilities: &[C::SystemStatus],
+    },
+    ToolManifest {
+        action: AgentAction::ReadClipboard,
+        tool: "read_clipboard",
+        version: 1,
+        risk: Risk::High,
+        side_effect: false,
+        reads_screen: false,
+        private_data: true,
+        local_only: true,
+        dry_run: false,
+        reversibility: R::NoEffect,
+        timeout_ms: 15_000,
+        capabilities: &[C::ClipboardRead],
+    },
+    ToolManifest {
+        action: AgentAction::WriteClipboard,
+        tool: "write_clipboard",
+        version: 1,
+        // The previous clipboard content is lost: irreversible, hence critical.
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Irreversible,
+        timeout_ms: 15_000,
+        capabilities: &[C::ClipboardWrite],
     },
 ];
 
@@ -250,8 +294,9 @@ mod tests {
             assert_eq!(manifest.side_effect, manifest.reversibility != Reversibility::NoEffect, "{name}");
             // Every side effect can be simulated, so simulation mode never runs it for real.
             assert!(!manifest.side_effect || manifest.dry_run, "{name}");
-            // Screen data never leaves the machine.
+            // Screen data and private data never leave the machine.
             assert!(!manifest.reads_screen || manifest.local_only, "{name}");
+            assert!(!manifest.private_data || manifest.local_only, "{name}");
             // Irreversible tools must be critical (none exists yet).
             assert!(manifest.reversibility != Reversibility::Irreversible || manifest.risk == Risk::Critical, "{name}");
             assert!(manifest.risk > Risk::Low || !manifest.side_effect, "{name}");

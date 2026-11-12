@@ -36,6 +36,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
     || (command.InspectForeground is null && command.CaptureForeground is null && command.CharacterMapDigit is null
         && command.LocateWindow is null && command.InspectWindow is null && command.TypeInNotepad is null
         && command.CaptureWindow is null && command.ListProcesses is null && command.GetSystemStatus is null
+        && command.ReadClipboard is null && command.WriteClipboard is null
         && command.LaunchApplication?.Application != Protocol.LaunchApplication.Types.Application.Notepad))
 {
     Reject(Protocol.Result.Types.Status.Denied, "unsupported_command", "Unsupported bridge command.");
@@ -89,6 +90,36 @@ else if (command.ListProcesses is { } listing)
     {
         result.ProcessList = ProcessLister.Read(listing.Limit);
         result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.ReadClipboard is not null)
+{
+    var content = ClipboardText.Read(command.DeadlineMs);
+    if (content is null)
+        Reject(Protocol.Result.Types.Status.Failed, "clipboard_unavailable", "The clipboard could not be opened.");
+    else
+    {
+        result.ClipboardContent = content;
+        result.Status = Protocol.Result.Types.Status.Success;
+    }
+}
+else if (command.WriteClipboard is { } writing)
+{
+    if (writing.Text.Length == 0 || writing.Text.Length > ClipboardText.MaxWrite * 2 || writing.Text.Contains('\0'))
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_text", "The text is empty, too long or invalid.");
+    else
+    {
+        try
+        {
+            if (ClipboardText.Write(writing.Text, command.DeadlineMs))
+                result.Status = Protocol.Result.Types.Status.Success;
+            else
+                Reject(Protocol.Result.Types.Status.Partial, "text_unverified", "The clipboard could not be read back.");
+        }
+        catch (Win32Exception)
+        {
+            Reject(Protocol.Result.Types.Status.Failed, "clipboard_unavailable", "The clipboard could not be written.");
+        }
     }
 }
 else if (command.GetSystemStatus is not null)

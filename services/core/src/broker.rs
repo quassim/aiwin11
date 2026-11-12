@@ -44,6 +44,10 @@ pub enum Capability {
     ProcessList = 1 << 9,
     /// Read memory, processor load, uptime and drive space. Read-only.
     SystemStatus = 1 << 10,
+    /// Read the clipboard's text once.
+    ClipboardRead = 1 << 11,
+    /// Replace the clipboard with one approved text.
+    ClipboardWrite = 1 << 12,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -116,6 +120,15 @@ impl Policy {
             Some(Operation::InspectWindow(_)) if agent(Capability::WindowInspect) => Ok("inspect_window"),
             Some(Operation::CaptureWindow(_)) if agent(Capability::WindowCapture) => Ok("capture_window"),
             Some(Operation::GetSystemStatus(_)) if agent(Capability::SystemStatus) => Ok("get_system_status"),
+            Some(Operation::ReadClipboard(_)) if agent(Capability::ClipboardRead) => Ok("read_clipboard"),
+            Some(Operation::WriteClipboard(input))
+                if agent(Capability::ClipboardWrite)
+                    && !input.text.is_empty()
+                    && input.text.chars().count() <= 2000
+                    && !input.text.contains('\0') =>
+            {
+                Ok("write_clipboard")
+            }
             Some(Operation::ListProcesses(listing))
                 if agent(Capability::ProcessList) && (1..=25).contains(&listing.limit) =>
             {
@@ -424,6 +437,30 @@ mod tests {
                 command.operation = Some(operation.clone());
                 assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
             }
+        }
+    }
+
+    #[test]
+    fn clipboard_read_and_write_are_separate_bounded_agent_grants() {
+        use aiwin11_contracts::v1::{ReadClipboard, WriteClipboard};
+        let read = Policy::granting(&[Capability::ClipboardRead]);
+        let write = Policy::granting(&[Capability::ClipboardWrite]);
+        let read_op = Operation::ReadClipboard(ReadClipboard {});
+        let write_op = |text: &str| Operation::WriteClipboard(WriteClipboard { text: text.into() });
+        for (policy, peer, operation, expected) in [
+            (read, Peer::Agent, read_op.clone(), true),
+            (write, Peer::Agent, read_op.clone(), false),
+            (read, Peer::DesktopInspector, read_op, false),
+            (write, Peer::Agent, write_op("Bonjour"), true),
+            (read, Peer::Agent, write_op("Bonjour"), false),
+            (write, Peer::Agent, write_op(""), false),
+            (write, Peer::Agent, write_op(&"a".repeat(2001)), false),
+            (write, Peer::Agent, write_op("a\0b"), false),
+        ] {
+            let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+            let mut command = request(&core);
+            command.operation = Some(operation.clone());
+            assert_eq!(core.authorize_dispatch(policy, peer, &command).is_ok(), expected, "{operation:?} {peer:?}");
         }
     }
 

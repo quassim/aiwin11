@@ -11,8 +11,8 @@ use std::{
 use aiwin11_contracts::{
     v1::{
         command::Operation, result::Status, AnalyzeCapture, CaptureForeground, CaptureWindow, CharacterMapDigit,
-        Command, GetSystemStatus, InspectForeground, InspectWindow, ListProcesses, LocateWindow, Result as BridgeReply,
-        TypeInNotepad, UiTree,
+        Command, GetSystemStatus, InspectForeground, InspectWindow, ListProcesses, LocateWindow, ReadClipboard,
+        Result as BridgeReply, TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -39,6 +39,9 @@ const AGENT_DEADLINE_MS: i64 = 15_000;
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_TREE_REPLY_BYTES: usize = 32 * 1024;
 const MAX_PROCESS_REPLY_BYTES: usize = 8 * 1024;
+/// 4000 characters of UTF-8 text plus the envelope.
+const MAX_CLIPBOARD_REPLY_BYTES: usize = 20 * 1024;
+pub(crate) const MAX_CLIPBOARD_READ_CHARS: usize = 4000;
 /// Processes reported to the agent by `list_processes`.
 pub(crate) const AGENT_PROCESS_LIMIT: u32 = 15;
 const MAX_AGENT_NODES: usize = 80;
@@ -203,6 +206,60 @@ impl Core {
             }
             accept_process_list(reply.process_list?)
         })
+    }
+
+    /// Agent tool: reads the clipboard's text once, after the user's approval.
+    pub(crate) fn agent_read_clipboard(&mut self, task: &str, policy: Policy) -> Result<ClipboardRead, &'static str> {
+        let operation = Operation::ReadClipboard(ReadClipboard {});
+        self.agent_bridge_call(task, policy, operation, "clipboard.read", |reply| {
+            if reply.ui_tree.is_some()
+                || reply.window_capture.is_some()
+                || reply.window_info.is_some()
+                || reply.process_id.is_some()
+                || reply.process_list.is_some()
+                || reply.system_status.is_some()
+            {
+                return None;
+            }
+            let content = reply.clipboard_content?;
+            let count = content.text.chars().count();
+            (count <= MAX_CLIPBOARD_READ_CHARS && content.has_text == (count > 0) && (!content.truncated || count > 0))
+                .then_some(ClipboardRead { text: content.text, truncated: content.truncated })
+        })
+    }
+
+    /// Agent tool: replaces the clipboard with `text`, after the user's approval. Returns
+    /// whether the text was read back identical.
+    pub(crate) fn agent_write_clipboard(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        text: &str,
+    ) -> Result<bool, &'static str> {
+        let operation = Operation::WriteClipboard(WriteClipboard { text: text.to_owned() });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "CLIPBOARD_ACCESS_DENIED",
+            _ => "CLIPBOARD_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match dispatch(&command) {
+            Some(reply) if reply.clipboard_content.is_none() && reply.ui_tree.is_none() => {
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Ok(true),
+                    (Status::Partial, Some("text_unverified")) => Ok(false),
+                    (Status::Failed, Some("clipboard_unavailable")) => Err("CLIPBOARD_UNAVAILABLE"),
+                    _ => Err("BRIDGE_FAILED"),
+                }
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(true) => ("clipboard.write.completed", "text_verified"),
+            Ok(false) => ("clipboard.write.partial", "text_unverified"),
+            Err(code) => ("clipboard.write.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "CLIPBOARD_AUDIT_UNAVAILABLE")?;
+        outcome
     }
 
     /// Agent tool: read-only system metrics.
@@ -508,6 +565,12 @@ fn accept_process_list(list: aiwin11_contracts::v1::ProcessList) -> Option<Proce
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClipboardRead {
+    pub text: String,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DriveSpace {
     pub name: String,
     pub total_bytes: u64,
@@ -598,6 +661,7 @@ fn dispatch(command: &Command) -> Option<BridgeReply> {
         Some(Operation::CaptureForeground(_) | Operation::CaptureWindow(_)) => MAX_JPEG_BYTES + MAX_MESSAGE_BYTES,
         Some(Operation::InspectWindow(_)) => MAX_TREE_REPLY_BYTES,
         Some(Operation::ListProcesses(_) | Operation::GetSystemStatus(_)) => MAX_PROCESS_REPLY_BYTES,
+        Some(Operation::ReadClipboard(_)) => MAX_CLIPBOARD_REPLY_BYTES,
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -666,6 +730,32 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads the clipboard; with AIWIN11_TEST_CLIPBOARD=1, also writes and reads back a test text,
+    /// then restores the previous plain text.
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn writes_then_reads_the_clipboard_through_the_broker_and_the_bridge() {
+        use crate::broker::Capability;
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let read = Policy::granting(&[Capability::ClipboardRead]);
+        let write = Policy::granting(&[Capability::ClipboardWrite]);
+        assert_eq!(core.agent_read_clipboard(&task, Policy::default()), Err("WINDOW_ACCESS_DENIED"));
+        assert_eq!(core.agent_write_clipboard(&task, read, "x"), Err("CLIPBOARD_ACCESS_DENIED"));
+        let saved = core.agent_read_clipboard(&task, read).unwrap();
+        // Writing replaces the user's clipboard (rich formats and images are lost): opt-in only.
+        if std::env::var("AIWIN11_TEST_CLIPBOARD").as_deref() != Ok("1") {
+            eprintln!("clipboard write skipped: set AIWIN11_TEST_CLIPBOARD=1 to test it");
+            return;
+        }
+        let marker = format!("AiWin11 test {}", Uuid::new_v4());
+        assert_eq!(core.agent_write_clipboard(&task, write, &marker), Ok(true));
+        assert_eq!(core.agent_read_clipboard(&task, read).unwrap().text, marker);
+        if !saved.text.is_empty() && !saved.truncated {
+            assert_eq!(core.agent_write_clipboard(&task, write, &saved.text), Ok(true), "restore");
+        }
+    }
 
     #[test]
     fn system_status_from_the_bridge_is_validated() {

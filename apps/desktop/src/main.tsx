@@ -46,7 +46,9 @@ type ApprovalAction =
   | { kind: "describeWindow"; application: string; title: string; model: string }
   | { kind: "typeText"; text: string; characters: number }
   | { kind: "listProcesses" }
-  | { kind: "systemStatus" };
+  | { kind: "systemStatus" }
+  | { kind: "readClipboard" }
+  | { kind: "writeClipboard"; text: string; characters: number };
 type PendingApproval = { approvalId: string; action: ApprovalAction; expiresInMs: number };
 type TaskUpdate =
   { type: "stage"; stage: string } | { type: "delta"; text: string } | ({ type: "approvalRequired" } & PendingApproval);
@@ -67,6 +69,21 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
     return {
       title: `L’agent propose d’ouvrir ${name}`,
       detail: `Action : lancer une nouvelle fenêtre de ${name}, sans argument.`,
+    };
+  }
+  if (action.kind === "readClipboard") {
+    return {
+      title: "L’agent demande à lire ton presse-papiers",
+      detail:
+        "Action : lire le texte actuellement copié (4000 caractères au plus) et le transmettre au modèle local. " +
+        "Refuse s’il peut contenir un mot de passe ou une donnée privée.",
+    };
+  }
+  if (action.kind === "writeClipboard") {
+    return {
+      title: "L’agent propose de copier un texte dans le presse-papiers",
+      detail: `Action : remplacer le contenu du presse-papiers par ce texte (${action.characters} caractères). L’ancien contenu sera perdu.`,
+      quote: action.text,
     };
   }
   if (action.kind === "systemStatus") {
@@ -154,6 +171,11 @@ const activityNames: Record<string, string> = {
   "process.list.failed": "Liste des processus impossible",
   "system.status.completed": "État du PC lu par l’agent",
   "system.status.failed": "État du PC indisponible",
+  "clipboard.read.completed": "Presse-papiers lu par l’agent",
+  "clipboard.read.failed": "Lecture du presse-papiers impossible",
+  "clipboard.write.completed": "Texte copié dans le presse-papiers",
+  "clipboard.write.partial": "Copie dans le presse-papiers non vérifiée",
+  "clipboard.write.failed": "Copie dans le presse-papiers impossible",
   "grant.created": "Autorisation temporaire accordée",
   "grant.revoked": "Autorisation temporaire révoquée",
   "model.cloud.authorized": "Requête OpenAI autorisée",

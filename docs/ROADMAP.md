@@ -40,7 +40,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Terminal / PowerShell | ❌ | R2 |
 | Navigateur | ❌ | R6 (via MCP) ou R2 |
 | Périphériques | ❌ | R7+ |
-| Presse-papiers | ❌ | R2 |
+| Presse-papiers | ✅ Lecture et écriture de texte, accord à chaque fois (lecture réelle testée ; écriture réelle en test opt-in `AIWIN11_TEST_CLIPBOARD=1`) | — |
 | Automatisations | ❌ | R8 |
 | APIs natives, puis vision + souris/clavier | 🟡 APIs natives et UIA ; pas de souris/clavier génériques | R2 |
 | Providers locaux : Ollama ✅, LM Studio ❌ ; cloud : OpenAI ✅, Anthropic ❌, Google ❌ | 🟡 | R3 |
@@ -252,12 +252,12 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Pont Windows :
   - ApplicationService : découverte et lancement d’applications autorisées ;
   - WindowService : lister, focus, redimensionner, réduire, fermer ;
-  - ProcessService : lister, inspecter, arrêter (avec approbation) ;
+  - 🟡 ProcessService : lister ✅, inspecter ❌, arrêter (avec approbation) ❌ ;
   - UIAutomationService : FindElement, Invoke, SetValue ;
   - InputService : clic, saisie, raccourcis, en dernier recours ;
   - ShellService : commandes PowerShell **approuvées** depuis une liste ;
-  - Presse-papiers (lecture et écriture avec approbation) ;
-  - SystemService : matériel et métriques ;
+  - ✅ Presse-papiers (lecture et écriture avec approbation) ;
+  - 🟡 SystemService : métriques ✅ (mémoire, processeur, disques), matériel ❌ ;
   - DesktopService : écrans, capture d’écran complète.
 - **Assistant élevé à la demande** (option B, §6) pour les opérations administrateur d’une liste fermée : double validation AiWin11 + UAC, une opération par lancement, puis arrêt.
 - Changement de méthode (API → UIA → vision → souris/clavier) **sans élargir les autorisations**.

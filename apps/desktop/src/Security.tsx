@@ -67,6 +67,8 @@ const actionNames: Record<string, string> = {
   typeText: "Écrire dans le Bloc-notes ouvert par l’agent",
   listProcesses: "Lister les processus (lecture seule)",
   systemStatus: "Lire l’état du PC (lecture seule)",
+  readClipboard: "Lire le presse-papiers",
+  writeClipboard: "Copier un texte dans le presse-papiers",
 };
 
 const effectNames: Record<Effect, string> = {
