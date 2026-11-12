@@ -32,8 +32,7 @@ La description de fenêtre et l’analyse d’image exigent qu’Ollama confirme
 
 ## Installer AiWin11 (sans environnement de développement)
 
-Double-clique sur `Installateur.cmd` (ou `scripts\package.ps1`) : il produit `targeteleaseundle
-sis\AiWin11_0.1.0_x64-setup.exe`. Cet installateur s’installe pour l’utilisateur courant, sans droits administrateur, dans `%LOCALAPPDATA%\AiWin11`, avec le pont Windows, l’assistant administrateur et l’agent. Il faut encore installer séparément Python 3.13 (dans le `PATH`), le runtime .NET 10 et Ollama. AiWin11 trouve Python tout seul (`AIWIN11_PYTHON` reste possible pour forcer un interpréteur). Installateur non signé : Windows SmartScreen peut demander une confirmation.
+Double-clique sur `Installateur.cmd` (ou `scripts\package.ps1`) : il produit `target\release\bundle\nsis\AiWin11_0.1.0_x64-setup.exe`. Cet installateur s’installe pour l’utilisateur courant, sans droits administrateur, dans `%LOCALAPPDATA%\AiWin11`, avec le pont Windows, l’assistant administrateur et l’agent. Il faut encore installer séparément Python 3.13 (dans le `PATH`), le runtime .NET 10 et Ollama. AiWin11 trouve Python tout seul (`AIWIN11_PYTHON` reste possible pour forcer un interpréteur). Installateur non signé : Windows SmartScreen peut demander une confirmation.
 
 ## Utiliser l’assistant
 
