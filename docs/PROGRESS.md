@@ -22,6 +22,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Plafond de coût par demande cloud : tarif par million de jetons et coût maximal saisis dans **Modèles** (aucun prix intégré), vérifiés avant chaque appel (`CLOUD_COST_EXCEEDED`) ; le Centre de contrôle estime le coût sur 30 jours avec ce tarif (l’ancien tarif du navigateur est repris). Vérifié par `verify.ps1`, non testé avec une vraie clé.
 
+- État de l’agent toujours visible dans la barre latérale (inactif, analyse, planification, attente d’approbation, exécution, pause, nouvel essai, erreur), déduit des étapes envoyées par le cœur, `role="status"`. Vérifié par `verify.ps1` (Vitest), non regardé dans l’application.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

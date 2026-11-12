@@ -32,6 +32,43 @@ aside {
   color: #83e8c6;
   margin-right: 7px;
 }
+.agent-state {
+  margin: -20px 10px 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-state-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #7d8b8b;
+  flex: none;
+}
+.agent-state-analysing .agent-state-dot,
+.agent-state-planning .agent-state-dot,
+.agent-state-executing .agent-state-dot,
+.agent-state-recovering .agent-state-dot {
+  background: #83e8c6;
+}
+.agent-state-waiting .agent-state-dot,
+.agent-state-paused .agent-state-dot {
+  background: #f2c66d;
+}
+.agent-state-error .agent-state-dot {
+  background: #ff8f8f;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-state-executing .agent-state-dot {
+    animation: agent-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes agent-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
 nav {
   display: grid;
   gap: 6px;

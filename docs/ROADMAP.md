@@ -114,7 +114,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Récupération : points de restauration, sauvegardes ciblées, opérations réversibles 🟡 (corbeille), transactions compensatoires | 🟡 | R2 |
 | Surfaces : Control Center ✅, Command Palette 🟡 (champ ouvert par raccourci global), Voice Assistant 🟡 (dictée et lecture déclenchées par l’utilisateur), Workflow Studio 🟡 | 🟡 | R5, R7, R8 |
 | UX : mode simple / mode expert | ✅ Bouton mode expert (pages avancées masquées sinon) | — |
-| UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur) | 🟡 Pendant la demande seulement | R5 |
+| UX : états d’agent toujours visibles (inactif, analyse, planification, attente, exécution, erreur) | ✅ Indicateur permanent dans la barre latérale (inactif, analyse, planification, attente d’approbation, exécution, pause, nouvel essai, erreur), annoncé aux lecteurs d’écran ; demandes de la fenêtre principale seulement (pas les routines planifiées) | R5 |
 | UX : local / cloud / transfert de données visibles | 🟡 Badge du fournisseur ; pas d’indicateur de transfert | R5 |
 | UX : changements sans redémarrage | ✅ | — |
 | UX : clavier, lecteurs d’écran, résolutions | 🟡 Pas d’audit lecteur d’écran | R1 |

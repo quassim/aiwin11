@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { agentState, agentStateLabels } from "./agentState";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
@@ -546,6 +547,8 @@ function App() {
   const [stopState, setStopState] = useState<"" | "idle" | "stopped" | "requested" | "confirmed" | "failed">("");
   // "requested": pause asked, applied before the next model step; "paused": the task waits.
   const [pauseState, setPauseState] = useState<"" | "requested" | "paused">("");
+  const [lastStage, setLastStage] = useState("");
+  const [lastFailed, setLastFailed] = useState(false);
   const selectedModel = provider === "ollama" ? model : cloudModel.trim();
   const canSend =
     !running &&
@@ -687,6 +690,8 @@ function App() {
     setActionReports([]);
     setStopState("");
     setPauseState("");
+    setLastStage("");
+    setLastFailed(false);
     setPendingApproval(undefined);
     const progress = new Channel<TaskUpdate>((update) => {
       if (update.type === "modelSelected") {
@@ -705,6 +710,7 @@ function App() {
         setPendingApproval(approval);
         return;
       }
+      setLastStage(update.stage);
       if (update.stage.startsWith("policy.approval.")) setPendingApproval(undefined);
       if (update.stage === "task.paused") setPauseState("paused");
       if (update.stage === "task.resumed") setPauseState("");
@@ -738,6 +744,7 @@ function App() {
       setPrompt("");
     } catch (failure) {
       setTaskStatus(taskErrors[String(failure)] ?? "Le cœur local n’a pas pu terminer la demande.");
+      setLastFailed(String(failure) !== "TASK_CANCELLED");
     } finally {
       // The streamed draft is unvalidated: only the agent-approved reply stays on screen.
       setDraftReply("");
@@ -795,6 +802,20 @@ function App() {
         <div className="brand">
           <span aria-hidden="true">✦</span> AiWin11
         </div>
+        {(() => {
+          const state = agentState({
+            running,
+            failed: lastFailed,
+            paused: pauseState !== "",
+            approvalPending: pendingApproval !== undefined,
+            lastStage,
+          });
+          return (
+            <p className={`agent-state agent-state-${state}`} role="status" aria-live="polite">
+              <span aria-hidden="true" className="agent-state-dot" /> Agent : {agentStateLabels[state]}
+            </p>
+          );
+        })()}
         <nav aria-label="Navigation principale">
           {pages
             .filter((item) => expert || !expertPages.has(item))
