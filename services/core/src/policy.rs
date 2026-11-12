@@ -109,10 +109,12 @@ pub enum AgentAction {
     DescribeScreen,
     /// Lists the status of the closed list of applications (read-only).
     ListApplications,
+    /// Stops one listed process of the user's session (critical: always asks).
+    StopProcess,
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 35] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
@@ -147,6 +149,7 @@ impl AgentAction {
         Self::InspectProcess,
         Self::DescribeScreen,
         Self::ListApplications,
+        Self::StopProcess,
     ];
 
     pub fn from_code(code: &str) -> Option<Self> {
@@ -189,6 +192,7 @@ impl AgentAction {
             Self::InspectProcess => "inspect_process",
             Self::DescribeScreen => "describe_screen",
             Self::ListApplications => "list_applications",
+            Self::StopProcess => "stop_process",
         }
     }
 
@@ -285,6 +289,7 @@ impl AgentProfile {
             Self::WindowsAdmin => matches!(
                 action,
                 A::SystemStatus
+                    | A::StopProcess
                     | A::ListApplications
                     | A::InspectProcess
                     | A::ListProcesses
@@ -322,7 +327,8 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 34] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 35] = [
+    (A::StopProcess, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListApplications, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::DescribeScreen, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::InspectProcess, [E::Allow, E::Allow, E::Allow, E::Allow]),

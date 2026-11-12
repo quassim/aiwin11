@@ -158,6 +158,10 @@ pub enum ApprovalAction {
         model: String,
     },
     ListApplications,
+    StopProcess {
+        name: String,
+        process_id: u32,
+    },
     /// Read-only; allowed in every profile by the default matrix.
     SystemStatus,
     /// Always asks: the clipboard may hold private data.
@@ -294,6 +298,8 @@ enum PlannedAction {
     InspectProcess(u32),
     /// Status of the closed list of applications.
     ListApplications,
+    /// PID from this task's last `list_processes`, to stop after approval.
+    StopProcess(u32),
     /// Primary screen, described by the local vision model.
     DescribeScreen,
     SetControlValue(usize, String),
@@ -1127,6 +1133,10 @@ impl TaskSlot {
             PlannedAction::DescribeWindow => ("describe_window", json!({}), self.describe_window(run)?),
             PlannedAction::DescribeScreen => ("describe_screen", json!({}), self.describe_screen(run)?),
             PlannedAction::ListApplications => ("list_applications", json!({}), self.list_applications(run)?),
+            PlannedAction::StopProcess(process_id) => {
+                let observation = self.stop_process(run, process_id)?;
+                ("stop_process", json!({ "process_id": process_id }), observation)
+            }
         })
     }
 
@@ -1461,6 +1471,57 @@ impl TaskSlot {
         let (status, code) = status_of(&result);
         run.report(action, summary, status, code);
         Ok(describe_processes(result))
+    }
+
+    /// Stops one process of this task's last list, after the user's approval (critical: always
+    /// asks). A program with a window is only asked to close; it is never forced.
+    fn stop_process<F: Fn(TaskUpdate)>(&self, run: &mut Run<'_, F>, process_id: u32) -> Result<String, &'static str> {
+        let action = AgentAction::StopProcess;
+        let Some(name) = run.processes.iter().find(|(id, _)| *id == process_id).map(|(_, name)| name.clone()) else {
+            run.report(action, "Arrêter un processus", ActionStatus::Failed, Some("PROCESS_NOT_LISTED"));
+            return Ok("Ce processus ne figure pas dans la dernière liste : appelle d’abord list_processes.".into());
+        };
+        let summary = format!("Arrêter le processus « {name} » (PID {process_id})");
+        let never = crate::windows_bridge::process_never_stopped(&name);
+        let window_protected =
+            lock(run.core)?.protected_windows().iter().any(|pattern| crate::matches_pattern(pattern, &name));
+        if never || window_protected {
+            let code = if never { "PROCESS_PROTECTED" } else { "WINDOW_PROTECTED" };
+            record_code(run.core, run.task, "policy.resource.denied", code)?;
+            run.report(action, &summary, ActionStatus::Denied, Some(code));
+            return Ok(format!("Arrêt refusé : « {name} » est protégé ({code}). Rien n’a été arrêté."));
+        }
+        let approval = ApprovalAction::StopProcess { name: name.clone(), process_id };
+        let grant = match self.gate(run, action, &summary, Capability::ProcessStop, approval)? {
+            Gate::Stop(observation) => return Ok(observation),
+            Gate::Run(grant) => grant,
+        };
+        let result =
+            self.dispatching(run.core, run.task, || -> Result<Result<bool, &'static str>, &'static str> {
+                Ok(lock(run.core)?.agent_stop_process(run.task, grant, process_id, &name))
+            })??;
+        Ok(match result {
+            Ok(true) => {
+                run.report(action, &summary, ActionStatus::Done, None);
+                format!("{summary} : le processus s’est fermé.")
+            }
+            Ok(false) => {
+                run.report(action, &summary, ActionStatus::Partial, Some("STILL_RUNNING"));
+                format!(
+                    "« {name} » a reçu la demande de fermeture mais reste ouvert (il attend peut-être qu’on \
+                     enregistre). Il n’a pas été forcé."
+                )
+            }
+            Err(code) => {
+                let status = if code.ends_with("DENIED") || code == "PROCESS_PROTECTED" {
+                    ActionStatus::Denied
+                } else {
+                    ActionStatus::Failed
+                };
+                run.report(action, &summary, status, Some(code));
+                format!("Arrêt impossible : {code}. Rien n’a été arrêté.")
+            }
+        })
     }
 
     /// Status of the applications the agent may open, with the user's blocks. Read-only.
@@ -3145,6 +3206,12 @@ fn accept_agent_reply(bytes: &[u8]) -> Result<PlannedAction, &'static str> {
                 _ => Err("AGENT_REJECTED"),
             }
         }
+        ("tool", Some("stop_process"), Some(arguments), None) if arguments.len() == 1 => arguments
+            .get("process_id")
+            .and_then(Value::as_u64)
+            .filter(|id| (5..=u64::from(u32::MAX)).contains(id))
+            .map(|id| PlannedAction::StopProcess(id as u32))
+            .ok_or("AGENT_REJECTED"),
         ("tool", Some("list_applications"), Some(arguments), None) if arguments.is_empty() => {
             Ok(PlannedAction::ListApplications)
         }

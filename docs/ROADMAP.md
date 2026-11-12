@@ -60,7 +60,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 |---|---|
 | Socle (lots A et B : AW-001 à AW-012) | ✅ Application Tauri, contrats Protobuf, broker, pont .NET, passerelle Ollama/OpenAI, agent, streaming, scénario « Ouvre le Bloc-notes » validé en réel |
 | Moteur de politiques, profils d’autonomie, approbations, simulation | ✅ |
-| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers texte/Markdown/CSV du dossier dédié ou choisi, lecture UIA de la fenêtre précédente avec clic et saisie sur un contrôle, recherche de contrôle 🧪, vision locale, opérations administrateur via l’assistant élevé ; redimensionnement 🧪, détail d’un processus 🧪, capture de l’écran pour l’agent 🧪, plusieurs dossiers 🧪, découverte des applications 🧪 ; manquent (périmètre fixé le 13/11) : arrêt d’un processus approuvé, souris/clavier en dernier recours, PowerShell depuis une liste fermée |
+| Contrôle Windows par l’agent (lot C : AW-013 à AW-017) | 🟡 Applications (liste fermée), fenêtres (lister, organiser), processus, services et état du PC en lecture, presse-papiers, fichiers texte/Markdown/CSV du dossier dédié ou choisi, lecture UIA de la fenêtre précédente avec clic et saisie sur un contrôle, recherche de contrôle 🧪, vision locale, opérations administrateur via l’assistant élevé ; redimensionnement 🧪, détail d’un processus 🧪, capture de l’écran pour l’agent 🧪, plusieurs dossiers 🧪, découverte des applications 🧪, arrêt d’un processus approuvé 🧪 ; manquent (périmètre fixé le 13/11) : souris/clavier en dernier recours, PowerShell depuis une liste fermée |
 | Consolidation R1 | ✅ Réglages mémorisés, arrêt global, rétention/export du journal, linters, mesures ; 🟡 accessibilité lecteur d’écran, T-003, E2E de l’interface |
 | Autorisations temporaires, manifestes d’outils | ✅ |
 | Architecture multi-processus gRPC [S1 §2–3] | 🔷 Décision ADR-011 : Protobuf sur stdio, un processus par commande (pont, agent, assistant, MCP) ; cœur et broker dans le processus Tauri ; retour à gRPC prévu si un service permanent devient nécessaire |
@@ -193,7 +193,7 @@ Une ligne 🟡 peut contenir des sous-points 🧪 : ils comptent dans la séance
 | Windows Bridge — WindowService (List ✅, Focus ✅, Minimize/Restore/Maximize ✅, Resize 🧪 moitié gauche/droite ou centrée aux deux tiers de l’écran de la fenêtre, Close ❌ volontairement absent) | 🟡 | R2 |
 | ApplicationService (Launch ✅ liste fermée : Bloc-notes, Table des caractères, Paint ; Discover et GetStatus 🧪 `list_applications` : installée, interdite, processus et fenêtres ouverts) | 🧪 | R2 |
 | FileService (List ✅, Read ✅, Copy ✅, Move ✅, Delete 🟡 corbeille, **Search** ✅ nom et contenu, pour l’agent et dans la page Fichiers) | 🟡 | R2 |
-| ProcessService (List ✅ lecture seule, Inspect 🧪 `inspect_process` sur un processus de la dernière liste, Terminate ❌) | 🟡 | R2 |
+| ProcessService (List ✅ lecture seule, Inspect 🧪 `inspect_process` sur un processus de la dernière liste, Terminate 🧪 `stop_process` : accord à chaque fois, fermeture demandée sans forcer pour un programme avec fenêtre, processus système, de sécurité et d’AiWin11 refusés) | 🧪 | R2 |
 | DesktopService (CaptureScreen, GetDisplays, GetActiveWindow) | 🟡 Capture d’une fenêtre ✅ ; écran principal pour l’agent 🧪 (`describe_screen`, vision locale, refus si une fenêtre protégée est visible) ; écrans et capture d’un écran choisi dans l’Inspecteur | R2 |
 | UIAutomationService (InspectTree ✅, Invoke ✅ et SetValue ✅ sur un contrôle numéroté de la fenêtre lue, FindElement 🧪 `find_control` par nom ou type dans la fenêtre lue) | 🧪 | R2 |
 | InputService (MovePointer, Click, Type 🟡, Hotkey) | 🟡 | R2 |
@@ -316,7 +316,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 - Pont Windows :
   - 🧪 ApplicationService : découverte et état (`list_applications`) et lancement ✅ des applications autorisées ;
   - 🟡 WindowService : lister ✅, focus ✅, réduire/restaurer/agrandir ✅ ; redimensionner 🧪 (dispositions sur l’écran de la fenêtre) ; fermer ❌ (risque de perte de données, à décider) ;
-  - 🟡 ProcessService : lister ✅, inspecter 🧪, arrêter (avec approbation) ❌ ;
+  - 🧪 ProcessService : lister ✅, inspecter 🧪, arrêter (avec approbation) 🧪 ;
   - UIAutomationService : FindElement, Invoke, SetValue ;
   - InputService : clic, saisie, raccourcis, en dernier recours ;
   - ShellService : commandes PowerShell **approuvées** depuis une liste ;

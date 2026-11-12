@@ -144,4 +144,48 @@ static class ProcessLister
         {
         }
     }
+
+    /// <summary>Processes never stopped, whatever the request (checked again by the host).</summary>
+    static readonly HashSet<string> Protected = new(StringComparer.OrdinalIgnoreCase) { "system", "registry", "smss", "csrss", "wininit", "winlogon", "services", "lsass", "lsaiso", "svchost", "fontdrvhost", "dwm", "explorer", "sihost", "ctfmon", "taskhostw", "conhost", "audiodg", "spoolsv", "searchhost", "startmenuexperiencehost", "shellexperiencehost", "textinputhost", "securityhealthsystray", "securityhealthservice", "msmpeng", "nissrv", "mssense", "wudfhost", "lockapp", "userinit", "aiwin11-desktop", "aiwin11.windows", "aiwin11.admin", "msedgewebview2" };
+
+    /// <summary>
+    /// Stops one process: "closed" (asked to close and exited), "ended" (no window, ended),
+    /// "still_running" (asked to close, still open: never forced), or an error code.
+    /// </summary>
+    public static string Stop(uint processId, string expectedName)
+    {
+        if (processId <= 4 || processId == (uint)Environment.ProcessId) return "protected_process";
+        Process process;
+        try
+        {
+            process = Process.GetProcessById((int)processId);
+        }
+        catch (ArgumentException)
+        {
+            return "process_unavailable";
+        }
+        using (process)
+        {
+            try
+            {
+                if (!string.Equals(process.ProcessName, expectedName, StringComparison.OrdinalIgnoreCase))
+                    return "process_changed";
+                if (Protected.Contains(process.ProcessName)
+                    || process.SessionId != Process.GetCurrentProcess().SessionId)
+                    return "protected_process";
+                if (process.MainWindowHandle != IntPtr.Zero)
+                {
+                    process.CloseMainWindow();
+                    return process.WaitForExit(5000) ? "closed" : "still_running";
+                }
+                process.Kill(entireProcessTree: false);
+                return process.WaitForExit(5000) ? "ended" : "still_running";
+            }
+            catch (Exception error) when (error is Win32Exception or InvalidOperationException or NotSupportedException)
+            {
+                // Access denied (elevated or protected process) or already exited.
+                return process.HasExited ? "ended" : "access_denied";
+            }
+        }
+    }
 }

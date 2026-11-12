@@ -40,7 +40,7 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.ListWindows is null && command.ArrangeWindow is null && command.ListServices is null
         && command.InvokeControl is null && command.RunDiagnostic is null && command.Dictate is null
         && command.ListDisplays is null && command.CaptureDisplay is null && command.InspectProcess is null
-        && command.ListApplications is null
+        && command.ListApplications is null && command.StopProcess is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -86,6 +86,31 @@ else if (command.CaptureWindow is { } captureTarget)
         or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
     {
         Reject(Protocol.Result.Types.Status.Failed, "capture_failed", "Windows could not capture the window.");
+    }
+}
+else if (command.StopProcess is { } stop)
+{
+    switch (ProcessLister.Stop(stop.ProcessId, stop.ExpectedName))
+    {
+        case "closed":
+        case "ended":
+            result.Status = Protocol.Result.Types.Status.Success;
+            break;
+        case "still_running":
+            Reject(Protocol.Result.Types.Status.Partial, "still_running", "The process was asked to close and is still running.");
+            break;
+        case "protected_process":
+            Reject(Protocol.Result.Types.Status.Denied, "protected_process", "This process is never stopped.");
+            break;
+        case "process_changed":
+            Reject(Protocol.Result.Types.Status.Denied, "process_changed", "The process ID now names another program.");
+            break;
+        case "access_denied":
+            Reject(Protocol.Result.Types.Status.Denied, "access_denied", "Windows refused to stop this process.");
+            break;
+        default:
+            Reject(Protocol.Result.Types.Status.Failed, "process_unavailable", "The process does not exist.");
+            break;
     }
 }
 else if (command.ListApplications is not null)

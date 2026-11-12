@@ -80,6 +80,7 @@ type ApprovalAction =
   | { kind: "inspectProcess"; name: string; process_id: number }
   | { kind: "describeScreen"; model: string }
   | { kind: "listApplications" }
+  | { kind: "stopProcess"; name: string; process_id: number }
   | { kind: "systemStatus" }
   | { kind: "readClipboard" }
   | { kind: "writeClipboard"; text: string; characters: number }
@@ -254,6 +255,12 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       detail: "Action : lire la mémoire, la charge du processeur et l’espace libre des disques. Rien n’est modifié.",
     };
   }
+  if (action.kind === "stopProcess") {
+    return {
+      title: `L’agent propose d’arrêter « ${action.name} »`,
+      detail: `PID ${action.process_id}. S’il a une fenêtre, il reçoit seulement une demande de fermeture et peut te proposer d’enregistrer ; il n’est jamais forcé. Sans fenêtre, il est arrêté directement : un travail non enregistré serait perdu.`,
+    };
+  }
   if (action.kind === "listApplications") {
     return {
       title: "L’agent demande à lister les applications qu’il peut ouvrir",
@@ -388,6 +395,9 @@ const activityNames: Record<string, string> = {
   "history.purged": "Ancien historique supprimé (conservation)",
   "history.cleared": "Historique effacé",
   "history.exported": "Journal d’audit exporté",
+  "process.stop.completed": "Processus arrêté",
+  "process.stop.partial": "Fermeture demandée, processus toujours ouvert",
+  "process.stop.failed": "Arrêt du processus impossible",
   "application.list.completed": "Applications listées",
   "application.list.failed": "Liste des applications impossible",
   "process.inspect.completed": "Processus détaillé",

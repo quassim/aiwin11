@@ -82,6 +82,8 @@ pub enum Capability {
     ImageGenerate = 1 << 23,
     /// Capture the primary screen once for the local vision model, after the user's approval.
     ScreenCapture = 1 << 24,
+    /// Stop one listed process of the user's session, after the user's approval.
+    ProcessStop = 1 << 25,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
@@ -217,6 +219,15 @@ impl Policy {
                 Ok("list_processes")
             }
             Some(Operation::ListApplications(_)) if agent(Capability::ProcessList) => Ok("list_applications"),
+            Some(Operation::StopProcess(stop))
+                if agent(Capability::ProcessStop)
+                    && stop.process_id > 4
+                    && stop.process_id != std::process::id()
+                    && !stop.expected_name.is_empty()
+                    && !crate::windows_bridge::process_never_stopped(&stop.expected_name) =>
+            {
+                Ok("stop_process")
+            }
             Some(Operation::InspectProcess(inspect)) if agent(Capability::ProcessList) && inspect.process_id != 0 => {
                 Ok("inspect_process")
             }

@@ -63,6 +63,11 @@ def is_search_query(value: object) -> bool:
 MAX_LISTED_WINDOWS = 20
 
 
+def is_stoppable_process_id(value: object) -> bool:
+    """A process ID above the reserved system ones (0 to 4)."""
+    return is_process_id(value) and isinstance(value, int) and value > 4
+
+
 def is_process_id(value: object) -> bool:
     """A real process ID: a positive 32-bit integer (booleans excluded)."""
     return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 0xFFFFFFFF
@@ -173,6 +178,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "find_control": {"query": is_search_query},
     "inspect_process": {"process_id": is_process_id},
     "list_applications": {},
+    "stop_process": {"process_id": is_stoppable_process_id},
     "click_control": {"control": is_control_number},
     "remember": {"text": is_note},
     "recall": {},

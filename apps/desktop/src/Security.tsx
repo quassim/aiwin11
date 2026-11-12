@@ -57,6 +57,7 @@ const profiles: { id: Autonomy; label: string; description: string }[] = [
 ];
 
 const actionNames: Record<string, string> = {
+  stopProcess: "Arrêter un processus",
   listApplications: "Lister les applications disponibles",
   describeScreen: "Décrire l’écran principal",
   inspectProcess: "Détailler un processus",

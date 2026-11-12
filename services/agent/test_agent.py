@@ -77,6 +77,18 @@ class AgentProtocolTest(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assert_rejected({"version": 2, "proposal": {"calls": [call("find_control", arguments)]}})
 
+    def test_stop_process_refuses_reserved_process_ids(self):
+        result = self.invoke({"version": 2, "proposal": {"calls": [call("stop_process", {"process_id": 4242})]}})
+        self.assertEqual(result.returncode, 0)
+        for arguments in [
+            {"process_id": 4},
+            {"process_id": 0},
+            {"process_id": True},
+            {"process_id": 42, "force": True},
+        ]:
+            with self.subTest(arguments=arguments):
+                self.assert_rejected({"version": 2, "proposal": {"calls": [call("stop_process", arguments)]}})
+
     def test_list_applications_takes_no_argument(self):
         result = self.invoke({"version": 2, "proposal": {"calls": [call("list_applications", {})]}})
         self.assertEqual(result.returncode, 0)

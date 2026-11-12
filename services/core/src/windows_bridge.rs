@@ -14,7 +14,7 @@ use aiwin11_contracts::{
         run_diagnostic::Diagnostic, service_entry::StartMode, AnalyzeCapture, ArrangeWindow, CaptureForeground,
         CaptureWindow, CharacterMapDigit, Command, Dictate, GetSystemStatus, InspectForeground, InspectProcess,
         InspectWindow, InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard,
-        Result as BridgeReply, RunDiagnostic, TypeInNotepad, UiTree, WriteClipboard,
+        Result as BridgeReply, RunDiagnostic, StopProcess, TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -248,6 +248,44 @@ impl Core {
         // Only the title and application name were read: nothing of a protected window is used.
         self.ensure_window_unprotected(task, &located)?;
         Ok(located)
+    }
+
+    /// Agent tool: stops one listed process after the user's approval. `Ok(true)` when it
+    /// exited, `Ok(false)` when it was asked to close and is still open (never forced).
+    pub(crate) fn agent_stop_process(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        process_id: u32,
+        name: &str,
+    ) -> Result<bool, &'static str> {
+        let operation = Operation::StopProcess(StopProcess { process_id, expected_name: name.to_owned() });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let task_id = self.authorize_dispatch(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "PROCESS_STOP_DENIED",
+            _ => "WINDOW_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match dispatch(&command) {
+            Some(reply) if reply.process_list.is_none() && reply.ui_tree.is_none() => {
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Ok(true),
+                    (Status::Partial, Some("still_running")) => Ok(false),
+                    (Status::Denied, Some("protected_process")) => Err("PROCESS_PROTECTED"),
+                    (Status::Denied, Some("process_changed")) => Err("PROCESS_CHANGED"),
+                    (Status::Denied, Some("access_denied")) => Err("PROCESS_ACCESS_DENIED"),
+                    (Status::Failed, Some("process_unavailable")) => Err("PROCESS_UNAVAILABLE"),
+                    _ => Err("BRIDGE_FAILED"),
+                }
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(true) => ("process.stop.completed", "exited"),
+            Ok(false) => ("process.stop.partial", "still_running"),
+            Err(code) => ("process.stop.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        outcome
     }
 
     /// Agent tool: status of the closed list of applications (installed, processes, windows).
@@ -878,6 +916,50 @@ pub(crate) struct ProcessInfo {
     pub working_set_bytes: u64,
     pub cpu_time_ms: u64,
     pub has_window: bool,
+}
+
+/// Processes the agent may never stop: Windows itself, security software, the shell and
+/// AiWin11 (the bridge checks the same list, the session and the name again).
+const NEVER_STOPPED: [&str; 35] = [
+    "system",
+    "registry",
+    "smss",
+    "csrss",
+    "wininit",
+    "winlogon",
+    "services",
+    "lsass",
+    "lsaiso",
+    "svchost",
+    "fontdrvhost",
+    "dwm",
+    "explorer",
+    "sihost",
+    "ctfmon",
+    "taskhostw",
+    "conhost",
+    "audiodg",
+    "spoolsv",
+    "searchhost",
+    "startmenuexperiencehost",
+    "shellexperiencehost",
+    "textinputhost",
+    "securityhealthsystray",
+    "securityhealthservice",
+    "msmpeng",
+    "nissrv",
+    "mssense",
+    "wudfhost",
+    "lockapp",
+    "userinit",
+    "aiwin11-desktop",
+    "aiwin11.windows",
+    "aiwin11.admin",
+    "msedgewebview2",
+];
+
+pub(crate) fn process_never_stopped(name: &str) -> bool {
+    NEVER_STOPPED.iter().any(|protected| protected.eq_ignore_ascii_case(name))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1528,6 +1610,52 @@ mod tests {
         assert!(status.memory_available_bytes > 0 && !status.drives.is_empty(), "{status:?}");
         let settings = status.settings.expect("Windows settings read");
         assert!(!settings.ui_language.is_empty() && !settings.time_zone.is_empty(), "{settings:?}");
+    }
+
+    #[test]
+    fn system_security_and_aiwin11_processes_are_never_stopped() {
+        for name in ["lsass", "CSRSS", "explorer", "MsMpEng", "aiwin11-desktop", "AiWin11.Windows", "msedgewebview2"] {
+            assert!(process_never_stopped(name), "{name}");
+        }
+        assert!(!process_never_stopped("notepad") && !process_never_stopped("chrome"));
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let grant = Policy::granting(&[crate::broker::Capability::ProcessStop]);
+        // Refused by the broker before anything reaches the bridge, and audited.
+        assert_eq!(core.agent_stop_process(&task, grant, 812, "lsass"), Err("PROCESS_STOP_DENIED"));
+        assert_eq!(core.agent_stop_process(&task, grant, 4, "notepad"), Err("PROCESS_STOP_DENIED"));
+        assert_eq!(core.agent_stop_process(&task, Policy::default(), 9999, "notepad"), Err("PROCESS_STOP_DENIED"));
+        let denied = core.activity().unwrap().into_iter().filter(|event| event.kind == "policy.denied").count();
+        assert_eq!(denied, 3);
+    }
+
+    /// Stops only processes this test started: a Character Map (asked to close) and a
+    /// windowless ping (ended).
+    #[test]
+    #[ignore = "requires the published bridge and an interactive Windows session"]
+    fn stops_processes_started_by_the_test_through_the_broker_and_the_bridge() {
+        let system = std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot")).join("System32");
+        let mut charmap = std::process::Command::new(system.join("charmap.exe")).spawn().expect("Character Map");
+        let mut ping = std::process::Command::new(system.join("PING.EXE"))
+            .args(["-n", "60", "127.0.0.1"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("ping");
+        thread::sleep(Duration::from_secs(2));
+        let mut core = Core::start(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        let grant = Policy::granting(&[crate::broker::Capability::ProcessStop]);
+        let wrong_name = core.agent_stop_process(&task, grant, charmap.id(), "notepad");
+        let closed = core.agent_stop_process(&task, grant, charmap.id(), "charmap");
+        let ended = core.agent_stop_process(&task, grant, ping.id(), "PING");
+        let _ = charmap.kill();
+        let _ = ping.kill();
+        let _ = charmap.wait();
+        let _ = ping.wait();
+        assert_eq!(wrong_name, Err("PROCESS_CHANGED"));
+        assert_eq!(closed, Ok(true));
+        assert_eq!(ended, Ok(true));
     }
 
     #[test]

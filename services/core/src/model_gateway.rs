@@ -313,6 +313,19 @@ nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’un
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }));
         functions.push(json!({
+            "name": "stop_process",
+            "description": "Arrête un processus de la dernière liste obtenue avec list_processes dans cette demande, \
+        désigné par son PID. Un programme avec une fenêtre reçoit seulement une demande de fermeture (il peut proposer \
+        d’enregistrer) et n’est jamais forcé ; seul un processus sans fenêtre est arrêté directement. Les processus de \
+        Windows, de sécurité et d’AiWin11 sont refusés. L’utilisateur doit l’approuver à chaque fois.",
+            "parameters": {
+                "type": "object",
+                "properties": { "process_id": { "type": "integer", "minimum": 5 } },
+                "required": ["process_id"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "list_applications",
             "description": "Liste, en lecture seule, les applications que tu peux ouvrir avec launch_application \
 (Bloc-notes, Table des caractères, Paint) : installée ou non, interdite ou non par l’utilisateur, et combien de \
@@ -1341,6 +1354,7 @@ mod tests {
                 "list_services",
                 "get_system_status",
                 "list_processes",
+                "stop_process",
                 "list_applications",
                 "inspect_process",
                 "inspect_window",
@@ -1373,6 +1387,7 @@ mod tests {
                 "list_services",
                 "get_system_status",
                 "list_processes",
+                "stop_process",
                 "list_applications",
                 "inspect_process",
                 "inspect_window",

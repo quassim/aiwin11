@@ -78,6 +78,7 @@ pub enum CapabilityName {
     ImageGenerate,
     Delegation,
     ScreenCapture,
+    ProcessStop,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -108,7 +109,7 @@ use CapabilityName as C;
 use Reversibility as R;
 
 /// One manifest per agent action, in `AgentAction::ALL` order.
-pub const MANIFESTS: [ToolManifest; 34] = [
+pub const MANIFESTS: [ToolManifest; 35] = [
     ToolManifest {
         action: AgentAction::LaunchApplication,
         tool: "launch_application",
@@ -598,6 +599,21 @@ pub const MANIFESTS: [ToolManifest; 34] = [
         reversibility: R::NoEffect,
         timeout_ms: 10_000,
         capabilities: &[C::ProcessList],
+    },
+    ToolManifest {
+        action: AgentAction::StopProcess,
+        tool: "stop_process",
+        version: 1,
+        // Unsaved work in a process without a window is lost: critical, never grantable.
+        risk: Risk::Critical,
+        side_effect: true,
+        reads_screen: false,
+        private_data: false,
+        local_only: true,
+        dry_run: true,
+        reversibility: R::Irreversible,
+        timeout_ms: 20_000,
+        capabilities: &[C::ProcessStop],
     },
 ];
 

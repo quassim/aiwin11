@@ -12,6 +12,7 @@ Périmètre fixé avec l’utilisateur : terminer la ligne, y compris arrêt de 
 - 🧪 `describe_screen` : capture de l’écran principal décrite par le modèle de vision local, toujours sur accord, refusée si une fenêtre protégée est visible. Pas de test réel automatique (il capturerait l’écran de l’utilisateur).
 - 🧪 Plusieurs dossiers : jusqu’à quatre dossiers supplémentaires (page Fichiers), noms `alias/nom.txt` pour l’agent, jamais de copie ou de renommage entre dossiers.
 - 🧪 `list_applications` : état de la liste fermée d’applications (installée, interdite, processus et fenêtres ouverts) ; test réel du pont passé.
+- 🧪 `stop_process` : arrêt approuvé d’un processus de la dernière liste ; fermeture demandée sans jamais forcer s’il a une fenêtre ; processus de Windows, de sécurité et d’AiWin11 refusés au cœur, au broker et au pont. Test réel du pont passé sur des processus lancés par le test.
 
 ## 2026-11-13, statut « test utilisateur à faire »
 

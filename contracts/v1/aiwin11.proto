@@ -50,6 +50,7 @@ message Command {
     CaptureDisplay capture_display = 45;
     InspectProcess inspect_process = 46;
     ListApplications list_applications = 47;
+    StopProcess stop_process = 48;
   }
 }
 
@@ -75,6 +76,15 @@ message ListLocalText {}
 
 // Read-only snapshot of the processes using the most memory (at most 25).
 message ListProcesses { uint32 limit = 1; }
+
+// Stops one process of the user's session, after the user's approval. A process with a window
+// is asked to close (WM_CLOSE: its own "save?" prompt may appear) and is never forced; only a
+// process without a window is ended. System, security and AiWin11 processes are refused.
+message StopProcess {
+  uint32 process_id = 1;
+  // Name seen when the process was listed; a reused ID naming another program is refused.
+  string expected_name = 2;
+}
 
 // Status of the closed list of applications the agent may open (ApplicationService Discover /
 // GetStatus): installed or not, and how many of its processes and windows are open. Read-only.
