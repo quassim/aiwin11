@@ -317,6 +317,8 @@ struct Run<'a, F: Fn(TaskUpdate)> {
     windows: Vec<ListedWindow>,
     /// This task's last `inspect_window` result, the only controls `click_control` may target.
     inspected: Option<(WindowTarget, Vec<NamedNode>)>,
+    /// Scheduled run: nobody can answer an approval, so anything that would ask is refused.
+    unattended: bool,
     /// Local vision model chosen by the user, if any.
     vision_model: Option<&'a str>,
 }
@@ -569,6 +571,7 @@ impl TaskSlot {
             launched_notepad: None,
             windows: Vec::new(),
             inspected: None,
+            unattended: request.scheduled,
             vision_model: request.vision_model.as_deref().filter(|_| local),
         };
         // Explicit local_first fallback: setting on, private mode off, cloud approved for this
@@ -890,7 +893,10 @@ impl TaskSlot {
     ) -> Result<Result<Effect, String>, &'static str> {
         // Grants are read at each evaluation, so a revocation applies to the very next action.
         let context = ActionContext { temporary_grant: lock(run.core)?.has_active_grant(action), ..run.context };
-        let decision = policy::evaluate(run.settings, action, context);
+        let mut decision = policy::evaluate(run.settings, action, context);
+        if run.unattended && decision.effect == Effect::Ask {
+            decision = policy::Decision { effect: Effect::Deny, rule: "unattended" };
+        }
         record_code(
             run.core,
             run.task,
