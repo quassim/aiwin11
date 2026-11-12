@@ -7,6 +7,7 @@ use std::{
 
 use aiwin11_core::{
     local_files::LocalFiles,
+    manifest::{ToolManifest, MANIFESTS},
     model_gateway::{LocalModelProvider, Ollama},
     openai,
     policy::{self, AgentAction, Effect, PolicySettings},
@@ -293,6 +294,8 @@ struct PolicyOverview {
     settings: PolicySettings,
     /// Effect of each action in the Observation, Assisted, Limited and Advanced profiles.
     table: Vec<PolicyRow>,
+    /// Reviewed facts about each tool (risk, dry run, reversibility, deadline).
+    manifests: &'static [ToolManifest],
 }
 
 #[tauri::command]
@@ -300,7 +303,7 @@ fn get_policy_overview(state: State<'_, Arc<AppState>>) -> Result<PolicyOverview
     let settings = state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
     let table =
         policy::table(settings.simulate).into_iter().map(|(action, effects)| PolicyRow { action, effects }).collect();
-    Ok(PolicyOverview { settings, table })
+    Ok(PolicyOverview { settings, table, manifests: &MANIFESTS })
 }
 
 /// Applies to the next task; a running task keeps the settings it started with.

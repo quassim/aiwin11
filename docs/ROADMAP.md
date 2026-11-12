@@ -109,7 +109,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | UX : changements sans redémarrage | ✅ | — |
 | UX : clavier, lecteurs d’écran, résolutions | 🟡 Pas d’audit lecteur d’écran | R1 |
 | Structure monorepo : `apps/overlay`, `packages/ui`, `provider-sdk`, `tool-sdk`, `plugin-sdk`, `plugins/`, `tests/{unit,integration,security,e2e}`, `scripts/` | 🟡 `packages/` et `tests/` vides ; services regroupés dans `services/core` | R4, R6 |
-| Contrat d’outil : id, version, capacités, schéma, **risque, dry-run, réversible, timeout** | 🟡 Catalogue + règles ; pas de manifeste formel | R2 |
+| Contrat d’outil : id, version, capacités, schéma, **risque, dry-run, réversible, timeout** | ✅ `manifest.rs` : un manifeste par outil, vérifié contre le catalogue et l’agent ; les invariants de politique en dérivent ; affiché dans **Sécurité** | — |
 | Base MCP spec 2026-07-28 | ❌ | R6 |
 | Critères NFR et scénarios | Voir §3 et §4 | — |
 | Roadmap phases 0 à 5 | Voir §5 | — |
@@ -247,7 +247,7 @@ L’ordre suit le principe de la conversation : sécurité et fiabilité avant l
 ### R2 — Politiques par ressource et contrôle Windows étendu (fin du lot C, début de M02/M04)
 
 - Politiques en données : sujet, action, **ressource (dossiers autorisés, applications)**, contraintes (`max_files`, `require_backup`, expiration), **autorisations temporaires et révocables** ; tables `policies` et `approvals` ; éditeur dans **Sécurité**.
-- Risque formel par outil et **manifeste d’outil** (risque, dry-run, réversible, timeout, capacités).
+- ✅ Risque formel par outil et **manifeste d’outil** (risque, dry-run, réversible, timeout, capacités).
 - Règles critiques explicites (toujours demandées ou refusées) : suppression massive, élévation, sécurité Windows, transactions financières, envoi de données confidentielles, installation de logiciel.
 - Pont Windows :
   - ApplicationService : découverte et lancement d’applications autorisées ;

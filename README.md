@@ -63,6 +63,8 @@ Le **mode simulation** remplace toute action avec effet par une simulation : l�
 
 Le bouton **Stoppe toutes les tâches**, toujours visible dans la barre latérale, arrête tout : une demande en réflexion ou en attente d’accord est annulée immédiatement (« Arrêt confirmé ») ; si une action est en cours d’exécution, elle n’est pas coupée au milieu (« Arrêt demandé ») et la demande s’arrête juste après, sans aucune autre action.
 
+La page **Sécurité** montre aussi la fiche de chaque outil : niveau de risque, possibilité d’annuler, simulation, usage local uniquement et délai maximal. Un outil **critique** demande toujours ton accord.
+
 ### Fournisseur cloud optionnel
 
 Sélectionnez **OpenAI · Cloud** dans **Modèles**, renseignez un identifiant de modèle compatible avec les appels d’outils et enregistrez une clé API. Windows conserve la clé dans le Gestionnaire d’identifiants sous `AiWin11/OpenAI`. Dans **Accueil**, cochez l’envoi du texte de la demande à OpenAI, pour cette demande seulement : cet accord n’est jamais mémorisé. Le fournisseur choisi est mémorisé ; Ollama est sélectionné au premier démarrage. [Référence de l’API OpenAI](https://developers.openai.com/api/reference/resources/chat)

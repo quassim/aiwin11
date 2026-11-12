@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::manifest::{manifest, Risk};
+
 /// What the engine decided for one proposed action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -106,24 +108,24 @@ impl AgentAction {
         }
     }
 
-    /// Changes something on the machine (as opposed to reading).
+    /// Changes something on the machine (as opposed to reading). From the tool manifest.
     pub fn has_side_effect(self) -> bool {
-        !matches!(self, Self::ListFiles | Self::ReadFile | Self::InspectWindow | Self::DescribeWindow)
+        manifest(self).side_effect
     }
 
-    /// Reads what another application shows on screen.
+    /// Reads what another application shows on screen. From the tool manifest.
     pub fn reads_screen(self) -> bool {
-        matches!(self, Self::InspectWindow | Self::DescribeWindow)
+        manifest(self).reads_screen
     }
 
     /// Never offered to, nor run for, a cloud model: file contents and screen data stay local.
     pub fn local_only(self) -> bool {
-        !matches!(self, Self::LaunchApplication)
+        manifest(self).local_only
     }
 
-    /// Always asks, in every profile.
+    /// Always asks, in every profile: the manifest rates it critical.
     pub fn critical(self) -> bool {
-        matches!(self, Self::TrashFile)
+        manifest(self).risk == Risk::Critical
     }
 }
 

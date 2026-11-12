@@ -5,7 +5,29 @@ type Autonomy = "observation" | "assisted" | "limited" | "advanced";
 type Effect = "allow" | "ask" | "deny" | "simulate";
 type PolicySettings = { autonomy: Autonomy; simulate: boolean };
 type PolicyRow = { action: string; effects: [Effect, Effect, Effect, Effect] };
-type PolicyOverview = { settings: PolicySettings; table: PolicyRow[] };
+type Risk = "low" | "medium" | "high" | "critical";
+type Reversibility = "noEffect" | "reversible" | "recoverable" | "irreversible";
+type ToolManifest = {
+  action: string;
+  tool: string;
+  version: number;
+  risk: Risk;
+  sideEffect: boolean;
+  readsScreen: boolean;
+  localOnly: boolean;
+  dryRun: boolean;
+  reversibility: Reversibility;
+  timeoutMs: number;
+};
+type PolicyOverview = { settings: PolicySettings; table: PolicyRow[]; manifests: ToolManifest[] };
+
+const riskNames: Record<Risk, string> = { low: "Faible", medium: "Moyen", high: "Élevé", critical: "Critique" };
+const reversibilityNames: Record<Reversibility, string> = {
+  noEffect: "Sans effet (lecture)",
+  reversible: "Réversible",
+  recoverable: "Récupérable (corbeille)",
+  irreversible: "Irréversible",
+};
 
 const profiles: { id: Autonomy; label: string; description: string }[] = [
   {
@@ -89,7 +111,7 @@ export function Security({ onFinished }: { onFinished: () => void }) {
         <p role="status">{status || "Chargement…"}</p>
       </section>
     );
-  const { settings, table } = overview;
+  const { settings, table, manifests } = overview;
   const column = profiles.findIndex((profile) => profile.id === settings.autonomy);
 
   return (
@@ -150,6 +172,39 @@ export function Security({ onFinished }: { onFinished: () => void }) {
                     {effectNames[effect]}
                   </td>
                 ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h3>Fiche de chaque outil</h3>
+      <p>
+        Faits vérifiés par AiWin11 pour chaque outil : ils déterminent les règles toujours appliquées (une action
+        critique demande toujours ton accord, un outil « local uniquement » n’est jamais proposé à un modèle cloud).
+      </p>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Outil</th>
+              <th scope="col">Risque</th>
+              <th scope="col">Annulation</th>
+              <th scope="col">Simulable</th>
+              <th scope="col">Local uniquement</th>
+              <th scope="col">Délai maximal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {manifests.map((manifest) => (
+              <tr key={manifest.tool}>
+                <th scope="row">
+                  {actionNames[manifest.action] ?? manifest.action} <code className="event-code">{manifest.tool}</code>
+                </th>
+                <td className={`risk-${manifest.risk}`}>{riskNames[manifest.risk]}</td>
+                <td>{reversibilityNames[manifest.reversibility]}</td>
+                <td>{manifest.sideEffect ? (manifest.dryRun ? "Oui" : "Non") : "—"}</td>
+                <td>{manifest.localOnly ? "Oui" : "Non"}</td>
+                <td>{Math.round(manifest.timeoutMs / 1000)} s</td>
               </tr>
             ))}
           </tbody>

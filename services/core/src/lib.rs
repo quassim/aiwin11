@@ -1,6 +1,7 @@
 pub mod broker;
 #[cfg(windows)]
 pub mod local_files;
+pub mod manifest;
 pub mod model_gateway;
 #[cfg(windows)]
 pub mod openai;
