@@ -32,6 +32,8 @@ Une entrée par session de travail, la plus récente en haut. Chaque session lit
 
 - Paramètres Windows en lecture dans `get_system_status` (thème, transparence, langue, fuseau horaire, alimentation, batterie, économiseur), validés par le cœur. Vérifié par `verify.ps1` et le test réel du pont sur la machine de référence.
 
+- Règles par ressource : fichiers protégés (modèles de noms, page Sécurité) invisibles pour l’agent et refusés à l’exécution (`FILE_PROTECTED`, audité) ; risque du manifeste ajouté à chaque décision journalisée. Vérifié par `verify.ps1`.
+
 **Prochaine étape** : test E2E de l’application, essais réels encore ouverts (UAC de l’assistant élevé, OpenAI/DeepSeek, vidéo, lecteur d’écran, recherche de fichiers et stratégies avec un vrai modèle).
 
 ## 2026-11-13 — dépôt GitHub

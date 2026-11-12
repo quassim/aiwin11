@@ -23,6 +23,17 @@ pub enum Risk {
     Critical,
 }
 
+impl Risk {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+}
+
 /// How a side effect can be undone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

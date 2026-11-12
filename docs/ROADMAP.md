@@ -58,7 +58,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Multimodal : texte ✅, voix STT/TTS ❌, image ❌, vidéo ❌, compréhension d’écran 🟡 (fenêtre), analyse de documents ❌, temps réel ❌ | 🟡 | R7 |
 | Configuration indépendante par modalité | 🟡 Modèle d’agent, modèle de vision, voix, moteurs image et vidéo réglés séparément | R3 |
 | Agent principal qui délègue à des agents spécialisés (dev, recherche, admin Windows, bureautique, multimédia) | ✅ Délégation d’un niveau, agents limités à leurs outils (règle `agent_scope`) | — |
-| Permissions par agent, application, dossier et action | 🟡 Par action, profil, agent spécialisé, dossier de travail et liste fermée d’applications | R2 |
+| Permissions par agent, application, dossier et action | 🟡 Par action, profil, agent spécialisé, dossier de travail, fichiers protégés et liste fermée d’applications | R2 |
 | Simulations | ✅ Mode simulation | — |
 | Confirmations des opérations sensibles | ✅ | — |
 | Journal d’audit | ✅ | — |
@@ -94,7 +94,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | M01 Hub : découverte ✅, config par tâche ❌, profils de génération ❌, tests de capacités 🟡 (sonde d’appel d’outil), routage auto ❌ | 🟡 | R3 |
 | M02 Windows : fenêtres 🟡, applications 🟡, fichiers 🟡, processus ❌, interactions graphiques 🟡, capture d’écran 🟡, informations contextuelles 🟡 | 🟡 | R2 |
 | M03 Agent : exécution ✅, planification ✅, outils ✅, délégation ✅, vérification 🟡, interruption ✅ (pause, reprise, annulation), **reprise** 🟡 (pause/reprise, reprise manuelle des workflows) | 🟡 | R2, R8 |
-| M04 Sécurité : règles par ressource ❌, permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
+| M04 Sécurité : règles par ressource 🟡 (fichiers protégés par modèle de nom), permissions temporaires ✅, approbations ✅, journalisation ✅, arrêt immédiat ✅ | 🟡 | R2 |
 | M05 Mémoire de session, préférences durables, indexation sélective, historique ✅, recherche sémantique | 🟡 | R6 |
 | M06 STT/TTS, compréhension d’images 🟡, OCR, génération image/vidéo, streaming multimodal | 🟡 | R7 |
 | M07 Déclencheurs ✅ (jours, démarrage), planification ✅, conditions 🟡 (branche après échec), tâches répétitives ✅, reprise sur erreur 🟡, éditeur visuel 🟡 | 🟡 | R8 |
@@ -104,7 +104,7 @@ Sources : **[V]** message de vision initial · **[S0]** cadrage v0.1 · **[S1]**
 | Ordre d’exécution : API native → API appli → UIA → vision + souris/clavier → script contrôlé ; **changer de méthode sans élargir les autorisations** | 🟡 API native et UIA seulement | R2 |
 | Passerelle : modalités (dont **embeddings**), contraintes (VRAM, latence, coût, confidentialité, **quotas**), politiques de routage, détection réelle des capacités | 🟡 | R3 |
 | Configuration YAML validée par schéma, générée par l’UI (execution_mode, privacy_mode, providers, routage par tâche, require_approval_for) | ❌ | R3 |
-| Décision = identité + action + ressource + contexte + risque → ALLOW/DENY/ASK/SIMULATE | 🟡 Action, profil, contexte ; ressource et risque formel à ajouter | R2 |
+| Décision = identité + action + ressource + contexte + risque → ALLOW/DENY/ASK/SIMULATE | 🟡 Action, profil, contexte et risque du manifeste (journalisé avec chaque décision) ; ressource : fichiers protégés refusés à l’exécution, autres ressources à venir | R2 |
 | Simulateur de politique (lire dossier, modifier document, installer logiciel, suppression massive, envoi Internet, sécurité Windows) | 🟡 Table des décisions dans **Sécurité** ; actions limitées aux outils existants | R2 |
 | Isolation : processus limités ✅ (agent), environnements contrôlés / VM ❌, pas d’exécution admin ✅ | 🟡 | R4, R9 |
 | Approbation forte : fichiers, commande, conséquences, étendue | ✅ Pour les actions existantes | — |

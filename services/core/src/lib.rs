@@ -155,6 +155,40 @@ pub struct ModelFacts {
     pub vram_bytes: Option<u64>,
 }
 
+/// At most this many protected file patterns, each 1 to 64 characters.
+pub const MAX_PROTECTED_PATTERNS: usize = 20;
+
+/// A file name pattern: `*` and `?` wildcards, no path separator, no control character.
+fn valid_pattern(pattern: &str) -> bool {
+    let length = pattern.chars().count();
+    (1..=64).contains(&length) && !pattern.chars().any(|c| c.is_control() || "\\/:<>\"|".contains(c))
+}
+
+/// Case-insensitive match of a whole file name against a `*` / `?` pattern.
+pub fn matches_pattern(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
+    let name: Vec<char> = name.to_lowercase().chars().collect();
+    // Iterative matcher with backtracking on the last `*`: linear in practice, no recursion.
+    let (mut p, mut n, mut star, mut mark) = (0, 0, None, 0);
+    while n < name.len() {
+        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == name[n]) {
+            p += 1;
+            n += 1;
+        } else if p < pattern.len() && pattern[p] == '*' {
+            star = Some(p);
+            mark = n;
+            p += 1;
+        } else if let Some(position) = star {
+            p = position + 1;
+            mark += 1;
+            n = mark;
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|c| *c == '*')
+}
+
 /// Public model identifiers as Ollama lists them: letters, digits and `-_.:/`, 1 to 256 bytes.
 fn valid_model_name(name: &str) -> bool {
     !name.is_empty()
@@ -508,6 +542,57 @@ impl Core {
                 "INSERT INTO events (id, session_id, kind, source, code)
                  VALUES (?1, ?2, 'settings.routing.changed', 'core', ?3)",
                 params![Uuid::new_v4().to_string(), session, if enabled { "local_first" } else { "manual" }],
+            )?;
+            transaction.commit()
+        };
+        write(&mut self.db).map_err(|_| "SETTINGS_UNAVAILABLE")
+    }
+
+    /// File name patterns the agent may never read, list, search, copy, move or trash
+    /// (ROADMAP "règles par ressource"). Checked by the file service at execution time.
+    pub fn protected_files(&self) -> Vec<String> {
+        self.setting("policy.protected_files")
+            .ok()
+            .flatten()
+            .map(|value| {
+                value
+                    .lines()
+                    .filter(|pattern| valid_pattern(pattern))
+                    .take(MAX_PROTECTED_PATTERNS)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Replaces the protected patterns; blank entries are ignored, duplicates removed.
+    pub fn set_protected_files(&mut self, patterns: &[String]) -> Result<(), &'static str> {
+        let mut kept: Vec<String> = Vec::new();
+        for pattern in patterns.iter().map(|pattern| pattern.trim()).filter(|pattern| !pattern.is_empty()) {
+            if !valid_pattern(pattern) {
+                return Err("SETTINGS_INVALID");
+            }
+            if !kept.iter().any(|known| known.eq_ignore_ascii_case(pattern)) {
+                kept.push(pattern.to_owned());
+            }
+        }
+        if kept.len() > MAX_PROTECTED_PATTERNS {
+            return Err("SETTINGS_INVALID");
+        }
+        let session = self.session_id.clone();
+        let write = |db: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = db.transaction()?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES ('policy.protected_files', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [kept.join("\n")],
+            )?;
+            // The patterns themselves stay out of the journal: only how many there are.
+            transaction.execute(
+                "INSERT INTO events (id, session_id, kind, source, code)
+                 VALUES (?1, ?2, 'settings.policy.protected.changed', 'core', ?3)",
+                params![Uuid::new_v4().to_string(), session, format!("count:{}", kept.len())],
             )?;
             transaction.commit()
         };
@@ -1113,6 +1198,7 @@ mod tests {
         for code in [
             "policy.evaluated",
             "ask:launch_application:profile",
+            "ask:launch_application:profile:medium",
             "step:1/8",
             "MODEL_REQUIRED",
             "assisted+simulate",
@@ -1261,6 +1347,28 @@ mod tests {
         assert!(core.cloud_fallback_enabled());
         core.db.execute("DROP TABLE settings", []).unwrap();
         assert!(!core.cloud_fallback_enabled(), "an unreadable setting never allows the cloud");
+    }
+
+    #[test]
+    fn protected_file_patterns_are_validated_and_matched_case_insensitively() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        assert!(core.protected_files().is_empty());
+        let patterns: Vec<String> = ["contrat*.txt", " ", "CONTRAT*.TXT", "secret?.txt"].map(String::from).into();
+        core.set_protected_files(&patterns).unwrap();
+        assert_eq!(core.protected_files(), ["contrat*.txt", "secret?.txt"]);
+        assert_eq!(core.activity().unwrap()[0].code.as_deref(), Some("count:2"));
+        for bad in ["../x", "a\\b", "x\u{0}", &"m".repeat(65)] {
+            assert_eq!(core.set_protected_files(&[bad.to_owned()]), Err("SETTINGS_INVALID"), "{bad:?}");
+        }
+        let too_many: Vec<String> = (0..=MAX_PROTECTED_PATTERNS).map(|index| format!("f{index}")).collect();
+        assert_eq!(core.set_protected_files(&too_many), Err("SETTINGS_INVALID"));
+        assert!(matches_pattern("contrat*.txt", "Contrat-2026.TXT"));
+        assert!(matches_pattern("secret?.txt", "secret1.txt"));
+        assert!(!matches_pattern("secret?.txt", "secret12.txt"));
+        assert!(matches_pattern("*", "x.txt"));
+        assert!(!matches_pattern("*.md", "notes.txt"));
+        assert!(matches_pattern("a*b*c", "aXXbYYc"));
+        assert!(!matches_pattern("a*b*c", "aXXbYY"));
     }
 
     #[test]

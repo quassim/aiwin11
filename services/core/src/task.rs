@@ -1229,7 +1229,14 @@ impl TaskSlot {
             run.core,
             run.task,
             "policy.evaluated",
-            &format!("{}:{}:{}", effect_code(decision.effect), action.code(), decision.rule),
+            // Identity is the task's agent; the record says effect, action, rule and the manifest's risk.
+            &format!(
+                "{}:{}:{}:{}",
+                effect_code(decision.effect),
+                action.code(),
+                decision.rule,
+                crate::manifest::manifest(action).risk.code()
+            ),
         )?;
         if decision.effect == Effect::Deny {
             run.report(action, summary, ActionStatus::Denied, Some(decision.rule));

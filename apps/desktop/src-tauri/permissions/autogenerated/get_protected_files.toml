@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-protected-files"
+description = "Enables the get_protected_files command without any pre-configured scope."
+commands.allow = ["get_protected_files"]
+
+[[permission]]
+identifier = "deny-get-protected-files"
+description = "Denies the get_protected_files command without any pre-configured scope."
+commands.deny = ["get_protected_files"]

@@ -71,6 +71,7 @@ fn main() {
         "get_cloud_cost",
         "ui_ready",
         "get_local_fallback_model",
+        "get_protected_files",
         "get_cloud_usage",
         "get_runtime_status",
         "video_status",
@@ -81,6 +82,7 @@ fn main() {
         "set_cloud_budget",
         "set_cloud_cost",
         "set_local_fallback_model",
+        "set_protected_files",
         "set_cloud_fallback",
         "get_model_resources",
     ])))

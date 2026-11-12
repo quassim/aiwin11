@@ -142,7 +142,11 @@ impl LocalFiles {
     ) -> Result<(), &'static str> {
         let command =
             core.agent_command(task, Operation::MoveLocalText(MoveLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
-        self.observe(core, &command, policy, "file.move", || self.move_text(source, destination))
+        let protected = core.protected_files();
+        self.observe(core, &command, policy, "file.move", || {
+            Self::ensure_unprotected(&protected, &[source, destination])?;
+            self.move_text(source, destination)
+        })
     }
 
     /// Agent tool: moves one text file into its own new folder of AiWin11's trash, keeping its
@@ -156,7 +160,11 @@ impl LocalFiles {
     ) -> Result<PathBuf, &'static str> {
         let command =
             core.agent_command(task, Operation::TrashLocalText(TrashLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
-        self.observe(core, &command, policy, "file.trash", || self.trash_text(name))
+        let protected = core.protected_files();
+        self.observe(core, &command, policy, "file.trash", || {
+            Self::ensure_unprotected(&protected, &[name])?;
+            self.trash_text(name)
+        })
     }
 
     /// Read-only check before a trash: the file is readable and in scope.
@@ -170,7 +178,9 @@ impl LocalFiles {
         let command = core
             .agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
             .map_err(|_| "FILE_UNAVAILABLE")?;
+        let protected = core.protected_files();
         self.observe(core, &command, policy, "file.preview", || {
+            Self::ensure_unprotected(&protected, &[name])?;
             let text = self.read(self.resolve(name)?, name)?;
             Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).chars().count())
         })
@@ -225,7 +235,8 @@ impl LocalFiles {
     pub fn agent_list(&self, core: &mut Core, task: &str, policy: Policy) -> Result<Vec<String>, &'static str> {
         let command =
             core.agent_command(task, Operation::ListLocalText(ListLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
-        self.observe(core, &command, policy, "file.list", || self.list_names(""))
+        let protected = core.protected_files();
+        self.observe(core, &command, policy, "file.list", || self.unprotected_names(&protected))
     }
 
     /// Agent tool: reads one text file of the dedicated folder for `task`.
@@ -233,7 +244,9 @@ impl LocalFiles {
         let command = core
             .agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
             .map_err(|_| "FILE_UNAVAILABLE")?;
+        let protected = core.protected_files();
         self.observe(core, &command, policy, "file.preview", || {
+            Self::ensure_unprotected(&protected, &[name])?;
             let text = self.read(self.resolve(name)?, name)?;
             Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
         })
@@ -256,9 +269,10 @@ impl LocalFiles {
         }
         let command =
             core.agent_command(task, Operation::ListLocalText(ListLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
+        let protected = core.protected_files();
         self.observe(core, &command, policy, "file.search", || {
             let mut hits = Vec::new();
-            for name in self.list_names("")? {
+            for name in self.unprotected_names(&protected)? {
                 let Ok(text) = self.resolve(&name).and_then(|path| self.read(path, &name)) else { continue };
                 let name_matches = name.to_lowercase().contains(&needle);
                 let lines: Vec<String> = text
@@ -291,7 +305,9 @@ impl LocalFiles {
         let command = core
             .agent_command(task, Operation::PreviewLocalText(PreviewLocalText {}))
             .map_err(|_| "FILE_UNAVAILABLE")?;
+        let protected = core.protected_files();
         self.observe(core, &command, policy, "file.preview", || {
+            Self::ensure_unprotected(&protected, &[source, destination])?;
             if !valid_name(destination) {
                 return Err("INVALID_FILE_NAME");
             }
@@ -319,7 +335,24 @@ impl LocalFiles {
     ) -> Result<(), &'static str> {
         let command =
             core.agent_command(task, Operation::CopyLocalText(CopyLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
-        self.observe(core, &command, policy, "file.copy", || self.copy_text(source, destination))
+        let protected = core.protected_files();
+        self.observe(core, &command, policy, "file.copy", || {
+            Self::ensure_unprotected(&protected, &[source, destination])?;
+            self.copy_text(source, destination)
+        })
+    }
+
+    /// Refuses names that match a protected pattern; checked inside the audited execution.
+    fn ensure_unprotected(protected: &[String], names: &[&str]) -> Result<(), &'static str> {
+        if names.iter().any(|name| protected.iter().any(|pattern| crate::matches_pattern(pattern, name))) {
+            return Err("FILE_PROTECTED");
+        }
+        Ok(())
+    }
+
+    fn unprotected_names(&self, protected: &[String]) -> Result<Vec<String>, &'static str> {
+        let names = self.list_names("")?;
+        Ok(names.into_iter().filter(|name| Self::ensure_unprotected(protected, &[name]).is_ok()).collect())
     }
 
     fn observe<T>(
@@ -792,6 +825,45 @@ mod tests {
         assert!(files.agent_search(&mut core, &task, reads, "introuvable").unwrap().is_empty());
         let kinds: Vec<_> = core.activity().unwrap().into_iter().map(|event| event.kind).collect();
         assert!(kinds.contains(&"file.search.completed".to_owned()), "{kinds:?}");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn protected_files_are_hidden_from_the_agent_and_refused_at_execution() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-file-test-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let files = LocalFiles::open(&directory).unwrap();
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let task = Uuid::new_v4().to_string();
+        fs::write(files.root().join("Contrat-2026.txt"), "lait confidentiel").unwrap();
+        fs::write(files.root().join("courses.txt"), "lait").unwrap();
+        core.set_protected_files(&["contrat*".to_owned()]).unwrap();
+        let all = Policy::granting(&[
+            Capability::FileRead,
+            Capability::FileCopy,
+            Capability::FileMove,
+            Capability::FileTrash,
+        ]);
+
+        assert_eq!(files.agent_list(&mut core, &task, all), Ok(vec!["courses.txt".into()]));
+        let hits = files.agent_search(&mut core, &task, all, "lait").unwrap();
+        assert_eq!(hits.iter().map(|hit| hit.name.as_str()).collect::<Vec<_>>(), ["courses.txt"]);
+        assert_eq!(files.agent_read(&mut core, &task, all, "contrat-2026.txt"), Err("FILE_PROTECTED"));
+        assert_eq!(files.agent_copy(&mut core, &task, all, "courses.txt", "contrat-copie.txt"), Err("FILE_PROTECTED"));
+        assert_eq!(files.agent_move(&mut core, &task, all, "Contrat-2026.txt", "x.txt"), Err("FILE_PROTECTED"));
+        assert_eq!(files.agent_trash(&mut core, &task, all, "Contrat-2026.txt").map(|_| ()), Err("FILE_PROTECTED"));
+        assert!(files.root().join("Contrat-2026.txt").exists(), "untouched");
+        assert!(!files.root().join("contrat-copie.txt").exists());
+        // Audited as a failure of the authorized operation, with the reason code.
+        let failures = core
+            .activity()
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind.ends_with(".failed") && event.code.as_deref() == Some("FILE_PROTECTED"))
+            .count();
+        assert_eq!(failures, 4);
+        // The user's own Files page is not restricted by agent rules.
+        assert_eq!(files.preview(&mut core, "Contrat-2026.txt"), Ok("lait confidentiel".into()));
         fs::remove_dir_all(directory).unwrap();
     }
 

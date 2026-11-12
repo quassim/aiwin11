@@ -654,6 +654,16 @@ fn set_cloud_budget(state: State<'_, Arc<AppState>>, tokens: u64) -> Result<(), 
 }
 
 #[tauri::command]
+fn get_protected_files(state: State<'_, Arc<AppState>>) -> Vec<String> {
+    lock_core(&state.core).protected_files()
+}
+
+#[tauri::command]
+fn set_protected_files(state: State<'_, Arc<AppState>>, patterns: Vec<String>) -> Result<(), &'static str> {
+    lock_core(&state.core).set_protected_files(&patterns)
+}
+
+#[tauri::command]
 fn get_local_fallback_model(state: State<'_, Arc<AppState>>) -> Option<String> {
     lock_core(&state.core).local_fallback_model()
 }
@@ -1087,6 +1097,7 @@ fn main() {
             get_cloud_budget,
             get_cloud_cost,
             get_local_fallback_model,
+            get_protected_files,
             get_cloud_usage,
             get_runtime_status,
             ui_ready,
@@ -1098,6 +1109,7 @@ fn main() {
             set_cloud_budget,
             set_cloud_cost,
             set_local_fallback_model,
+            set_protected_files,
             set_cloud_fallback,
             get_model_resources,
             probe_local_model,
