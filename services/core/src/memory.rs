@@ -14,6 +14,9 @@ use windows_sys::Win32::{
 
 use crate::Core;
 
+/// id, created_at, ciphertext, schedule.
+type StoredEntry = (String, String, Vec<u8>, Option<String>);
+
 pub const MAX_NOTE_CHARS: usize = 1000;
 pub const MAX_NOTES: u32 = 200;
 const ENTROPY: &[u8] = b"AiWin11.memory.v1";
@@ -24,6 +27,19 @@ pub struct MemoryEntry {
     pub id: String,
     pub created_at: String,
     pub text: String,
+    /// Daily local time "HH:MM" for a scheduled saved request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
+}
+
+/// "HH:MM", 24-hour clock.
+pub fn valid_schedule(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 5
+        && bytes[2] == b':'
+        && value[..2].parse::<u8>().is_ok_and(|hours| hours < 24)
+        && value[3..].parse::<u8>().is_ok_and(|minutes| minutes < 60)
+        && bytes.iter().enumerate().all(|(index, byte)| index == 2 || byte.is_ascii_digit())
 }
 
 fn blob(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {
@@ -208,20 +224,86 @@ impl Core {
         self.entries("routine")
     }
 
+    /// Results of scheduled requests, oldest first.
+    pub fn reports(&self) -> Result<Vec<MemoryEntry>, &'static str> {
+        self.entries("report")
+    }
+
+    /// Keeps the result of a scheduled request (encrypted). At most 50 are kept.
+    pub fn save_report(&mut self, text: &str) -> Result<String, &'static str> {
+        let text: String = text.chars().take(MAX_NOTE_CHARS).collect();
+        let _ = self.db.execute(
+            "DELETE FROM memory_entries WHERE kind = 'report' AND id NOT IN
+             (SELECT id FROM memory_entries WHERE kind = 'report' ORDER BY created_at DESC LIMIT 49)",
+            [],
+        );
+        self.store(if valid_note(&text) { &text } else { "(résultat vide)" }, "report")
+    }
+
+    /// Sets or removes (`None`) the daily time of a saved request.
+    pub fn set_routine_schedule(&mut self, id: &str, schedule: Option<&str>) -> Result<(), &'static str> {
+        if schedule.is_some_and(|value| !valid_schedule(value)) {
+            return Err("SCHEDULE_INVALID");
+        }
+        let changed = self
+            .db
+            .execute(
+                "UPDATE memory_entries SET schedule = ?2, last_run = NULL WHERE id = ?1 AND kind = 'routine'",
+                params![id, schedule],
+            )
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        if changed == 0 {
+            return Err("ROUTINE_NOT_FOUND");
+        }
+        self.journal("routine.schedule.changed", Some(if schedule.is_some() { "scheduled" } else { "unscheduled" }))
+            .map_err(|_| "MEMORY_UNAVAILABLE")
+    }
+
+    /// Saved requests due now (local time), not yet run today; marks them as run.
+    pub fn take_due_routines(&mut self) -> Result<Vec<MemoryEntry>, &'static str> {
+        let (today, now): (String, String) = self
+            .db
+            .query_row(
+                "SELECT strftime('%Y-%m-%d', 'now', 'localtime'), strftime('%H:%M', 'now', 'localtime')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| "MEMORY_UNAVAILABLE")?;
+        let due: Vec<MemoryEntry> = self
+            .entries("routine")?
+            .into_iter()
+            .filter(|routine| routine.schedule.as_deref().is_some_and(|time| time <= now.as_str()))
+            .collect();
+        let mut taken = Vec::new();
+        for routine in due {
+            let marked = self
+                .db
+                .execute(
+                    "UPDATE memory_entries SET last_run = ?2 WHERE id = ?1 AND (last_run IS NULL OR last_run <> ?2)",
+                    params![routine.id, today],
+                )
+                .map_err(|_| "MEMORY_UNAVAILABLE")?;
+            if marked == 1 {
+                taken.push(routine);
+            }
+        }
+        Ok(taken)
+    }
+
     fn entries(&self, kind: &str) -> Result<Vec<MemoryEntry>, &'static str> {
-        let read = || -> rusqlite::Result<Vec<(String, String, Vec<u8>)>> {
+        let read = || -> rusqlite::Result<Vec<StoredEntry>> {
             let mut statement = self.db.prepare(
-                "SELECT id, created_at, content FROM memory_entries WHERE kind = ?1 ORDER BY created_at, rowid",
+                "SELECT id, created_at, content, schedule FROM memory_entries WHERE kind = ?1 ORDER BY created_at, rowid",
             )?;
-            let rows = statement.query_map([kind], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            let rows = statement.query_map([kind], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?;
             rows.collect()
         };
         Ok(read()
             .map_err(|_| "MEMORY_UNAVAILABLE")?
             .into_iter()
-            .filter_map(|(id, created_at, cipher)| {
+            .filter_map(|(id, created_at, cipher, schedule)| {
                 let text = String::from_utf8(unprotect(&cipher)?).ok()?;
-                Some(MemoryEntry { id, created_at, text })
+                Some(MemoryEntry { id, created_at, text, schedule })
             })
             .collect())
     }
@@ -280,7 +362,8 @@ mod tests {
 
     #[test]
     fn notes_are_ranked_by_embeddings_or_keywords() {
-        let note = |text: &str| MemoryEntry { id: text.into(), created_at: String::new(), text: text.into() };
+        let note =
+            |text: &str| MemoryEntry { id: text.into(), created_at: String::new(), text: text.into(), schedule: None };
         let notes = vec![note("Mon chat s'appelle Zéphyrin"), note("Je préfère le thème sombre"), note("Rien")];
         let found = rank("comment s'appelle mon chat ?", notes.clone(), None, 5);
         assert_eq!(found[0].text, "Mon chat s'appelle Zéphyrin");
@@ -288,6 +371,22 @@ mod tests {
         let vectors = vec![vec![0.0, 1.0], vec![1.0, 0.0], vec![0.1, 0.9], vec![0.0, 0.0]];
         let found = rank("thème", notes, Some(&vectors), 1);
         assert_eq!(found[0].text, "Je préfère le thème sombre");
+    }
+
+    #[test]
+    fn scheduled_routines_run_once_a_day_and_reports_are_kept() {
+        let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let id = core.save_routine("Quel est l'état du PC ?").unwrap();
+        assert_eq!(core.set_routine_schedule(&id, Some("25:00")), Err("SCHEDULE_INVALID"));
+        assert!(core.take_due_routines().unwrap().is_empty(), "not scheduled");
+        core.set_routine_schedule(&id, Some("00:00")).unwrap();
+        assert_eq!(core.routines().unwrap()[0].schedule.as_deref(), Some("00:00"));
+        assert_eq!(core.take_due_routines().unwrap().len(), 1);
+        assert!(core.take_due_routines().unwrap().is_empty(), "once per day");
+        core.save_report("Tout va bien").unwrap();
+        assert_eq!(core.reports().unwrap()[0].text, "Tout va bien");
+        assert!(core.memories().unwrap().is_empty() && core.routines().unwrap().len() == 1);
+        assert!(valid_schedule("07:30") && !valid_schedule("7:30") && !valid_schedule("07:60"));
     }
 
     #[test]

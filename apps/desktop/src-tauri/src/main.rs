@@ -383,6 +383,55 @@ async fn dictate(state: State<'_, Arc<AppState>>) -> Result<String, &'static str
 }
 
 #[tauri::command]
+fn get_reports(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.reports()
+}
+
+/// Main window only: daily local time "HH:MM" of a saved request, or none.
+#[tauri::command]
+fn set_routine_schedule(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    schedule: Option<String>,
+) -> Result<(), &'static str> {
+    state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.set_routine_schedule(&id, schedule.as_deref())
+}
+
+/// Runs saved requests at their daily time: local model, Observation profile, result kept
+/// encrypted. Skipped while another task runs.
+fn run_scheduler(state: Arc<AppState>) {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        if state.task.is_running() {
+            continue;
+        }
+        let (due, model) = match state.core.lock() {
+            Ok(mut core) => (core.take_due_routines().unwrap_or_default(), core.model_preferences().local_model),
+            Err(_) => continue,
+        };
+        for routine in due {
+            let request = TaskRequest {
+                provider: aiwin11_core::task::Provider::Ollama,
+                prompt: routine.text.clone(),
+                model: model.clone(),
+                cloud_approved: false,
+                vision_model: None,
+                cloud_fallback_model: None,
+                scheduled: true,
+            };
+            let outcome = state.task.run(&state.core, state.files.as_ref(), &request, |_| {});
+            let report = match outcome {
+                Ok(outcome) => format!("« {} » : {}", routine.text, outcome.reply),
+                Err(code) => format!("« {} » : échec ({code}).", routine.text),
+            };
+            if let Ok(mut core) = state.core.lock() {
+                let _ = core.save_report(&report);
+            }
+        }
+    }
+}
+
+#[tauri::command]
 fn get_routines(state: State<'_, Arc<AppState>>) -> Result<Vec<aiwin11_core::memory::MemoryEntry>, &'static str> {
     state.core.lock().map_err(|_| "CORE_UNAVAILABLE")?.routines()
 }
@@ -562,6 +611,8 @@ fn main() {
             // Pay the bridge's first start (runtime load, antivirus scan) now, not within a
             // command's deadline. The spare process waits idle for an authorized command.
             std::thread::spawn(aiwin11_core::windows_bridge::prewarm_bridge);
+            let scheduler = Arc::clone(app.state::<Arc<AppState>>().inner());
+            std::thread::spawn(move || run_scheduler(scheduler));
             desktop_surfaces(app)?;
             Ok(())
         })
@@ -577,6 +628,8 @@ fn main() {
             get_cloud_fallback,
             get_memories,
             get_routines,
+            get_reports,
+            set_routine_schedule,
             dictate,
             set_workspace,
             get_embedding_model,

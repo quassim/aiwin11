@@ -130,24 +130,32 @@ impl Core {
                 transaction.execute_batch(include_str!("../migrations/003.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/004.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/005.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
             }
             1 => {
                 transaction.execute_batch(include_str!("../migrations/002.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/003.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/004.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/005.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
             }
             2 => {
                 transaction.execute_batch(include_str!("../migrations/003.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/004.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/005.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
             }
             3 => {
                 transaction.execute_batch(include_str!("../migrations/004.sql"))?;
                 transaction.execute_batch(include_str!("../migrations/005.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
             }
-            4 => transaction.execute_batch(include_str!("../migrations/005.sql"))?,
-            5 => {}
+            4 => {
+                transaction.execute_batch(include_str!("../migrations/005.sql"))?;
+                transaction.execute_batch(include_str!("../migrations/006.sql"))?;
+            }
+            5 => transaction.execute_batch(include_str!("../migrations/006.sql"))?,
+            6 => {}
             _ => return Err(rusqlite::Error::InvalidQuery),
         }
         let session_id = Uuid::new_v4().to_string();
@@ -779,6 +787,8 @@ mod tests {
             "memory_entries.created_at",
             "memory_entries.id",
             "memory_entries.kind",
+            "memory_entries.last_run",
+            "memory_entries.schedule",
             "events.code",
             "events.id",
             "events.kind",
@@ -878,7 +888,7 @@ mod tests {
     #[test]
     fn a_newer_database_is_rejected() {
         let db = Connection::open_in_memory().unwrap();
-        db.pragma_update(None, "user_version", 6).unwrap();
+        db.pragma_update(None, "user_version", 7).unwrap();
         assert!(Core::start(db).is_err());
     }
 
@@ -889,7 +899,7 @@ mod tests {
         db.execute("INSERT INTO sessions (id) VALUES ('old')", []).unwrap();
         let core = Core::start(db).unwrap();
         let version: u32 = core.db.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         let sessions: u32 = core.db.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0)).unwrap();
         assert_eq!(sessions, 2, "existing data is kept");
         assert_eq!(core.policy_settings(), PolicySettings::default());

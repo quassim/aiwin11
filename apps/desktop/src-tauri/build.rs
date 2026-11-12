@@ -36,6 +36,8 @@ fn main() {
         "get_cloud_fallback",
         "get_memories",
         "get_routines",
+        "get_reports",
+        "set_routine_schedule",
         "dictate",
         "set_workspace",
         "get_embedding_model",

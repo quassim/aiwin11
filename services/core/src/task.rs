@@ -54,6 +54,9 @@ pub struct TaskRequest {
     /// OpenAI model for the `local_first` fallback (see `Core::cloud_fallback_enabled`).
     #[serde(default)]
     pub cloud_fallback_model: Option<String>,
+    /// Run by the scheduler, nobody watching: local model only, Observation profile forced.
+    #[serde(default)]
+    pub scheduled: bool,
 }
 
 /// What actually happened to one action the agent asked for.
@@ -542,7 +545,15 @@ impl TaskSlot {
             record(core, task, "model.cloud.authorized")?;
         }
         // Read once: a running task keeps the settings it started with.
-        let settings = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
+        let mut settings = core.lock().map_err(|_| "CORE_UNAVAILABLE")?.policy_settings();
+        if request.scheduled {
+            if !matches!(request.provider, Provider::Ollama) {
+                return Err("SCHEDULED_LOCAL_ONLY");
+            }
+            // Nobody can approve: reads only, every side effect refused.
+            settings = PolicySettings { autonomy: crate::policy::Autonomy::Observation, simulate: settings.simulate };
+            record_code(core, task, "task.scheduled", "observation")?;
+        }
         record_code(core, task, "policy.profile", &profile_code(settings))?;
         // File contents and screen data never leave the machine: local-only tools are offered,
         // and allowed by the policy engine, only for local models.
@@ -2676,6 +2687,7 @@ mod tests {
             cloud_approved: false,
             vision_model: std::env::var("AIWIN11_TEST_VISION_MODEL").ok(),
             cloud_fallback_model: None,
+            scheduled: false,
         }
     }
 

@@ -305,6 +305,8 @@ Speech (R7, window only): replies can be read aloud with `speechSynthesis`, rest
 
 Saved requests (migration 005, `memory_entries.kind = 'routine'`, same DPAPI encryption): `save_routine { text }`, `get_routines`, deletion with `delete_memory { id }` (clearing all notes keeps routines). Picking one only fills the request field: it never runs without the user sending it.
 
+Scheduling (R8, migration 006: `schedule` "HH:MM" local time, `last_run` local day): `set_routine_schedule { id, schedule? }` (journaled `routine.schedule.changed`). While AiWin11 is open, a scheduler thread checks every 30 s and runs each due request once a day, only when no task is running, with `TaskRequest.scheduled = true`: local provider required (`SCHEDULED_LOCAL_ONLY`), Observation profile forced (`task.scheduled`), so every side effect is refused and nothing needs an approval. The reply (or error code) is stored encrypted as a `report` (50 kept), listed by `get_reports`.
+
 ## Storage invariant: nothing sensitive in SQLite
 
 Every write to `events` passes event kinds, codes and task IDs through `journal_code`: a value that is not a short machine code (ASCII letters, digits and `_.:+/-`, at most 96 bytes) is stored as `REDACTED`. The test `the_schema_only_holds_identifiers_codes_and_timestamps` lists every column of the schema with what it holds; adding a column fails it until the column is reviewed. `free_text_never_reaches_the_database_file` scans the database file for injected free text.

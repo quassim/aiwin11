@@ -114,7 +114,7 @@ Sous chaque réponse, **Lire à voix haute** utilise une voix Windows installée
 
 ### Demandes enregistrées
 
-Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ; un clic sur une demande enregistrée la remet dans le champ, tu n’as plus qu’à l’envoyer.
+Sous le champ de demande, **Enregistrer la demande** garde le texte (chiffré) ; un clic sur une demande enregistrée la remet dans le champ, tu n’as plus qu’à l’envoyer. Avec une heure et **Planifier**, AiWin11 l’exécute seul chaque jour (s’il est ouvert), avec le modèle local et en lecture seule : aucune action modifiante, aucun envoi au cloud. Les résultats s’affichent dans **Résultats des demandes planifiées**.
 
 ### Mémoire
 
