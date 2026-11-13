@@ -2226,8 +2226,12 @@ impl TaskSlot {
                 },
             ),
         };
-        let server = match lock(run.core)?.mcp_server(server_name) {
-            Ok(server) => server,
+        let configuration = {
+            let core = lock(run.core)?;
+            core.mcp_server(server_name).and_then(|server| Ok((server, core.mcp_approved_stamp(server_name)?)))
+        };
+        let (server, stamp) = match configuration {
+            Ok(configuration) => configuration,
             Err(code) => {
                 run.report(action, &summary, ActionStatus::Failed, Some(code));
                 return Ok(if code == "MCP_SERVER_CHANGED" {
@@ -2251,7 +2255,9 @@ impl TaskSlot {
         };
         let authorize = || -> Result<(), &'static str> {
             let mut core = lock(run.core)?;
-            if core.mcp_server(server_name).as_ref() != Ok(&server) {
+            if core.mcp_server(server_name).as_ref() != Ok(&server)
+                || core.mcp_approved_stamp(server_name).as_ref() != Ok(&stamp)
+            {
                 return Err("MCP_CONFIGURATION_CHANGED");
             }
             let command = core
@@ -2259,12 +2265,13 @@ impl TaskSlot {
                 .map_err(|_| "MCP_UNAVAILABLE")?;
             core.authorize_dispatch(grant, Peer::Agent, &command).map(|_| ()).map_err(|_| "MCP_ACCESS_DENIED")
         };
-        let result = match call {
-            None => authorize().and_then(|()| crate::mcp::list_tools(&server)),
-            Some((tool, arguments)) => self.dispatching(run.core, run.task, || {
-                authorize().and_then(|()| crate::mcp::call_tool(&server, tool, arguments))
-            })?,
-        };
+        let result = self.dispatching(run.core, run.task, || {
+            authorize()?;
+            match call {
+                None => crate::mcp::list_tools(&server, &stamp),
+                Some((tool, arguments)) => crate::mcp::call_tool(&server, &stamp, tool, arguments),
+            }
+        })?;
         let (status, code) = status_of(&result);
         run.report(action, &summary, status, code);
         let kind = if result.is_ok() { "mcp.request.completed" } else { "mcp.request.failed" };
@@ -2889,12 +2896,11 @@ impl TaskSlot {
             run.report(AgentAction::AnalyzeDocument, &summary, ActionStatus::Failed, Some("FILE_UNAVAILABLE"));
             return Ok(describe_read(name, Err("FILE_UNAVAILABLE")));
         };
-        let result = match files.agent_resolve_document(&*lock(run.core)?, name) {
-            Ok(path) => {
-                self.dispatching(run.core, run.task, || lock(run.core)?.agent_analyze_document(run.task, grant, &path))?
-            }
-            Err(code) => Err(code),
-        };
+        let result = self.dispatching(run.core, run.task, || {
+            let mut core = lock(run.core)?;
+            let (path, _directory, _file) = files.agent_resolve_document(&core, name)?;
+            core.agent_analyze_document(run.task, grant, &path)
+        })?;
         let (status, code) = status_of(&result);
         run.report(AgentAction::AnalyzeDocument, &summary, status, code);
         Ok(describe_read(name, result))

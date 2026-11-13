@@ -2,6 +2,14 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## Revue ciblée du broker après audit
+
+- MCP : empreinte SHA-256 des fichiers déclarés et chemins canoniques locaux, vérification au lancement sur des fichiers ouverts sans partage en écriture ni suppression. L’accord de la tâche est lié à l’empreinte approuvée. Les anciens serveurs demandent une nouvelle acceptation dans Extensions. Les dépendances chargées par le serveur et les scripts fournis autrement que par chemin absolu restent hors de cette empreinte.
+- Documents bureautiques : le contrôle du chemin final, du nombre de liens et de la taille se fait sur un handle. Le dossier et le fichier restent ouverts pendant la lecture par le pont. Le contrôle des fichiers protégés est relu après l’accord, au moment de l’exécution.
+- Pont Windows : seule la liste des écrans bénéficie d’une relance en cas d’absence de réponse ou d’expiration du premier essai, dans le délai initial. Le démarrage après une installation sur Windows vierge reste à mesurer.
+- Administration : contrôle d’activation, empreinte du binaire empaqueté et accord UAC conservés. Annulation : aucun nouvel effet après annulation, et un effet déjà engagé peut se terminer. Ces chemins conservent leurs tests existants. Une revue indépendante et les essais UAC sur machine de recette restent ouverts.
+- Validation : `verify.ps1 -Ipc -Tauri` réussi, puis 163 tests du cœur et Clippy sur les dernières régressions. Le test MCP détecte un changement de contenu à taille et date identiques. L’Inspecteur a listé les écrans au premier appel sur trois lancements de la release sur le poste de référence.
+
 ## Recette UI avec profil isolé
 
 - Mémoire de conversation validée avec Ollama local : un code synthétique est rappelé lors d’un suivi puis oublié après **Nouvelle conversation** (`-SessionMemory`). Déclencheur de dossier corrigé : l’empreinte de référence est sauvegardée lors de l’activation, pour détecter un ajout avant le premier passage du planificateur. Test Rust et recette release réussis, avec rapport visible (`-FolderTrigger`). Suites standard : 161 tests du cœur Rust et 16 tests d’interface réussis.

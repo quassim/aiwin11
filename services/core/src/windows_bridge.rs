@@ -1485,7 +1485,28 @@ pub(crate) fn dispatch(command: &Command) -> Option<BridgeReply> {
 }
 
 pub(crate) fn dispatch_once(command: &Command) -> Option<BridgeReply> {
-    dispatch_with(command, spawn_bridge)
+    dispatch_with_cold_start_retry(command, unix_millis, |command| dispatch_with(command, spawn_bridge))
+}
+
+fn dispatch_with_cold_start_retry(
+    command: &Command,
+    clock: impl Fn() -> Option<i64>,
+    mut dispatch: impl FnMut(&Command) -> Option<BridgeReply>,
+) -> Option<BridgeReply> {
+    if matches!(command.operation, Some(Operation::ListDisplays(_))) {
+        let now = clock()?;
+        let mut first = command.clone();
+        first.deadline_ms = first.deadline_ms.min(now + 6_000);
+        let reply = dispatch(&first);
+        if reply.as_ref().is_some_and(|reply| reply.status() != Status::Timeout) {
+            return reply;
+        }
+        if clock()? < command.deadline_ms {
+            return dispatch(command).or(reply);
+        }
+        return reply;
+    }
+    dispatch(command)
 }
 
 fn dispatch_with(command: &Command, spawn: impl FnOnce() -> Option<std::process::Child>) -> Option<BridgeReply> {
@@ -1580,6 +1601,36 @@ fn pipe_available(stdout: &std::process::ChildStdout) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_display_inventory_retries_a_cold_bridge_without_extending_the_deadline() {
+        let mut command = Command {
+            operation: Some(Operation::ListDisplays(Default::default())),
+            deadline_ms: 21_000,
+            ..Default::default()
+        };
+        let mut deadlines = Vec::new();
+        let reply = dispatch_with_cold_start_retry(
+            &command,
+            || Some(1_000),
+            |attempt| {
+                deadlines.push(attempt.deadline_ms);
+                (deadlines.len() == 2).then(BridgeReply::default)
+            },
+        );
+        assert!(reply.is_some());
+        assert_eq!(deadlines, [7_000, 21_000]);
+        command.operation = Some(Operation::CharacterMapDigit(Default::default()));
+        deadlines.clear();
+        dispatch_with_cold_start_retry(
+            &command,
+            || Some(1_000),
+            |attempt| {
+                deadlines.push(attempt.deadline_ms);
+                None
+            },
+        );
+        assert_eq!(deadlines, [21_000]);
+    }
     use super::*;
 
     #[test]

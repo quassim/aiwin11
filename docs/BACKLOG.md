@@ -26,11 +26,9 @@ AW-025 multi-agent (8–12); AW-026 visual workflow editor (10–15); AW-027 ima
 ## Lot sequence
 A: AW-001–005; B: AW-006–012; C: AW-013–017; D: AW-018–024; E: AW-025–032.
 
-## Status (2026-11-12)
-- Lot A (AW-001–005): done. The Windows application uses authenticated gRPC named pipes for the core session, task host, execution broker, audit journal and model gateway.
-- Lot B (AW-006–012): done and validated live with Ollama `qwen3:8b`.
-- Lot C (AW-013–017) 🧪 Terminé, test utilisateur à faire. Covers UIA inspection, local capture and vision, approved control actions with targeted Win32 fallback, file operations in authorized folders, and persistent task audit and recovery.
-- Lots D and E: not started.
+## Implementation status
+
+This backlog tracks ticket IDs, dependencies and original estimates. The [roadmap](ROADMAP.md) tracks implementation status and remaining work for all lots, including D and E, and records which scenarios have passed Windows acceptance testing.
 
 ## Definition of done
 Working code, typed contracts, documented setup, relevant tests green, verified broker enforcement and audit of all side effects. Do not represent mocks as complete Windows integration.

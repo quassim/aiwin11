@@ -176,7 +176,11 @@ impl FolderSet {
         store.agent_read(core, task, policy, file)
     }
 
-    pub fn agent_resolve_document(&self, core: &Core, name: &str) -> Result<PathBuf, &'static str> {
+    pub fn agent_resolve_document(
+        &self,
+        core: &Core,
+        name: &str,
+    ) -> Result<(PathBuf, std::fs::File, std::fs::File), &'static str> {
         let (_, store, file) = self.resolve(name)?;
         store.agent_resolve_document(core, file)
     }

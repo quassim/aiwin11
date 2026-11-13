@@ -253,11 +253,22 @@ impl LocalFiles {
     }
 
     /// Resolves and validates one Office/ODF document path inside this folder before bridge dispatch.
-    pub fn agent_resolve_document(&self, core: &Core, name: &str) -> Result<PathBuf, &'static str> {
+    pub fn agent_resolve_document(&self, core: &Core, name: &str) -> Result<(PathBuf, File, File), &'static str> {
         let protected = core.protected_files();
         Self::ensure_unprotected(&protected, &[name])?;
+        let directory = open_checked_directory(&self.root)?;
         let path = self.resolve_with(name, valid_document_name)?;
-        path.canonicalize().map_err(|_| "FILE_UNAVAILABLE")
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|_| "FILE_UNAVAILABLE")?;
+        let (path, size) = checked_file(&file, &self.root, name)?;
+        if size > 2 * 1024 * 1024 {
+            return Err("FILE_TOO_LARGE");
+        }
+        Ok((path, directory, file))
     }
 
     /// Agent tool: searches file names and contents of the folder, case-insensitively.
@@ -632,6 +643,22 @@ fn valid_trash_id(id: &str) -> bool {
 }
 
 fn read_checked_in(file: &File, directory: &Path, name: &str) -> Result<String, &'static str> {
+    let (_, size) = checked_file(file, directory, name)?;
+    if size > MAX_BYTES as u64 {
+        return Err("FILE_TOO_LARGE");
+    }
+    let mut bytes = Vec::new();
+    file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|_| "FILE_UNAVAILABLE")?;
+    if bytes.len() > MAX_BYTES {
+        return Err("FILE_TOO_LARGE");
+    }
+    if bytes.contains(&0) {
+        return Err("FILE_NOT_UTF8");
+    }
+    String::from_utf8(bytes).map_err(|_| "FILE_NOT_UTF8")
+}
+
+fn checked_file(file: &File, directory: &Path, name: &str) -> Result<(PathBuf, u64), &'static str> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
         return Err("FILE_UNAVAILABLE");
@@ -645,19 +672,7 @@ fn read_checked_in(file: &File, directory: &Path, name: &str) -> Result<String, 
         return Err("FILE_OUTSIDE_SCOPE");
     }
     let size = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
-    if size > MAX_BYTES as u64 {
-        return Err("FILE_TOO_LARGE");
-    }
-
-    let mut bytes = Vec::new();
-    file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|_| "FILE_UNAVAILABLE")?;
-    if bytes.len() > MAX_BYTES {
-        return Err("FILE_TOO_LARGE");
-    }
-    if bytes.contains(&0) {
-        return Err("FILE_NOT_UTF8");
-    }
-    String::from_utf8(bytes).map_err(|_| "FILE_NOT_UTF8")
+    Ok((path, size))
 }
 
 /// Opens a directory by handle and checks that it is a real directory (no junction or link)
@@ -764,7 +779,7 @@ fn rename_in_directory(file: &File, root: &File, destination: &str, failure: &'s
     }
 }
 
-fn final_path(file: &File) -> Result<PathBuf, &'static str> {
+pub(crate) fn final_path(file: &File) -> Result<PathBuf, &'static str> {
     let mut buffer = vec![0u16; 32768];
     let length = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), buffer.len() as u32, 0) }
         as usize;
@@ -1091,6 +1106,26 @@ mod tests {
         for path in [original, alias, outside] {
             fs::remove_file(path).unwrap();
         }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn document_handles_prevent_replacement_and_reject_hard_links() {
+        let directory = std::env::temp_dir().join(format!("aiwin11-document-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let files = LocalFiles::open(&directory).unwrap();
+        let core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
+        let document = files.root().join("report.docx");
+        fs::write(&document, "fixture").unwrap();
+        let (_, folder, file) = files.agent_resolve_document(&core, "report.docx").unwrap();
+        assert!(fs::rename(&document, files.root().join("replaced.docx")).is_err());
+        assert!(fs::write(&document, "replacement").is_err());
+        drop((folder, file));
+        let alias = files.root().join("alias.docx");
+        fs::hard_link(&document, &alias).unwrap();
+        assert!(matches!(files.agent_resolve_document(&core, "alias.docx"), Err("FILE_OUTSIDE_SCOPE")));
+        fs::remove_file(alias).unwrap();
+        fs::remove_file(document).unwrap();
         fs::remove_dir_all(directory).unwrap();
     }
 }

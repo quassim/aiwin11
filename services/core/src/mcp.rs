@@ -10,17 +10,20 @@
 
 use std::{
     collections::BTreeMap,
+    fs::{File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
-    os::windows::process::CommandExt,
-    path::Path,
+    os::windows::{fs::OpenOptionsExt, process::CommandExt},
+    path::{Component, Path, PathBuf, Prefix},
     process::{Command as Process, Stdio},
     sync::mpsc,
     thread,
-    time::{Duration, Instant, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 use crate::Core;
 
@@ -55,26 +58,61 @@ pub enum ServerState {
     Changed,
 }
 
-/// Size and last write time of a file, `None` if it is not a readable file.
-fn file_stamp(path: &Path) -> Option<String> {
-    let metadata = std::fs::metadata(path).ok().filter(std::fs::Metadata::is_file)?;
-    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos();
-    Some(format!("{}:{modified}", metadata.len()))
+pub fn fingerprint(server: &McpServer) -> Option<String> {
+    Some(VerifiedFiles::open(server).ok()?.stamp)
 }
 
-/// Fingerprint of what the server runs: its executable and every argument naming an existing
-/// file (a script run by an interpreter).
-pub fn fingerprint(server: &McpServer) -> Option<String> {
-    let mut parts = vec![file_stamp(Path::new(&server.command))?];
-    for arg in &server.args {
-        let path = Path::new(arg);
-        if path.is_absolute() {
-            if let Some(stamp) = file_stamp(path) {
-                parts.push(stamp);
+struct VerifiedFiles {
+    command: PathBuf,
+    args: Vec<std::ffi::OsString>,
+    stamp: String,
+    _handles: Vec<File>,
+}
+
+impl VerifiedFiles {
+    fn open(server: &McpServer) -> Result<Self, &'static str> {
+        let mut handles = Vec::new();
+        let mut digest = Sha256::new();
+        let mut add_file = |path: &Path| -> Result<PathBuf, &'static str> {
+            let mut file = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ)
+                .open(path)
+                .map_err(|_| "MCP_SERVER_INVALID")?;
+            let canonical = crate::local_files::final_path(&file).map_err(|_| "MCP_SERVER_INVALID")?;
+            if !matches!(canonical.components().next(), Some(Component::Prefix(prefix))
+                if matches!(prefix.kind(), Prefix::VerbatimDisk(_)))
+                || !file.metadata().map_err(|_| "MCP_SERVER_INVALID")?.is_file()
+            {
+                return Err("MCP_SERVER_INVALID");
+            }
+            use std::os::windows::ffi::OsStrExt;
+            let units: Vec<u16> = canonical.as_os_str().encode_wide().collect();
+            digest.update((units.len() as u64).to_le_bytes());
+            for unit in units {
+                digest.update(unit.to_le_bytes());
+            }
+            let mut content = Sha256::new();
+            std::io::copy(&mut file, &mut content).map_err(|_| "MCP_SERVER_INVALID")?;
+            digest.update(content.finalize());
+            handles.push(file);
+            Ok(canonical)
+        };
+        let command = add_file(Path::new(&server.command))?;
+        if !command.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+            return Err("MCP_SERVER_INVALID");
+        }
+        let mut args = Vec::with_capacity(server.args.len());
+        for arg in &server.args {
+            let path = Path::new(arg);
+            if path.is_absolute() {
+                args.push(add_file(path)?.into_os_string());
+            } else {
+                args.push(arg.into());
             }
         }
+        Ok(Self { command, args, stamp: format!("sha256:{:x}", digest.finalize()), _handles: handles })
     }
-    Some(parts.join("|"))
 }
 
 /// One server declared by the user: a fixed executable and fixed arguments, no shell.
@@ -231,6 +269,10 @@ impl Core {
             _ => Err("MCP_SERVER_CHANGED"),
         }
     }
+
+    pub fn mcp_approved_stamp(&self, name: &str) -> Result<String, &'static str> {
+        self.mcp_fingerprints().remove(name).filter(|stamp| stamp.starts_with("sha256:")).ok_or("MCP_SERVER_CHANGED")
+    }
 }
 
 fn client_info() -> Value {
@@ -367,11 +409,16 @@ impl Connection {
 /// Starts the server, opens the conversation, runs `work`, then stops the process.
 fn with_server<T>(
     server: &McpServer,
+    expected: &str,
     work: impl FnOnce(&mut Connection) -> Result<T, &'static str>,
 ) -> Result<T, &'static str> {
     server.clone().validated()?;
-    let mut process = Process::new(&server.command);
-    process.args(&server.args).env_clear();
+    let verified = VerifiedFiles::open(server).map_err(|_| "MCP_SERVER_CHANGED")?;
+    if verified.stamp != expected {
+        return Err("MCP_SERVER_CHANGED");
+    }
+    let mut process = Process::new(&verified.command);
+    process.args(&verified.args).env_clear();
     for key in ["SystemRoot", "PATH", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"] {
         if let Some(value) = std::env::var_os(key) {
             process.env(key, value);
@@ -384,6 +431,7 @@ fn with_server<T>(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| "MCP_SERVER_UNAVAILABLE")?;
+    // Keep write/delete sharing disabled until the process has finished reading its scripts.
     let outcome = (|| {
         let stdin = child.stdin.take().ok_or("MCP_SERVER_UNAVAILABLE")?;
         let stdout = child.stdout.take().ok_or("MCP_SERVER_UNAVAILABLE")?;
@@ -409,6 +457,7 @@ fn with_server<T>(
     })();
     let _ = child.kill();
     let _ = child.wait();
+    drop(verified);
     outcome
 }
 
@@ -442,8 +491,8 @@ fn format_tools(tools: &[(String, String, String)]) -> String {
 }
 
 /// Tool names and descriptions of one server, bounded, for the model.
-pub(crate) fn list_tools(server: &McpServer) -> Result<String, &'static str> {
-    with_server(server, |connection| tools_of(connection, server).map(|tools| format_tools(&tools)))
+pub(crate) fn list_tools(server: &McpServer, expected: &str) -> Result<String, &'static str> {
+    with_server(server, expected, |connection| tools_of(connection, server).map(|tools| format_tools(&tools)))
 }
 
 fn tool_text(result: &Value) -> Result<String, &'static str> {
@@ -459,18 +508,23 @@ fn tool_text(result: &Value) -> Result<String, &'static str> {
 }
 
 /// Calls one tool and returns its text content, bounded.
-pub(crate) fn call_tool(server: &McpServer, tool: &str, arguments: &Value) -> Result<String, &'static str> {
+pub(crate) fn call_tool(
+    server: &McpServer,
+    expected: &str,
+    tool: &str,
+    arguments: &Value,
+) -> Result<String, &'static str> {
     if !server.enabled || !server.permits(tool) {
         return Err("MCP_TOOL_DISABLED");
     }
-    with_server(server, |connection| {
+    with_server(server, expected, |connection| {
         tool_text(&connection.request("tools/call", json!({ "name": tool, "arguments": arguments }))?)
     })
 }
 
 /// Started by the user from the Extensions page: protocol version, identity and tools.
-pub fn probe(server: &McpServer) -> Result<ServerProbe, &'static str> {
-    with_server(server, |connection| {
+pub fn probe(server: &McpServer, expected: &str) -> Result<ServerProbe, &'static str> {
+    with_server(server, expected, |connection| {
         let tools = tools_of(connection, server)?.into_iter().map(|(name, _, _)| name).collect();
         Ok(probe_of(connection, tools))
     })
@@ -665,7 +719,7 @@ mod tests {
             enabled: true,
             allowed_tools: None,
         };
-        assert!(list_tools(&server).is_err());
+        assert!(list_tools(&server, &fingerprint(&server).unwrap()).is_err());
     }
 
     #[test]
@@ -674,9 +728,9 @@ mod tests {
         let mut server: McpServer = serde_json::from_value(legacy).unwrap();
         assert!(server.enabled && server.permits("read"));
         server.allowed_tools = Some(vec!["read".into()]);
-        assert_eq!(call_tool(&server, "write", &json!({})), Err("MCP_TOOL_DISABLED"));
+        assert_eq!(call_tool(&server, "", "write", &json!({})), Err("MCP_TOOL_DISABLED"));
         server.enabled = false;
-        assert_eq!(call_tool(&server, "read", &json!({})), Err("MCP_TOOL_DISABLED"));
+        assert_eq!(call_tool(&server, "", "read", &json!({})), Err("MCP_TOOL_DISABLED"));
     }
 }
 #[test]
@@ -709,12 +763,18 @@ fn probes_and_calls_a_read_only_mcp_process_over_stdio() {
         enabled: true,
         allowed_tools: Some(vec!["read_fixture".into()]),
     };
-    let probed = probe(&server);
-    let called = call_tool(&server, "read_fixture", &json!({}));
+    let stamp = fingerprint(&server).unwrap();
+    let probed = probe(&server, &stamp);
+    let called = call_tool(&server, &stamp, "read_fixture", &json!({}));
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, fixture.replace("MCP fixture OK", "MCP fixture NO")).unwrap();
+    File::options().write(true).open(&path).unwrap().set_modified(modified).unwrap();
+    let refused = probe(&server, &stamp);
     std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(directory).unwrap();
     let probed = probed.unwrap();
     assert_eq!(probed.server_name, "AiWin11 fixture");
     assert_eq!(probed.tools, ["read_fixture"]);
     assert_eq!(called.as_deref(), Ok("MCP fixture OK"));
+    assert_eq!(refused, Err("MCP_SERVER_CHANGED"));
 }

@@ -390,6 +390,8 @@ The main window can save, remove and check the presence of the `AiWin11/OpenAI` 
 
 ## MCP extensions (R6)
 
+The approved fingerprint uses SHA-256 over the canonical local paths and contents of the executable and absolute file arguments. Missing or nonlocal files fail validation. Legacy metadata fingerprints require explicit acceptance in Extensions. The agent binds approval to the saved fingerprint. Immediately before spawn, the client hashes opened files again and passes their canonical paths to the child, keeping write/delete sharing disabled until it exits. The fingerprint covers declared files; modules and dependencies loaded by the server are outside that set.
+
 `mcp.servers` (settings, JSON; `get_mcp_servers` / `set_mcp_servers`, journaled `settings.mcp.changed`) holds at most 5 user-declared stdio servers `{ name [A-Za-z0-9_-]{1,32}, command (absolute path to an existing file), args (≤ 16) }`. No shell: the executable is started directly, with a reduced environment (SystemRoot, PATH, USERPROFILE, APPDATA, LOCALAPPDATA, TEMP, TMP), one process per request: `initialize` (protocol `2025-06-18`), `notifications/initialized`, then one `tools/list` or `tools/call`, 60 s at most, then the process is stopped. Agent tools, local models only: `mcp_list_tools { server }` (asks in Observation and Assisted, allowed in Limited/Advanced) and `mcp_call { server, tool, arguments ≤ 4000 characters }` (critical: always asks, the approval shows the full arguments). Both pass through the broker (`McpRequest`, `Capability::McpServer`); the server's own authorization never replaces this. Results (text content, ≤ 8000 characters; tool lists ≤ 50 entries) are framed as untrusted data. Events `mcp.request.completed|failed`.
 
 ## Durable memory (R6)

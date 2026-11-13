@@ -1424,15 +1424,17 @@ async fn test_mcp_server(
 ) -> Result<aiwin11_core::mcp::ServerProbe, &'static str> {
     let state = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let server = {
+        let (server, stamp) = {
             let core = lock_core(&state.core);
             if core.mcp_server_states().get(&name) == Some(&aiwin11_core::mcp::ServerState::Changed) {
                 return Err("MCP_SERVER_CHANGED");
             }
             let _ = core.journal("mcp.server.tested", None);
-            core.mcp_servers().into_iter().find(|server| server.name == name).ok_or("MCP_SERVER_UNKNOWN")?
+            let server =
+                core.mcp_servers().into_iter().find(|server| server.name == name).ok_or("MCP_SERVER_UNKNOWN")?;
+            (server, core.mcp_approved_stamp(&name)?)
         };
-        aiwin11_core::mcp::probe(&server)
+        aiwin11_core::mcp::probe(&server, &stamp)
     })
     .await
     .map_err(|_| "MCP_SERVER_UNAVAILABLE")?
