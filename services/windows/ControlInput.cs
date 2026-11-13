@@ -20,21 +20,23 @@ internal static class ControlInput
             && rootOwner == processId && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < deadline;
 
         if (!StillTarget()) return WindowInspector.ControlResult.Unavailable;
-        var name = new StringBuilder(32);
-        if (GetClassNameW(child, name, name.Capacity) == 0)
+        char[] nameBuffer = new char[32];
+        int nameLength = GetClassNameW(child, nameBuffer, nameBuffer.Length);
+        if (nameLength == 0)
             return WindowInspector.ControlResult.Unavailable;
+        string className = new(nameBuffer, 0, nameLength);
 
         uint Remaining() => (uint)Math.Clamp(deadline - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), 0, 250);
         bool Send(uint message, nuint parameter, out nuint result) =>
             SendMessageTimeoutW(child, message, parameter, 0, TimeoutFlags, Remaining(), out result) != 0;
 
-        if (value is null && controlType == 50000 && name.ToString() == "Button" && StillTarget())
+        if (value is null && controlType == 50000 && className == "Button" && StillTarget())
         {
             // Delivery does not prove that the application performed its action.
             Send(ButtonClick, 0, out _);
             return WindowInspector.ControlResult.InputUnverified;
         }
-        if (value is null || controlType != 50004 || name.ToString() != "Edit"
+        if (value is null || controlType != 50004 || className != "Edit"
             || value.Length is < 1 or > 64 || value.Any(char.IsControl) || !IsWindowUnicode(child))
             return WindowInspector.ControlResult.Unavailable;
 
@@ -47,10 +49,10 @@ internal static class ControlInput
             if (!CanType() || !Send(Character, character, out _))
                 return WindowInspector.ControlResult.InputUnverified;
         }
-        var actual = new StringBuilder(value.Length + 2);
+        char[] actual = new char[value.Length + 2];
         return CanType()
-            && SendTextMessage(child, GetText, (nuint)actual.Capacity, actual, TimeoutFlags, Remaining(), out _) != 0
-            && actual.ToString() == value
+            && SendTextMessage(child, GetText, (nuint)actual.Length, actual, TimeoutFlags, Remaining(), out nuint copied) != 0
+            && new string(actual, 0, Math.Min((int)copied, actual.Length)).TrimEnd('\0') == value
             ? WindowInspector.ControlResult.KeyboardVerified
             : WindowInspector.ControlResult.InputUnverified;
     }
@@ -62,11 +64,11 @@ internal static class ControlInput
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", ExactSpelling = true)] private static extern int GetWindowLongW(nint window, int index);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int GetClassNameW(nint window, StringBuilder name, int capacity);
+    private static extern int GetClassNameW(nint window, [Out] char[] name, int capacity);
     [DllImport("user32.dll", ExactSpelling = true)]
     private static extern nint SendMessageTimeoutW(nint window, uint message, nuint wParam, nint lParam,
         uint flags, uint timeout, out nuint result);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern nint SendTextMessage(nint window, uint message, nuint wParam, StringBuilder lParam,
+    private static extern nint SendTextMessage(nint window, uint message, nuint wParam, [Out] char[] lParam,
         uint flags, uint timeout, out nuint result);
 }

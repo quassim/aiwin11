@@ -37,7 +37,7 @@ internal static class WindowCapture
                 return Render(screen, width, height, deadline, StillPresent,
                     memory => BitBlt(memory, 0, 0, width, height, screen, display.X, display.Y, SourceCopy));
             }
-            finally { ReleaseDC(0, screen); }
+            finally { _ = ReleaseDC(0, screen); }
         }
         finally { SetThreadDpiAwarenessContext(previousDpi); }
     }
@@ -85,7 +85,7 @@ internal static class WindowCapture
                 return Render(screen, width, height, deadline, CanCapture,
                     memory => PrintWindow(window, memory, RenderFullContent));
             }
-            finally { ReleaseDC(0, screen); }
+            finally { _ = ReleaseDC(0, screen); }
         }
         finally
         {

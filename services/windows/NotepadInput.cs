@@ -62,15 +62,16 @@ internal static class NotepadInput
 
             string expected = text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
             sent = true;
-            if (SendMessageTimeoutW(editor, SetText, 0, new StringBuilder(expected), AbortIfHung, 1000, out nuint accepted) == 0
+            char[] expectedChars = (expected + "\0").ToCharArray();
+            if (SendMessageTimeoutW(editor, SetText, 0, expectedChars, AbortIfHung, 1000, out nuint accepted) == 0
                 || accepted == 0)
             {
                 Unverified();
                 return;
             }
-            var actual = new StringBuilder(expected.Length * 2 + 16);
-            if (SendMessageTimeoutW(editor, GetText, (nuint)actual.Capacity, actual, AbortIfHung, 1000, out _) != 0
-                && Normalize(actual.ToString()) == Normalize(expected))
+            char[] actual = new char[expected.Length * 2 + 16];
+            if (SendMessageTimeoutW(editor, GetText, (nuint)actual.Length, actual, AbortIfHung, 1000, out nuint copied) != 0
+                && Normalize(new string(actual, 0, Math.Min((int)copied, actual.Length)).TrimEnd('\0')) == Normalize(expected))
             {
                 result.Status = Protocol.Result.Types.Status.Success;
                 return;
@@ -109,9 +110,10 @@ internal static class NotepadInput
         nint found = 0;
         EnumChildWindows(topLevel, (child, _) =>
         {
-            var name = new StringBuilder(32);
-            if (IsWindowVisible(child) && GetClassNameW(child, name, name.Capacity) > 0
-                && Array.IndexOf(EditorClasses, name.ToString()) >= 0
+            char[] name = new char[32];
+            int nameLength = GetClassNameW(child, name, name.Length);
+            if (IsWindowVisible(child) && nameLength > 0
+                && Array.IndexOf(EditorClasses, new string(name, 0, nameLength)) >= 0
                 && GetWindowThreadProcessId(child, out uint owner) != 0 && owner == processId)
             {
                 found = child;
@@ -128,10 +130,10 @@ internal static class NotepadInput
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int GetClassNameW(nint window, StringBuilder className, int maxCount);
+    private static extern int GetClassNameW(nint window, [Out] char[] className, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern nint SendMessageTimeoutW(
-        nint window, uint message, nuint wParam, StringBuilder lParam, uint flags, uint timeout, out nuint result);
+        nint window, uint message, nuint wParam, [In, Out] char[] lParam, uint flags, uint timeout, out nuint result);
     [DllImport("user32.dll", ExactSpelling = true)]
     private static extern nint SendMessageTimeoutW(
         nint window, uint message, nuint wParam, nint lParam, uint flags, uint timeout, out nuint result);

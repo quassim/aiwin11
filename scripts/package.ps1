@@ -1,12 +1,39 @@
 ﻿# Builds the AiWin11 Windows installer (NSIS, per-user, no administrator rights needed).
-# The installer embeds the Windows bridge, the elevated helper and the Python agent next to
-# AiWin11.exe. Pass the Python 3.13 x64 embeddable ZIP to bundle the interpreter.
-param([string]$PythonRuntimeZip, [string]$UpdatePublicKeyFile)
+# The installer embeds the Windows bridge, the elevated helper (self-contained .NET 10 by default)
+# and the Python agent next to AiWin11.exe. Pass -PythonRuntimeZip or -BundlePython to bundle
+# the Python 3.13 x64 embeddable runtime.
+param(
+    [string]$PythonRuntimeZip,
+    [switch]$BundlePython,
+    [switch]$FrameworkDependentDotnet,
+    [string]$UpdatePublicKeyFile
+)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$pythonVersion = '3.13.3'
 $pythonArchive = if ($PythonRuntimeZip) {
     (Resolve-Path -LiteralPath $PythonRuntimeZip).ProviderPath
+} elseif ($BundlePython) {
+    $toolsDir = Join-Path $root '.tools'
+    New-Item -ItemType Directory -Force $toolsDir | Out-Null
+    $cachedZip = Join-Path $toolsDir "python-${pythonVersion}-embed-amd64.zip"
+    $baseUrl = "https://www.python.org/ftp/python/${pythonVersion}/python-${pythonVersion}-embed-amd64.zip"
+    $spdx = Invoke-RestMethod -Uri "${baseUrl}.spdx.json" -UseBasicParsing
+    $expectedSha256 = ($spdx.packages | Where-Object {
+        $_.packageFileName -eq "python-${pythonVersion}-embed-amd64.zip" -and $_.downloadLocation -eq $baseUrl
+    } | Select-Object -First 1).checksums |
+        Where-Object { $_.algorithm -eq 'SHA256' } | Select-Object -ExpandProperty checksumValue -First 1
+    if ($expectedSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "Missing SHA256 checksum in Python SPDX manifest." }
+    if (-not (Test-Path -LiteralPath $cachedZip -PathType Leaf)) {
+        Invoke-WebRequest -Uri $baseUrl -OutFile $cachedZip -UseBasicParsing
+    }
+    $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $cachedZip).Hash.ToLowerInvariant()
+    if ($actualSha256 -ne $expectedSha256.ToLowerInvariant()) {
+        Remove-Item -LiteralPath $cachedZip -Force -ErrorAction SilentlyContinue
+        throw "Python runtime checksum mismatch: expected $expectedSha256, got $actualSha256"
+    }
+    $cachedZip
 }
 $updatePublicKey = if ($UpdatePublicKeyFile) {
     (Get-Content -Raw -LiteralPath $UpdatePublicKeyFile).Trim()
@@ -29,11 +56,18 @@ foreach ($directory in @((Join-Path $root 'target'), $companions)) {
 if (Test-Path -LiteralPath $companions) { Remove-Item -LiteralPath $companions -Recurse -Force }
 New-Item -ItemType Directory -Force $companions | Out-Null
 
-dotnet publish services/windows/AiWin11.Windows.csproj --configuration Release --runtime win-x64 --self-contained false --output $companions -nologo -v q
+$selfContained = if ($FrameworkDependentDotnet) { 'false' } else { 'true' }
+$singleFileArgs = @('-p:PublishSingleFile=true')
+if (-not $FrameworkDependentDotnet) {
+    $singleFileArgs += '-p:IncludeNativeLibrariesForSelfExtract=true'
+}
+
+dotnet publish services/windows/AiWin11.Windows.csproj --configuration Release --runtime win-x64 --self-contained $selfContained `
+    @singleFileArgs --output $companions -nologo -v q
 if ($LASTEXITCODE -ne 0) { throw 'Build failed: bridge' }
 # The elevated helper is one file, so its pinned SHA-256 covers all of its code.
-dotnet publish services/admin/AiWin11.Admin.csproj --configuration Release --runtime win-x64 --self-contained false `
-    -p:PublishSingleFile=true --output $companions -nologo -v q
+dotnet publish services/admin/AiWin11.Admin.csproj --configuration Release --runtime win-x64 --self-contained $selfContained `
+    @singleFileArgs --output $companions -nologo -v q
 if ($LASTEXITCODE -ne 0) { throw 'Build failed: admin helper' }
 Copy-Item -LiteralPath services/agent/agent.py -Destination (Join-Path $companions 'aiwin11_agent.py')
 if ($pythonArchive) {
@@ -75,7 +109,7 @@ if ($pythonArchive) {
     $configs += @('--config', $pythonConfig)
 }
 if ($thumbprint) {
-    $signing = Join-Path $companions 'tauri.signing.json'
+    $signing = Join-Path $root 'target\tauri.signing.json'
     "{ ""bundle"": { ""windows"": { ""certificateThumbprint"": ""$thumbprint"", ""digestAlgorithm"": ""sha256"", ""timestampUrl"": ""http://timestamp.digicert.com"" } } }" |
         Set-Content -Encoding ascii $signing
     $configs += @('--config', $signing)
@@ -105,3 +139,8 @@ if ($updatePublicKey) {
     } | ConvertTo-Json -Depth 4 | Set-Content -Encoding ascii -LiteralPath (Join-Path $bundleDirectory 'latest.json')
 }
 Get-ChildItem (Join-Path $root 'target\release\bundle\nsis') -Filter *.exe | ForEach-Object { Write-Host "Installateur : $($_.FullName)" }
+$dotnetSummary = if ($FrameworkDependentDotnet) { 'externe (.NET 10 requis)' } else { 'embarqué (autonome)' }
+$pythonSummary = if ($pythonArchive) { 'embarqué (3.13)' } else { 'détecté via PATH / AIWIN11_PYTHON' }
+$updaterSummary = if ($updatePublicKey) { 'activé (latest.json généré)' } else { 'désactivé' }
+$signSummary = if ($thumbprint) { "signé ($thumbprint)" } else { 'non signé' }
+Write-Host "Distribution : .NET $dotnetSummary · Python $pythonSummary · Mises à jour $updaterSummary · $signSummary"

@@ -359,14 +359,29 @@ impl Core {
 
     /// Sets or removes the local time and weekdays of a saved request.
     pub fn set_routine_schedule(&mut self, id: &str, schedule: Option<&str>) -> Result<(), &'static str> {
+        self.update_routine_schedule(id, schedule, None)
+    }
+
+    pub fn schedule_folder_routine(&mut self, id: &str, stamp: &str) -> Result<(), &'static str> {
+        self.update_routine_schedule(id, Some(FOLDER_TRIGGER), Some(format!("folder:{stamp}")))
+    }
+
+    fn update_routine_schedule(
+        &mut self,
+        id: &str,
+        schedule: Option<&str>,
+        marker: Option<String>,
+    ) -> Result<(), &'static str> {
         if schedule.is_some_and(|value| !valid_schedule(value)) {
             return Err("SCHEDULE_INVALID");
         }
         let changed = self
             .db
             .execute(
-                "UPDATE memory_entries SET schedule = ?2 WHERE id = ?1 AND kind = 'routine'",
-                params![id, schedule],
+                "UPDATE memory_entries SET schedule = ?2,
+                 last_run = CASE WHEN ?3 IS NOT NULL THEN ?3 WHEN last_run LIKE 'folder:%' THEN NULL ELSE last_run END
+                 WHERE id = ?1 AND kind = 'routine'",
+                params![id, schedule, marker],
             )
             .map_err(|_| "MEMORY_UNAVAILABLE")?;
         if changed == 0 {
@@ -838,6 +853,10 @@ mod tests {
         assert!(core.take_folder_routine("a").unwrap().is_none());
         assert_eq!(core.take_folder_routine("b").unwrap().unwrap().id, id);
         assert!(core.take_folder_routine("b").unwrap().is_none(), "once per change");
+        core.set_routine_schedule(&id, None).unwrap();
+        core.schedule_folder_routine(&id, "c").unwrap();
+        assert_eq!(core.take_folder_routine("d").unwrap().unwrap().id, id, "first poll sees immediate changes");
+        assert!(core.take_folder_routine("d").unwrap().is_none());
         assert!(!valid_schedule("dossier"));
     }
 

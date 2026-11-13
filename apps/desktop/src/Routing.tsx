@@ -9,10 +9,11 @@ import { placementAdvice, placementLabel, type LoadedModel } from "./placement";
 const tasks: { name: string; status: string }[] = [
   { name: "Texte et actions Windows", status: "Modèle choisi ci-dessous (local ou cloud)" },
   { name: "Vision (description de fenêtre)", status: "Modèle de vision local choisi ci-dessous" },
-  { name: "Synthèse vocale", status: "Voix Windows locale (français si installée)" },
-  { name: "Reconnaissance vocale", status: "Moteur Windows local (SAPI), bouton Dicter de l’Accueil" },
-  { name: "Génération d’images", status: "Moteur Stable Diffusion local (configuré ci-dessous)" },
+  { name: "Synthèse vocale", status: "Voix Windows locale sélectionnable ci-dessous" },
+  { name: "Reconnaissance vocale", status: "Moteur Windows local (SAPI) sélectionnable ci-dessous" },
+  { name: "Génération d’images", status: "Moteur Stable Diffusion local (AUTOMATIC1111 ou ComfyUI)" },
   { name: "Génération vidéo", status: "ComfyUI local, dans la page Vidéo" },
+  { name: "Développement et planification", status: "Modèles Ollama par agent et tâches planifiées ci-dessous" },
   { name: "Embeddings de la mémoire", status: "Modèle Ollama sélectionné dans la page Mémoire" },
 ];
 
@@ -27,6 +28,7 @@ export type AgentModels = {
   research: string;
   multimedia: string;
   readOnly: string;
+  planning: string;
 };
 type ImageBackend = "automatic1111" | "comfyUi";
 export type CloudProvider = { id: string; label: string; enabled: boolean };
@@ -38,6 +40,7 @@ const agentProfiles = [
   { key: "research", label: "Recherche" },
   { key: "multimedia", label: "Multimédia" },
   { key: "readOnly", label: "Lecture seule" },
+  { key: "planning", label: "Planification (tâches planifiées)" },
 ] as const;
 
 const strategies: { id: LocalStrategy; label: string; description: string }[] = [
@@ -121,6 +124,24 @@ export function Routing({
   const [speechStatus, setSpeechStatus] = useState("");
   const [lmModels, setLmModels] = useState<string[]>([]);
   const [lmStatus, setLmStatus] = useState("");
+  const [aiProfile, setAiProfile] = useState<{
+    strategy: LocalStrategy;
+    requireTools: boolean;
+    requireVision: boolean;
+    allowCloudFallback: boolean;
+    allowScreenUpload: boolean;
+    allowDocumentUpload: boolean;
+    taskBudgetCents: number;
+  }>({
+    strategy: strategy ?? "manual",
+    requireTools: false,
+    requireVision: false,
+    allowCloudFallback: false,
+    allowScreenUpload: false,
+    allowDocumentUpload: false,
+    taskBudgetCents: 0,
+  });
+  const [profileStatus, setProfileStatus] = useState("");
 
   function saveLocalRuntime(preferences: LocalRuntimePreferences) {
     void invoke("set_local_runtime_preferences", { preferences }).then(
@@ -181,6 +202,7 @@ export function Routing({
       onFallbackChange(enabled);
     });
     void invoke<number>("get_cloud_budget").then(setBudget);
+    void invoke<typeof aiProfile>("get_ai_profile").then(setAiProfile, () => undefined);
     void checkImageEngine();
     void refreshResources();
     void invoke<typeof speech>("get_speech_recognizers").then(setSpeech, () =>
@@ -488,6 +510,59 @@ export function Routing({
         </ul>
       )}
       {loaded && placementAdvice(loaded) && <p role="note">{placementAdvice(loaded)}</p>}
+      <h3>Profil IA et garde-fous par tâche</h3>
+      <div className="task-form">
+        {(
+          [
+            ["requireTools", "Exiger un modèle vérifié pour les outils"],
+            ["requireVision", "Exiger la prise en charge vision"],
+            ["allowCloudFallback", "Autoriser le secours cloud (hors mode privé)"],
+            ["allowScreenUpload", "Autoriser l’envoi d’écran au cloud (hors mode privé)"],
+            ["allowDocumentUpload", "Autoriser l’envoi de documents au cloud (hors mode privé)"],
+          ] as const
+        ).map(([field, label]) => (
+          <label key={field} className="approval">
+            <input
+              type="checkbox"
+              checked={aiProfile[field]}
+              onChange={(event) => {
+                const next = { ...aiProfile, strategy: strategy ?? aiProfile.strategy, [field]: event.target.checked };
+                void invoke("set_ai_profile", { profile: next }).then(
+                  () => {
+                    setAiProfile(next);
+                    setProfileStatus("Profil IA enregistré.");
+                  },
+                  (err) => setProfileStatus(`Refusé : ${String(err)}.`),
+                );
+              }}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+        <label htmlFor="task-budget-cents">Budget maximal par tâche (centimes EUR, 0 = illimité)</label>
+        <input
+          id="task-budget-cents"
+          type="number"
+          min={0}
+          max={100000}
+          value={aiProfile.taskBudgetCents}
+          onChange={(event) => {
+            const next = {
+              ...aiProfile,
+              strategy: strategy ?? aiProfile.strategy,
+              taskBudgetCents: Math.max(0, Number(event.target.value) || 0),
+            };
+            void invoke("set_ai_profile", { profile: next }).then(
+              () => {
+                setAiProfile(next);
+                setProfileStatus("Budget par tâche enregistré.");
+              },
+              (err) => setProfileStatus(`Refusé : ${String(err)}.`),
+            );
+          }}
+        />
+        <p role="status">{profileStatus}</p>
+      </div>
       <p role="status">{status}</p>
     </section>
   );

@@ -73,6 +73,8 @@ pub enum AgentAction {
     LaunchApplication,
     ListFiles,
     ReadFile,
+    AnalyzeDocument,
+    WriteFile,
     CopyFile,
     MoveFile,
     TrashFile,
@@ -85,9 +87,12 @@ pub enum AgentAction {
     WriteClipboard,
     ListWindows,
     ArrangeWindow,
+    SendKey,
+    SetSystemSetting,
     ListServices,
     AdminService,
     AdminCleanTemp,
+    AdminRestorePoint,
     ClickControl,
     SetControlValue,
     Remember,
@@ -109,6 +114,10 @@ pub enum AgentAction {
     DescribeScreen,
     /// Lists the status of the closed list of applications (read-only).
     ListApplications,
+    /// Lists connected user-facing Windows peripherals (read-only).
+    ListPeripherals,
+    /// Opens one validated https:// URL in the default browser (critical: always asks).
+    OpenUrl,
     /// Stops one listed process of the user's session (critical: always asks).
     StopProcess,
     PowerShellDiagnostic,
@@ -119,10 +128,12 @@ pub enum AgentAction {
 }
 
 impl AgentAction {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 45] = [
         Self::LaunchApplication,
         Self::ListFiles,
         Self::ReadFile,
+        Self::AnalyzeDocument,
+        Self::WriteFile,
         Self::CopyFile,
         Self::MoveFile,
         Self::TrashFile,
@@ -135,9 +146,12 @@ impl AgentAction {
         Self::WriteClipboard,
         Self::ListWindows,
         Self::ArrangeWindow,
+        Self::SendKey,
+        Self::SetSystemSetting,
         Self::ListServices,
         Self::AdminService,
         Self::AdminCleanTemp,
+        Self::AdminRestorePoint,
         Self::ClickControl,
         Self::SetControlValue,
         Self::Remember,
@@ -154,6 +168,8 @@ impl AgentAction {
         Self::InspectProcess,
         Self::DescribeScreen,
         Self::ListApplications,
+        Self::ListPeripherals,
+        Self::OpenUrl,
         Self::StopProcess,
         Self::PowerShellDiagnostic,
         Self::DescribeImage,
@@ -174,6 +190,8 @@ impl AgentAction {
             Self::LaunchApplication => "launch_application",
             Self::ListFiles => "list_files",
             Self::ReadFile => "read_file",
+            Self::AnalyzeDocument => "analyze_document",
+            Self::WriteFile => "write_file",
             Self::CopyFile => "copy_file",
             Self::MoveFile => "move_file",
             Self::TrashFile => "trash_file",
@@ -186,9 +204,12 @@ impl AgentAction {
             Self::WriteClipboard => "write_clipboard",
             Self::ListWindows => "list_windows",
             Self::ArrangeWindow => "arrange_window",
+            Self::SendKey => "send_key",
+            Self::SetSystemSetting => "set_system_setting",
             Self::ListServices => "list_services",
             Self::AdminService => "admin_service",
             Self::AdminCleanTemp => "admin_clean_temp",
+            Self::AdminRestorePoint => "admin_restore_point",
             Self::ClickControl => "click_control",
             Self::SetControlValue => "set_control_value",
             Self::Remember => "remember",
@@ -205,6 +226,8 @@ impl AgentAction {
             Self::InspectProcess => "inspect_process",
             Self::DescribeScreen => "describe_screen",
             Self::ListApplications => "list_applications",
+            Self::ListPeripherals => "list_peripherals",
+            Self::OpenUrl => "open_url",
             Self::StopProcess => "stop_process",
             Self::PowerShellDiagnostic => "run_powershell_diagnostic",
             Self::DescribeImage => "describe_image",
@@ -298,6 +321,7 @@ impl AgentProfile {
                 action,
                 A::ListFiles
                     | A::ReadFile
+                    | A::AnalyzeDocument
                     | A::SearchFiles
                     | A::Recall
                     | A::SearchMemory
@@ -320,8 +344,11 @@ impl AgentProfile {
                 action,
                 A::LaunchApplication
                     | A::ListApplications
+                    | A::OpenUrl
                     | A::ListFiles
                     | A::ReadFile
+                    | A::AnalyzeDocument
+                    | A::WriteFile
                     | A::SearchFiles
                     | A::CopyFile
                     | A::MoveFile
@@ -340,6 +367,7 @@ impl AgentProfile {
                 A::SystemStatus
                     | A::StopProcess
                     | A::ListApplications
+                    | A::ListPeripherals
                     | A::InspectProcess
                     | A::ListProcesses
                     | A::ListServices
@@ -347,6 +375,7 @@ impl AgentProfile {
                     | A::PowerShellDiagnostic
                     | A::AdminService
                     | A::AdminCleanTemp
+                    | A::AdminRestorePoint
                     | A::ListWindows
                     | A::ArrangeWindow
                     | A::InspectWindow
@@ -377,12 +406,17 @@ use Effect as E;
 
 /// Base matrix: effect of each action in each profile, before invariants.
 /// Order of columns: Observation, Assisted, Limited, Advanced.
-const MATRIX: [(AgentAction, [Effect; 4]); 38] = [
+const MATRIX: [(AgentAction, [Effect; 4]); 45] = [
     (A::GenerateVideo, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::DescribeImage, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::PowerShellDiagnostic, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::StopProcess, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListApplications, [E::Allow, E::Allow, E::Allow, E::Allow]),
+    (A::ListPeripherals, [E::Allow, E::Allow, E::Allow, E::Allow]),
+    (A::OpenUrl, [E::Deny, E::Ask, E::Ask, E::Ask]),
+    (A::WriteFile, [E::Deny, E::Ask, E::Allow, E::Allow]),
+    (A::SendKey, [E::Deny, E::Ask, E::Ask, E::Ask]),
+    (A::SetSystemSetting, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::DescribeScreen, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::InspectProcess, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::FindControl, [E::Allow, E::Allow, E::Allow, E::Allow]),
@@ -400,6 +434,7 @@ const MATRIX: [(AgentAction, [Effect; 4]); 38] = [
     (A::ClickControl, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::AdminService, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::AdminCleanTemp, [E::Deny, E::Ask, E::Ask, E::Ask]),
+    (A::AdminRestorePoint, [E::Deny, E::Ask, E::Ask, E::Ask]),
     (A::ListServices, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ListWindows, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::ArrangeWindow, [E::Deny, E::Ask, E::Allow, E::Allow]),
@@ -409,6 +444,7 @@ const MATRIX: [(AgentAction, [Effect; 4]); 38] = [
     (A::ListFiles, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ListProcesses, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::ReadFile, [E::Allow, E::Allow, E::Allow, E::Allow]),
+    (A::AnalyzeDocument, [E::Allow, E::Allow, E::Allow, E::Allow]),
     (A::InspectWindow, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::DescribeWindow, [E::Ask, E::Ask, E::Ask, E::Ask]),
     (A::LaunchApplication, [E::Deny, E::Ask, E::Allow, E::Allow]),

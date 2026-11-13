@@ -20,7 +20,7 @@ internal static class Notepad
     internal static void StartExecutable(string executable)
     {
         var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>() };
-        var commandLine = new StringBuilder($"\"{executable}\"");
+        char[] commandLine = $"\"{executable}\"\0".ToCharArray();
         if (!CreateProcessW(executable, commandLine, 0, 0, false, 0, 0,
                 Environment.SystemDirectory, ref startup, out var created))
             throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -53,9 +53,9 @@ internal static class Notepad
     internal static bool IsNotepad(Process process)
     {
         uint length = 128;
-        var family = new StringBuilder((int)length);
+        char[] family = new char[length];
         if (GetPackageFamilyName(process.SafeHandle, ref length, family) == 0)
-            return string.Equals(family.ToString(), PackageFamily, StringComparison.Ordinal);
+            return string.Equals(new string(family, 0, (int)length).TrimEnd('\0'), PackageFamily, StringComparison.Ordinal);
 
         return string.Equals(process.MainModule?.FileName, SystemNotepad, StringComparison.OrdinalIgnoreCase);
     }
@@ -64,7 +64,7 @@ internal static class Notepad
     private static extern int GetPackageFamilyName(
         Microsoft.Win32.SafeHandles.SafeProcessHandle process,
         ref uint length,
-        StringBuilder family);
+        [Out] char[] family);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo
@@ -86,7 +86,7 @@ internal static class Notepad
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateProcessW(
-        string applicationName, StringBuilder commandLine, nint processAttributes, nint threadAttributes,
+        string applicationName, [In, Out] char[] commandLine, nint processAttributes, nint threadAttributes,
         [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint creationFlags, nint environment,
         string currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
 

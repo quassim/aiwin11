@@ -42,6 +42,8 @@ if (command.SchemaVersion != 1 || !Guid.TryParseExact(command.RequestId, "D", ou
         && command.ListSpeechRecognizers is null
         && command.ListDisplays is null && command.CaptureDisplay is null && command.InspectProcess is null
         && command.ListApplications is null && command.StopProcess is null
+        && command.ListPeripherals is null && command.OpenUrl is null && command.SendKey is null
+        && command.SetSystemSetting is null && command.AnalyzeDocument is null
         && (command.LaunchApplication is null
             || (command.LaunchApplication.Application != Protocol.LaunchApplication.Types.Application.Notepad
                 && AppLauncher.Target(command.LaunchApplication.Application) is null))))
@@ -118,6 +120,73 @@ else if (command.ListApplications is not null)
 {
     result.ApplicationList = AppLauncher.Status();
     result.Status = Protocol.Result.Types.Status.Success;
+}
+else if (command.ListPeripherals is not null)
+{
+    result.PeripheralList = PeripheralsReader.Read();
+    result.Status = Protocol.Result.Types.Status.Success;
+}
+else if (command.OpenUrl is { } openUrl)
+{
+    if (!BrowserLauncher.IsAllowedHttpsUrl(openUrl.Url, out _))
+        Reject(Protocol.Result.Types.Status.Denied, "invalid_url", "Only public https:// URLs without credentials are allowed.");
+    else if (BrowserLauncher.Open(openUrl.Url))
+        result.Status = Protocol.Result.Types.Status.Success;
+    else
+        Reject(Protocol.Result.Types.Status.Failed, "open_url_failed", "Windows could not open the URL in the default browser.");
+}
+else if (command.SendKey is { } sendKey)
+{
+    switch (KeyInput.Apply(sendKey.Window, sendKey.ProcessId, sendKey.Key, command.DeadlineMs))
+    {
+        case "ok":
+            result.Status = Protocol.Result.Types.Status.Success;
+            break;
+        case "invalid_key":
+            Reject(Protocol.Result.Types.Status.Denied, "invalid_key", "Unsupported key.");
+            break;
+        case "window_changed":
+            Reject(Protocol.Result.Types.Status.Denied, "window_changed", "The window no longer belongs to that process.");
+            break;
+        case "window_elevated":
+            Reject(Protocol.Result.Types.Status.Denied, "window_elevated", "The target window runs with elevated privileges and is protected.");
+            break;
+        case "expired":
+            Reject(Protocol.Result.Types.Status.Timeout, "expired", "The command deadline expired.");
+            break;
+        default:
+            Reject(Protocol.Result.Types.Status.Failed, "send_key_failed", "Windows could not deliver the key to that window.");
+            break;
+    }
+}
+else if (command.SetSystemSetting is { } setSetting)
+{
+    switch (SystemSettingsWriter.Apply(setSetting.Setting, command.DeadlineMs))
+    {
+        case "ok":
+            result.Status = Protocol.Result.Types.Status.Success;
+            break;
+        case "invalid_setting":
+            Reject(Protocol.Result.Types.Status.Denied, "invalid_setting", "Unsupported system setting.");
+            break;
+        case "expired":
+            Reject(Protocol.Result.Types.Status.Timeout, "expired", "The command deadline expired.");
+            break;
+        default:
+            Reject(Protocol.Result.Types.Status.Failed, "set_setting_failed", "Windows could not update the personalization setting.");
+            break;
+    }
+}
+else if (command.AnalyzeDocument is { } analyzeDocument)
+{
+    var text = DocumentReader.ExtractText(analyzeDocument.Path, command.DeadlineMs);
+    if (text is null)
+        Reject(Protocol.Result.Types.Status.Failed, "document_unreadable", "The document could not be read.");
+    else
+    {
+        result.Status = Protocol.Result.Types.Status.Success;
+        result.DocumentText = text;
+    }
 }
 else if (command.InspectProcess is { } inspectProcess)
 {

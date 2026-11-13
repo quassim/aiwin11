@@ -9,6 +9,7 @@ import json
 import sys
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlparse
 
 VERSION = 2
 MAX_INPUT_BYTES = 32 * 1024
@@ -20,8 +21,8 @@ _ALIAS_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 _RESERVED = {"CON", "PRN", "AUX", "NUL"}
 
 
-def is_text_file_name(value: object) -> bool:
-    """Text file name as accepted by the host: `name.txt`, or `alias/name.txt` for an extra folder."""
+def _is_flat_file_name(value: object, extensions: tuple[str, ...]) -> bool:
+    """File name as accepted by the host: `name.ext`, or `alias/name.ext` for an extra folder."""
     if isinstance(value, str) and value.count("/") == 1:
         alias, value = value.split("/")
         if not (0 < len(alias) <= 24 and all(char in _ALIAS_CHARS for char in alias)):
@@ -32,12 +33,22 @@ def is_text_file_name(value: object) -> bool:
     upper = stem.upper()
     reserved = upper in _RESERVED or (len(upper) == 4 and upper[:3] in ("COM", "LPT") and upper[3].isdigit())
     return (
-        extension.lower() in ("txt", "md", "csv")
+        extension.lower() in extensions
         and stem != ""
         and stem == stem.strip()
         and not reserved
         and all(char in _NAME_CHARS for char in stem)
     )
+
+
+def is_text_file_name(value: object) -> bool:
+    """Text/structured file name as accepted by the host."""
+    return _is_flat_file_name(value, ("txt", "md", "csv", "json", "log", "yaml", "yml", "xml", "ini", "toml"))
+
+
+def is_document_name(value: object) -> bool:
+    """Office/ODF document name as accepted by the host."""
+    return _is_flat_file_name(value, ("docx", "xlsx", "pptx", "odt"))
 
 
 MAX_TYPED_CHARS = 2000
@@ -164,6 +175,27 @@ def is_mcp_arguments(value: object) -> bool:
     return isinstance(value, dict) and len(json.dumps(value)) <= 4000
 
 
+def is_file_content(value: object) -> bool:
+    """Non-empty UTF-8 text up to 64 KiB without NUL bytes, for new text files."""
+    return isinstance(value, str) and "\x00" not in value and 1 <= len(value.encode("utf-8")) <= 65536
+
+
+def is_https_url(value: object) -> bool:
+    """Public https:// URL without userinfo, whitespace or local/loopback host."""
+    if not isinstance(value, str) or not (10 <= len(value) <= 512):
+        return False
+    if any(ch.isspace() or ord(ch) < 32 for ch in value):
+        return False
+    parsed = urlparse(value)
+    if parsed.scheme.lower() != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return False
+    host = (parsed.hostname or "").lower()
+    blocked_hosts = {"localhost", "127.0.0.1", "::1"}
+    if not host or host in blocked_hosts or host.startswith("0.0.0.") or host.endswith((".local", ".internal")):
+        return False
+    return True
+
+
 # Tool name -> argument name -> allowed values (tuple) or validator (callable).
 # Every declared argument is required and no other argument is accepted.
 Rule = tuple[str, ...] | Callable[[object], bool]
@@ -172,6 +204,8 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "list_text_files": {},
     "search_text_files": {"query": is_search_query},
     "read_text_file": {"name": is_text_file_name},
+    "analyze_document": {"name": is_document_name},
+    "write_text_file": {"name": is_text_file_name, "content": is_file_content},
     "copy_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
     "move_text_file": {"source": is_text_file_name, "destination": is_text_file_name},
     "trash_text_file": {"name": is_text_file_name},
@@ -202,9 +236,19 @@ TOOLS: dict[str, dict[str, Rule]] = {
         "operation": ("start", "stop", "restart", "automatic", "manual", "disabled"),
     },
     "admin_clean_temp": {},
+    "admin_restore_point": {
+        "label": lambda value: (
+            isinstance(value, str) and 1 <= len(value.strip()) <= 64 and not any(ord(ch) < 32 for ch in value)
+        ),
+    },
+    "set_system_setting": {
+        "setting": ("theme_light", "theme_dark", "transparency_on", "transparency_off"),
+    },
     "find_control": {"query": is_search_query},
     "inspect_process": {"process_id": is_process_id},
     "list_applications": {},
+    "list_peripherals": {},
+    "open_url": {"url": is_https_url},
     "stop_process": {"process_id": is_stoppable_process_id},
     "click_control": {"control": is_control_number},
     "remember": {"text": is_note},
@@ -214,6 +258,25 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "arrange_window": {
         "window": is_window_number,
         "arrangement": ("focus", "minimize", "restore", "maximize", "snap_left", "snap_right", "center"),
+    },
+    "send_key": {
+        "window": is_window_number,
+        "key": (
+            "enter",
+            "escape",
+            "tab",
+            "space",
+            "up",
+            "down",
+            "left",
+            "right",
+            "ctrl+c",
+            "ctrl+v",
+            "ctrl+a",
+            "ctrl+z",
+            "ctrl+s",
+            "ctrl+f",
+        ),
     },
 }
 

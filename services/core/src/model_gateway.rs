@@ -60,13 +60,39 @@ dossier d’AiWin11 (lecture seule). Renvoie au plus 20 fichiers avec trois lign
         }));
         functions.push(json!({
             "name": "read_text_file",
-            "description": "Lit un fichier UTF-8 .txt, .md ou .csv du dossier d’AiWin11 (lecture seule, 64 Kio au plus).",
+            "description": "Lit un fichier texte UTF-8 (.txt, .md, .csv, .json, .log, .yaml, .xml, .ini, .toml) du dossier d’AiWin11 (lecture seule, 64 Kio au plus).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string", "description": "Nom exact du fichier, par exemple notes.txt" }
                 },
                 "required": ["name"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
+            "name": "analyze_document",
+            "description": "Extrait et lit le texte d’un document bureautique (.docx, .xlsx, .pptx, .odt) du dossier d’AiWin11 (lecture seule, 16 000 caractères au plus).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Nom exact du document, par exemple rapport.docx" }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
+            "name": "write_text_file",
+            "description": "Crée un nouveau fichier UTF-8 .txt, .md ou .csv (64 Kio au plus) dans le dossier d’AiWin11. \
+        Ne remplace jamais un fichier existant.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Nom du nouveau fichier, par exemple notes.md" },
+                    "content": { "type": "string", "description": "Contenu UTF-8 non vide du fichier" }
+                },
+                "required": ["name", "content"],
                 "additionalProperties": false
             }
         }));
@@ -191,6 +217,43 @@ snap_left / snap_right = moitié gauche / droite de l’écran, center = centré
             }
         }));
         functions.push(json!({
+            "name": "send_key",
+            "description": "Met au premier plan une fenêtre de la dernière liste obtenue avec list_windows dans cette \
+        demande et lui envoie une touche ou un raccourci clavier autorisé. L’utilisateur doit l’approuver.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Numéro dans la liste" },
+                    "key": {
+                        "type": "string",
+                        "enum": [
+                            "enter", "escape", "tab", "space", "up", "down", "left", "right",
+                            "ctrl+c", "ctrl+v", "ctrl+a", "ctrl+z", "ctrl+s", "ctrl+f"
+                        ],
+                        "description": "Touche ou raccourci autorisé à envoyer à la fenêtre"
+                    }
+                },
+                "required": ["window", "key"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
+            "name": "set_system_setting",
+            "description": "Modifie un réglage d’apparence Windows de l’utilisateur courant (thème clair/sombre ou transparence). L’utilisateur doit l’approuver.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "setting": {
+                        "type": "string",
+                        "enum": ["theme_light", "theme_dark", "transparency_on", "transparency_off"],
+                        "description": "Réglage à appliquer"
+                    }
+                },
+                "required": ["setting"],
+                "additionalProperties": false
+            }
+        }));
+        functions.push(json!({
             "name": "read_clipboard",
             "description": "Lit le texte actuellement dans le presse-papiers Windows (4000 caractères au plus). \
         L’utilisateur doit l’approuver à chaque fois.",
@@ -230,6 +293,19 @@ sécurité, de mise à jour et les services vitaux de Windows sont toujours refu
             "description": "Opération administrateur : supprime les fichiers temporaires de Windows de plus d’un jour \
         (C:\\Windows\\Temp). Demande l’accord de l’utilisateur puis une confirmation Windows (UAC).",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
+            "name": "admin_restore_point",
+            "description": "Opération administrateur : crée un point de restauration Windows avec un libellé court. \
+Demande l’accord de l’utilisateur puis une confirmation Windows (UAC).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "label": { "type": "string", "description": "Libellé court du point de restauration (64 caractères au plus)" }
+                },
+                "required": ["label"],
+                "additionalProperties": false
+            }
         }));
         functions.push(json!({
             "name": "run_diagnostic",
@@ -352,6 +428,23 @@ nom, identifiant, mémoire utilisée, temps processeur cumulé, présence d’un
 (Bloc-notes, Table des caractères, Paint) : installée ou non, interdite ou non par l’utilisateur, et combien de \
 processus et de fenêtres sont déjà ouverts. N’ouvre ni ne ferme rien.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
+            "name": "list_peripherals",
+            "description": "Liste, en lecture seule, les périphériques connectés (audio, imprimantes, caméras, \
+        écrans, Bluetooth et entrée USB/HID) avec leur catégorie et leur état. Ne modifie rien.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }));
+        functions.push(json!({
+            "name": "open_url",
+            "description": "Ouvre une URL publique https:// dans le navigateur par défaut de Windows, après accord \
+        de l’utilisateur. Refuse http://, file://, les adresses locales et les identifiants dans l’URL.",
+            "parameters": {
+                "type": "object",
+                "properties": { "url": { "type": "string", "minLength": 10, "maxLength": 512 } },
+                "required": ["url"],
+                "additionalProperties": false
+            }
         }));
         functions.push(json!({
             "name": "inspect_process",
@@ -1427,6 +1520,8 @@ mod tests {
                 "list_text_files",
                 "search_text_files",
                 "read_text_file",
+                "analyze_document",
+                "write_text_file",
                 "copy_text_file",
                 "move_text_file",
                 "organize_files",
@@ -1436,10 +1531,13 @@ mod tests {
                 "recall",
                 "list_windows",
                 "arrange_window",
+                "send_key",
+                "set_system_setting",
                 "read_clipboard",
                 "write_clipboard",
                 "admin_service",
                 "admin_clean_temp",
+                "admin_restore_point",
                 "run_diagnostic",
                 "run_powershell_diagnostic",
                 "delegate",
@@ -1452,6 +1550,8 @@ mod tests {
                 "list_processes",
                 "stop_process",
                 "list_applications",
+                "list_peripherals",
+                "open_url",
                 "inspect_process",
                 "inspect_window",
                 "find_control",
@@ -1472,10 +1572,13 @@ mod tests {
                 "recall",
                 "list_windows",
                 "arrange_window",
+                "send_key",
+                "set_system_setting",
                 "read_clipboard",
                 "write_clipboard",
                 "admin_service",
                 "admin_clean_temp",
+                "admin_restore_point",
                 "run_diagnostic",
                 "run_powershell_diagnostic",
                 "delegate",
@@ -1488,6 +1591,8 @@ mod tests {
                 "list_processes",
                 "stop_process",
                 "list_applications",
+                "list_peripherals",
+                "open_url",
                 "inspect_process",
                 "inspect_window",
                 "find_control",

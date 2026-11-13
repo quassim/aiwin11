@@ -92,6 +92,7 @@ type ApprovalAction =
   | { kind: "launch"; application: "notepad" | "charmap" | "paint" }
   | { kind: "listFiles" }
   | { kind: "readFile"; name: string }
+  | { kind: "writeFile"; name: string; characters: number; content: string }
   | { kind: "searchFiles"; query: string }
   | { kind: "copyFile"; source: string; destination: string; characters: number }
   | { kind: "moveFile"; source: string; destination: string; characters: number }
@@ -103,6 +104,8 @@ type ApprovalAction =
   | { kind: "inspectProcess"; name: string; process_id: number }
   | { kind: "describeScreen"; model: string }
   | { kind: "listApplications" }
+  | { kind: "listPeripherals" }
+  | { kind: "openUrl"; url: string }
   | { kind: "stopProcess"; name: string; process_id: number }
   | { kind: "systemStatus" }
   | { kind: "readClipboard" }
@@ -123,7 +126,10 @@ type ApprovalAction =
   | { kind: "setControlValue"; application: string; title: string; control: string; text: string }
   | { kind: "adminService"; service: string; operation: string }
   | { kind: "adminCleanTemp" }
-  | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement };
+  | { kind: "adminRestorePoint"; label: string }
+  | { kind: "arrangeWindow"; application: string; title: string; arrangement: Arrangement }
+  | { kind: "sendKey"; application: string; title: string; key: string }
+  | { kind: "setSystemSetting"; setting: string };
 type Arrangement = "focus" | "minimize" | "restore" | "maximize" | "snap_left" | "snap_right" | "center";
 const arrangementNames: Record<Arrangement, string> = {
   focus: "mettre au premier plan",
@@ -287,6 +293,24 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       detail: `Fenêtre : « ${action.title} » (application ${action.application}). Elle n’est jamais fermée.`,
     };
   }
+  if (action.kind === "sendKey") {
+    return {
+      title: `L’agent propose d’envoyer « ${action.key} » à une fenêtre`,
+      detail: `Fenêtre : « ${action.title} » (application ${action.application}). Elle sera mise au premier plan.`,
+    };
+  }
+  if (action.kind === "setSystemSetting") {
+    return {
+      title: "L’agent propose de modifier un réglage d’apparence Windows",
+      detail: `Réglage : ${action.setting} (utilisateur courant, réversible).`,
+    };
+  }
+  if (action.kind === "adminRestorePoint") {
+    return {
+      title: "L’agent propose de créer un point de restauration Windows (administrateur)",
+      detail: `Libellé : « ${action.label} ». Demande aussi une confirmation Windows (UAC).`,
+    };
+  }
   if (action.kind === "readClipboard") {
     return {
       title: "L’agent demande à lire ton presse-papiers",
@@ -300,6 +324,13 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       title: "L’agent propose de copier un texte dans le presse-papiers",
       detail: `Action : remplacer le contenu du presse-papiers par ce texte (${action.characters} caractères). L’ancien contenu sera perdu.`,
       quote: action.text,
+    };
+  }
+  if (action.kind === "writeFile") {
+    return {
+      title: `L’agent propose de créer « ${action.name} »`,
+      detail: `Action : créer un nouveau fichier texte (${action.characters} caractères). Aucun fichier existant n’est remplacé.`,
+      quote: action.content,
     };
   }
   if (action.kind === "systemStatus") {
@@ -319,6 +350,18 @@ function describeApproval(action: ApprovalAction): { title: string; detail: stri
       title: "L’agent demande à lister les applications qu’il peut ouvrir",
       detail:
         "Action : vérifier si le Bloc-notes, la Table des caractères et Paint sont installés et ouverts. Rien n’est ouvert ni fermé.",
+    };
+  }
+  if (action.kind === "listPeripherals") {
+    return {
+      title: "L’agent demande à lister les périphériques connectés",
+      detail: "Action en lecture seule : lire le nom, la catégorie et l’état des périphériques Windows.",
+    };
+  }
+  if (action.kind === "openUrl") {
+    return {
+      title: "L’agent propose d’ouvrir un lien dans le navigateur",
+      detail: `URL : ${action.url}`,
     };
   }
   if (action.kind === "describeScreen") {
@@ -583,6 +626,7 @@ const taskErrors: Record<string, string> = {
   CLOUD_BUDGET_EXCEEDED: "Le budget de jetons cloud de cette demande est atteint (page Modèles).",
   CLOUD_COST_EXCEEDED: "Le coût maximal fixé pour cette demande cloud est atteint (page Modèles).",
   AGENT_TIME_LIMIT: "La demande a dépassé 15 minutes : elle a été arrêtée.",
+  AGENT_TOOL_LIMIT: "La demande a dépassé la limite de 50 appels d’outils : elle a été arrêtée.",
   PRIVATE_MODE: "Le mode privé est activé (page Sécurité) : aucune requête n’est envoyée au cloud.",
   CLOUD_REQUEST_FAILED: "La requête cloud a échoué. Vérifie la clé, l’accès au modèle et la connexion.",
   CLOUD_PROPOSAL_INVALID: "Le modèle cloud n’a renvoyé ni réponse complète ni appel d’outil valide.",
@@ -663,7 +707,7 @@ function App() {
   const refreshContext = () =>
     void invoke<number>("session_context_size").then(setContextSize, () => setContextSize(0));
   const [floating, setFloating] = useState(false);
-  const [agent, setAgent] = useState<"general" | keyof AgentModels>("general");
+  const [agent, setAgent] = useState<"general" | Exclude<keyof AgentModels, "planning">>("general");
   const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
   const [customAgent, setCustomAgent] = useState("");
   useEffect(() => {
@@ -737,14 +781,20 @@ function App() {
       setDictationStatus(text ? `Entendu : « ${text} »` : "");
     } catch (failure) {
       setDictationStatus(dictationErrors[String(failure)] ?? "La dictée a échoué.");
+      setLiveVoice(false);
     } finally {
       setDictating(false);
     }
     if (text) {
       setPrompt(text);
       await runTask(text, true);
+    } else {
+      setLiveVoice(false);
     }
   }
+  const [liveVoice, setLiveVoice] = useState(false);
+  const liveVoiceRef = useRef(false);
+  liveVoiceRef.current = liveVoice;
   const voiceRequestRef = useRef(voiceRequest);
   voiceRequestRef.current = voiceRequest;
 
@@ -1100,7 +1150,12 @@ function App() {
         progress,
       });
       setAgentReply(outcome.reply);
-      if (speakReply || autoSpeak()) speak(outcome.reply);
+      if (speakReply || autoSpeak() || liveVoiceRef.current) {
+        const spoken = speak(outcome.reply, () => {
+          if (liveVoiceRef.current) void voiceRequestRef.current();
+        });
+        if (!spoken && liveVoiceRef.current) setLiveVoice(false);
+      }
       setActionReports(outcome.actions);
       setTaskStatus("");
       setPrompt("");
@@ -1445,6 +1500,22 @@ function App() {
                 >
                   🎙 Demande vocale
                 </button>
+                <button
+                  type="button"
+                  aria-pressed={liveVoice}
+                  disabled={!canVoice && !liveVoice}
+                  onClick={() => {
+                    if (liveVoice) {
+                      setLiveVoice(false);
+                      window.speechSynthesis?.cancel();
+                    } else {
+                      setLiveVoice(true);
+                      void voiceRequest();
+                    }
+                  }}
+                >
+                  {liveVoice ? "Arrêter le mode vocal continu" : "Conversation vocale continue"}
+                </button>
                 {running && (
                   <button type="button" aria-pressed={pauseState !== ""} onClick={() => void togglePause()}>
                     {pauseState === "" ? "Pause" : "Reprendre"}
@@ -1496,6 +1567,15 @@ function App() {
             onModels={() => navigate("Modèles")}
             onSecurity={() => navigate("Sécurité")}
             onActivity={() => navigate("Activité")}
+            onDiagnoseSlowPc={() => {
+              setAgent("windowsAdmin");
+              setPrompt(
+                "Mon PC est lent. Suis ce plan : 1) Examine en lecture seule l’état système (CPU, mémoire, disques), les processus et les services. 2) Identifie les causes possibles et propose les actions sûres (ex. nettoyer les fichiers temporaires) puis demande mon accord pour toute action sensible (arrêt de processus ou service). 3) Vérifie l’état après action et rédige un rapport final clair.",
+              );
+              resetApproval();
+              navigate("Accueil");
+              setTimeout(() => document.getElementById("prompt")?.focus(), 0);
+            }}
           />
         )}
         {page === "Modèles" && (

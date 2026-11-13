@@ -6,6 +6,7 @@ type ServerState = "ready" | "disabled" | "changed";
 type ServerProbe = { protocolVersion: string; serverName: string; serverVersion: string; tools: string[] };
 
 const probeErrors: Record<string, string> = {
+  MCP_SERVER_CHANGED: "Le serveur a changé. Accepte la nouvelle version avant de le tester.",
   MCP_SERVER_UNKNOWN: "Enregistre d’abord cette extension.",
   MCP_SERVER_INVALID: "L’exécutable est introuvable ou invalide.",
   MCP_SERVER_UNAVAILABLE: "Le serveur n’a pas pu être démarré.",
@@ -54,6 +55,7 @@ export function Extensions() {
       setProbes((current) => ({ ...current, [name]: `${identity}, MCP ${probe.protocolVersion}. Outils : ${tools}.` }));
     } catch (code) {
       setProbes((current) => ({ ...current, [name]: probeErrors[String(code)] ?? "Le test a échoué." }));
+      if (code === "MCP_SERVER_CHANGED") loadStates();
     }
   }
 

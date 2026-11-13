@@ -35,6 +35,7 @@ export const toolCallingLabels: Record<ToolCalling, string> = {
 
 export function ModelProbe({ model, disabled }: { model: string; disabled: boolean }) {
   const [busy, setBusy] = useState(false);
+  const [benchmarkProgress, setBenchmarkProgress] = useState("");
   const [result, setResult] = useState<Probe>();
   const [error, setError] = useState("");
   const [manifests, setManifests] = useState<Manifest[]>([]);
@@ -53,6 +54,7 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
 
   async function testModel() {
     setBusy(true);
+    setBenchmarkProgress("");
     setError("");
     setResult(undefined);
     try {
@@ -65,13 +67,41 @@ export function ModelProbe({ model, disabled }: { model: string; disabled: boole
     }
   }
 
+  async function runBenchmark() {
+    const names = Array.from(new Set([model, ...manifests.map((item) => item.name)].filter(Boolean)));
+    if (names.length === 0) return;
+    setBusy(true);
+    setError("");
+    setResult(undefined);
+    try {
+      for (let index = 0; index < names.length; index += 1) {
+        setBenchmarkProgress(`Banc de performance : ${names[index]} (${index + 1}/${names.length})…`);
+        setResult(await invoke<Probe>("probe_local_model", { model: names[index] }));
+      }
+      setBenchmarkProgress(`Banc de performance terminé (${names.length} modèles mesurés).`);
+    } catch {
+      setError("Le banc de performance a été interrompu. Vérifie qu’Ollama est accessible.");
+    } finally {
+      setBusy(false);
+      void loadManifests();
+    }
+  }
+
   return (
     <div>
       <button type="button" disabled={disabled || busy || !model} onClick={() => void testModel()}>
         Tester le modèle local
       </button>
+      <button
+        type="button"
+        disabled={disabled || busy || (!model && manifests.length === 0)}
+        onClick={() => void runBenchmark()}
+      >
+        Banc de performance
+      </button>
       <div role="status">
-        {busy && <p>Test en cours…</p>}
+        {busy && <p>{benchmarkProgress || "Test en cours…"}</p>}
+        {!busy && benchmarkProgress && <p>{benchmarkProgress}</p>}
         {error && <p>{error}</p>}
         {result && (
           <ul>

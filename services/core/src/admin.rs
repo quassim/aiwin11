@@ -132,6 +132,16 @@ impl Core {
                 format!("service {} {}", service_action_code(action), request.service)
             }
             Operation::AdminCleanTemp(_) => "clean-temp".to_owned(),
+            Operation::AdminRestorePoint(request) => {
+                let label = request.label.trim();
+                if label.is_empty()
+                    || label.chars().count() > 64
+                    || label.chars().any(|ch| ch.is_control() || ch == '"')
+                {
+                    return Err("ADMIN_INVALID");
+                }
+                format!("restore-point \"{label}\"")
+            }
             _ => return Err("ADMIN_INVALID"),
         };
         let command = self.agent_command(task, operation).map_err(|_| "ADMIN_FAILED")?;

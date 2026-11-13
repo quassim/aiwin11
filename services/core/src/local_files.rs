@@ -12,7 +12,7 @@ use std::{
 
 use aiwin11_contracts::v1::{
     command::Operation, CopyLocalText, DeleteLocalText, ListLocalText, ListTrash, MoveLocalText, PreviewLocalText,
-    RestoreLocalText, TrashLocalText,
+    RestoreLocalText, TrashLocalText, WriteLocalText,
 };
 use windows_sys::Wdk::{
     Foundation::OBJECT_ATTRIBUTES,
@@ -252,6 +252,14 @@ impl LocalFiles {
         })
     }
 
+    /// Resolves and validates one Office/ODF document path inside this folder before bridge dispatch.
+    pub fn agent_resolve_document(&self, core: &Core, name: &str) -> Result<PathBuf, &'static str> {
+        let protected = core.protected_files();
+        Self::ensure_unprotected(&protected, &[name])?;
+        let path = self.resolve_with(name, valid_document_name)?;
+        path.canonicalize().map_err(|_| "FILE_UNAVAILABLE")
+    }
+
     /// Agent tool: searches file names and contents of the folder, case-insensitively.
     /// Read-only, under the same `FileRead` grant as `agent_read`; files that cannot be read
     /// (too large, not UTF-8, links) are skipped. The query is never journaled.
@@ -339,6 +347,23 @@ impl LocalFiles {
         self.observe(core, &command, policy, "file.copy", || {
             Self::ensure_unprotected(&protected, &[source, destination])?;
             self.copy_text(source, destination)
+        })
+    }
+
+    pub fn agent_write(
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        name: &str,
+        content: &str,
+    ) -> Result<(), &'static str> {
+        let command =
+            core.agent_command(task, Operation::WriteLocalText(WriteLocalText {})).map_err(|_| "FILE_UNAVAILABLE")?;
+        let protected = core.protected_files();
+        self.observe(core, &command, policy, "file.write", || {
+            Self::ensure_unprotected(&protected, &[name])?;
+            self.write_text(name, content)
         })
     }
 
@@ -513,14 +538,36 @@ impl LocalFiles {
         }
         let root = self.open_root()?;
         let text = self.read(self.resolve(name)?, name)?;
-        let mut staging = create_staging(&root)?;
+        self.publish_bytes(&root, destination, text.as_bytes(), "FILE_COPY_FAILED", "FILE_COPY_CLEANUP_FAILED")
+    }
+
+    fn write_text(&self, name: &str, content: &str) -> Result<(), &'static str> {
+        if !valid_name(name) {
+            return Err("INVALID_FILE_NAME");
+        }
+        if content.is_empty() || content.len() > MAX_BYTES || content.contains('\0') {
+            return Err("INVALID_FILE_CONTENT");
+        }
+        let root = self.open_root()?;
+        self.publish_bytes(&root, name, content.as_bytes(), "FILE_WRITE_FAILED", "FILE_WRITE_CLEANUP_FAILED")
+    }
+
+    fn publish_bytes(
+        &self,
+        root: &File,
+        destination: &str,
+        bytes: &[u8],
+        fail_code: &'static str,
+        cleanup_code: &'static str,
+    ) -> Result<(), &'static str> {
+        let mut staging = create_staging(root)?;
         let result = staging
-            .write_all(text.as_bytes())
+            .write_all(bytes)
             .and_then(|()| staging.sync_all())
-            .map_err(|_| "FILE_COPY_FAILED")
-            .and_then(|()| rename_in_directory(&staging, &root, destination, "FILE_COPY_FAILED"));
+            .map_err(|_| fail_code)
+            .and_then(|()| rename_in_directory(&staging, root, destination, fail_code));
         if result.is_err() && !mark_for_deletion(&staging) {
-            return Err("FILE_COPY_CLEANUP_FAILED");
+            return Err(cleanup_code);
         }
         result
     }
@@ -544,7 +591,11 @@ impl LocalFiles {
     }
 
     fn resolve(&self, name: &str) -> Result<PathBuf, &'static str> {
-        if !valid_name(name) {
+        self.resolve_with(name, valid_name)
+    }
+
+    fn resolve_with(&self, name: &str, validator: fn(&str) -> bool) -> Result<PathBuf, &'static str> {
+        if !validator(name) {
             return Err("INVALID_FILE_NAME");
         }
         let path = self.root.join(name);
@@ -723,7 +774,7 @@ fn final_path(file: &File) -> Result<PathBuf, &'static str> {
     Ok(PathBuf::from(OsString::from_wide(&buffer[..length])))
 }
 
-fn valid_name(name: &str) -> bool {
+fn valid_name_with_extensions(name: &str, extensions: &[&str]) -> bool {
     let Some((stem, extension)) = name.rsplit_once('.') else { return false };
     let uppercase = stem.to_ascii_uppercase();
     let reserved = matches!(uppercase.as_str(), "CON" | "PRN" | "AUX" | "NUL")
@@ -731,11 +782,19 @@ fn valid_name(name: &str) -> bool {
             && (uppercase.starts_with("COM") || uppercase.starts_with("LPT"))
             && uppercase.as_bytes()[3].is_ascii_digit());
     name.len() <= MAX_NAME
-        && ["txt", "md", "csv"].iter().any(|supported| extension.eq_ignore_ascii_case(supported))
+        && extensions.iter().any(|supported| extension.eq_ignore_ascii_case(supported))
         && !stem.is_empty()
         && stem == stem.trim()
         && !reserved
         && stem.bytes().all(|byte| byte.is_ascii_alphanumeric() || b" -_".contains(&byte))
+}
+
+fn valid_name(name: &str) -> bool {
+    valid_name_with_extensions(name, &["txt", "md", "csv", "json", "log", "yaml", "yml", "xml", "ini", "toml"])
+}
+
+fn valid_document_name(name: &str) -> bool {
+    valid_name_with_extensions(name, &["docx", "xlsx", "pptx", "odt"])
 }
 
 #[cfg(test)]
@@ -764,6 +823,12 @@ mod tests {
         assert!(valid_name("Notes 1.TXT"));
         assert!(valid_name("Notes 1.MD"));
         assert!(valid_name("Tableau.CSV"));
+        assert!(valid_name("config.json"));
+        assert!(valid_name("journal.log"));
+        assert!(valid_name("reglages.yaml"));
+        assert!(valid_name("reglages.toml"));
+        assert!(valid_name("doc.xml"));
+        assert!(valid_name("app.ini"));
         for name in ["../x.txt", "C:\\x.txt", "x.txt:stream", "dir/x.txt", "NUL.txt", "COM1.txt", "x.txt ", "x..txt"] {
             assert!(!valid_name(name), "{name}");
         }

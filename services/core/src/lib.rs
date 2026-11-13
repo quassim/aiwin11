@@ -22,6 +22,7 @@ pub mod task;
 pub mod video;
 #[cfg(windows)]
 pub mod windows_bridge;
+pub mod yaml_config;
 
 use std::{path::Path, time::Duration};
 
@@ -56,6 +57,7 @@ pub struct AgentModels {
     pub research: String,
     pub multimedia: String,
     pub read_only: String,
+    pub planning: String,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -63,6 +65,18 @@ pub struct AgentModels {
 pub struct LocalRuntimePreferences {
     pub runtime: model_gateway::LocalRuntime,
     pub lm_studio_model: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct AiProfile {
+    pub strategy: LocalStrategy,
+    pub require_tools: bool,
+    pub require_vision: bool,
+    pub allow_cloud_fallback: bool,
+    pub allow_screen_upload: bool,
+    pub allow_document_upload: bool,
+    pub task_budget_cents: u32,
 }
 
 impl AgentModels {
@@ -77,6 +91,10 @@ impl AgentModels {
             policy::AgentProfile::ReadOnly => self.read_only.as_str(),
         };
         valid_model_name(model).then_some(model)
+    }
+
+    pub fn planning_model(&self) -> Option<&str> {
+        valid_model_name(&self.planning).then_some(self.planning.as_str())
     }
 }
 
@@ -585,6 +603,7 @@ impl Core {
             &models.research,
             &models.multimedia,
             &models.read_only,
+            &models.planning,
         ]
         .into_iter()
         .any(|model| !model.is_empty() && !valid_model_name(model))
@@ -760,6 +779,47 @@ impl Core {
             }
             _ => LocalStrategy::Manual,
         }
+    }
+
+    /// Reads the structured AI profile (capabilities, upload guards and per-task budget).
+    pub fn ai_profile(&self) -> AiProfile {
+        let mut profile = self
+            .setting("routing.ai_profile")
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<AiProfile>(&raw).ok())
+            .unwrap_or_default();
+        profile.strategy = self.local_strategy();
+        if self.private_mode() {
+            profile.allow_cloud_fallback = false;
+            profile.allow_screen_upload = false;
+            profile.allow_document_upload = false;
+        }
+        profile
+    }
+
+    /// Saves the structured AI profile; private mode always forces cloud/upload flags off.
+    pub fn set_ai_profile(&mut self, mut profile: AiProfile) -> Result<(), &'static str> {
+        if self.private_mode()
+            && (profile.allow_cloud_fallback || profile.allow_screen_upload || profile.allow_document_upload)
+        {
+            return Err("PRIVATE_MODE_ACTIVE");
+        }
+        if profile.task_budget_cents > 100_000 {
+            return Err("AI_PROFILE_INVALID");
+        }
+        self.set_local_strategy(profile.strategy)?;
+        profile.strategy = self.local_strategy();
+        let json = serde_json::to_string(&profile).map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        self.db
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('routing.ai_profile', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                [json],
+            )
+            .map_err(|_| "SETTINGS_UNAVAILABLE")?;
+        Ok(())
     }
 
     /// Stores the local routing strategy and journals the change (strategy code only).
@@ -1784,8 +1844,14 @@ mod tests {
     #[test]
     fn local_profiles_and_provider_capabilities_are_scoped() {
         let mut core = Core::start(Connection::open_in_memory().unwrap()).unwrap();
-        core.set_agent_models(AgentModels { office: "local:office".into(), ..Default::default() }).unwrap();
+        core.set_agent_models(AgentModels {
+            office: "local:office".into(),
+            planning: "local:planner".into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert_eq!(core.agent_models().for_profile(policy::AgentProfile::Office), Some("local:office"));
+        assert_eq!(core.agent_models().planning_model(), Some("local:planner"));
         assert_eq!(core.agent_models().for_profile(policy::AgentProfile::General), None);
         assert_eq!(
             core.set_agent_models(AgentModels { office: "not a model".into(), ..Default::default() }),

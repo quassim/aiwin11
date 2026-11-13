@@ -2,6 +2,104 @@
 
 Une entrée par session de travail, la plus récente en haut. Chaque session lit ce journal et `docs/ROADMAP.md` avant de commencer.
 
+## Recette UI avec profil isolé
+
+- Mémoire de conversation validée avec Ollama local : un code synthétique est rappelé lors d’un suivi puis oublié après **Nouvelle conversation** (`-SessionMemory`). Déclencheur de dossier corrigé : l’empreinte de référence est sauvegardée lors de l’activation, pour détecter un ajout avant le premier passage du planificateur. Test Rust et recette release réussis, avec rapport visible (`-FolderTrigger`). Suites standard : 161 tests du cœur Rust et 16 tests d’interface réussis.
+
+- MCP validé dans la release avec Ollama local et un serveur stdio de recette. Sonde (version et outil), liste et appel avec accord confirmés. Correction du bouton **Tester**, qui refuse maintenant de lancer un serveur modifié et actualise l’état pour afficher **Accepter la nouvelle version**. Nouvelle sonde validée après acceptation.
+
+- Diagnostic PowerShell prédéfini de l’édition et du build Windows validé avec Ollama local. Les deux scénarios de la release vérifient dans le journal l’exécution après accord et l’absence d’exécution après refus (`-PowerShellDiagnostic Approve|Decline`).
+
+- Mémoire : indexation, recherche par contenu et retrait d’un extrait synthétique validés dans la release (`scripts/smoke-desktop.ps1 -MemoryIndex`). Workflows : deux étapes terminées et une condition non satisfaite dans une demande locale soumise depuis l’interface (`-WorkflowCondition`). La recherche sémantique par l’agent, la nouvelle tentative sur erreur et le déclenchement sur changement de dossier restent à valider.
+
+- Suite de la recette : mode simple/expert, fenêtre flottante et actualisation du tableau de bord validés. Ctrl+Alt+Retour arrière annule une tâche en attente d’accord sans exécuter l’action, comme le confirme le journal. L’arrêt pendant une action déjà engagée reste à essayer.
+
+- Release compilée avec l’identifiant `app.aiwin11.recette`. Ollama strictement local, sans changement du profil courant. Écrans retournés par le broker, ouverture du Bloc-notes approuvée et auditée, refus sans exécution et arrêt pendant une approbation validés. UI Automation confirme le focus du lien d’évitement et du bouton de refus. Les annonces par lecteur d’écran restent à écouter.
+- Palette (raccourci, Échap, transfert de brouillon) à 40 ms au p95 sur 22 ouvertures. Catalogue SAPI validé, sans ouverture du microphone.
+
+## 2026-11-13, recette utilisateur locale
+
+- Ollama portable lancé en mode strictement local avec les modèles déjà installés. 21 des 23 essais interactifs ont réussi, dont le lancement approuvé du Bloc-notes, les opérations sur fichiers de test, le diagnostic système et la liste des écrans. Les deux essais ciblant la Table des caractères ont refusé l’inspection quand une autre fenêtre est passée devant. Le test de l’interface a été interrompu avant l’envoi, car le fournisseur sélectionné dans le profil courant était cloud.
+- MCP : sonde et appel en lecture seule réussis sur un processus Python local de test via stdio. Test reproductible avec `cargo test --locked -p aiwin11-core probes_and_calls_a_read_only_mcp_process_over_stdio -- --ignored` après avoir renseigné `AIWIN11_PYTHON`. La recette dans l’interface avec un serveur configuré reste à faire.
+- 161 tests Rust du cœur et 11 tests gRPC réussis. Le micro, les moteurs de génération image/vidéo, la mémoire avec embeddings et la recette interactive des workflows et agents personnalisés restent à essayer.
+
+## 2026-11-13, recette de l’installateur
+
+- Installation NSIS dans un dossier de test sur le poste Windows de référence. Python embarqué 3.13.3 avec SQLite, premier inventaire des écrans via le broker, catalogue SAPI et palette validés sur l’exécutable installé. Palette à 38 ms au p95 sur 22 ouvertures. Désinstallation vérifiée, données applicatives conservées.
+- L’inventaire d’écrans dispose de 20 s pour inclure le démarrage du pont autonome et d’une réponse bornée à 16 Kio. Le journal distingue un délai signalé par le pont d’une absence de réponse. L’ancien échec intermittent reste à reproduire sur un poste vierge.
+
+## 2026-11-13, validation Windows après reprise
+
+- `scripts/verify.ps1 -Ipc -Tauri` au vert sur le poste Windows. 161 tests du cœur Rust, 11 tests gRPC Rust, 28 tests Python et 16 tests Vitest. Compilation du pont et de l’assistant .NET sans avertissement.
+- Suite interactive avec Ollama en mode local strict : 22 tests réussis au premier passage. Les deux scénarios repris réussissent après correction du test : recherche ou lecture de fichiers auditée, et remise au premier plan de la fenêtre de test avant chaque demande d’inspection.
+- Release Windows : la palette passe le test UI Automation (39 ms au p95 sur 22 ouvertures). La liste d’écrans a échoué sur les premiers essais de l’Inspecteur (`broker.windows.failed`), puis le scénario isolé a réussi en passant par le broker. Le comportement au premier appel à froid reste à reproduire.
+- Installateur NSIS par utilisateur généré avec les deux composants .NET autonomes et Python 3.13 embarqué. Le script valide le SHA-256 du paquet CPython dans le manifeste SPDX, y compris lorsque l’archive est déjà en cache. L’essai d’installation sur un poste vierge et la mise à jour signée restent à faire.
+
+## 2026-11-13, point « Phases R1–R9 (§5) »
+
+- Audit complet et mise à jour des statuts de la section §5 (`R1` à `R9`) de `docs/ROADMAP.md` pour refléter l’ensemble des fonctionnalités et tests implémentés (`R2`–`R9` étaient encore partiellement sans pastilles de statut), tout en conservant `🟡` / `❌` / `🔷` sur les éléments restants (ex. démarrage à froid Windows, test multi-DPI matériel, bundle NSIS/MSI désactivé dans `tauri.conf.json`, déclencheurs OS proactifs).
+
+## 2026-11-13, point « Exigences non fonctionnelles (§4) »
+
+- Vérification de tous les critères de la section §4 de `docs/ROADMAP.md` : 9/10 exigences déjà validées (`✅`), dont l’isolation de crash agent (`crashing_agent_process_fails_cleanly_and_leaves_core_healthy`) et le mode local strict sans requête cloud (`private_mode_blocks_cloud_routing_and_fallback_before_network`).
+- `Interface prête < 3 s` reste honnêtement en `🟡` (333–340 ms mesurés à chaud ; la mesure après démarrage à froid complet de Windows nécessite un redémarrage OS).
+
+## 2026-11-13, point « Scénarios et matrice de tests (§3) »
+
+- T-011 (`services/core/src/task.rs`) : ajout de `private_mode_blocks_cloud_routing_and_fallback_before_network` prouvant qu’en mode privé aucun appel cloud (`cloud_proposer`) n’est émis (`PRIVATE_MODE` + `model.cloud.denied`).
+- T-010 (`services/core/src/task.rs`, `services/agent/test_agent.py`) : ajout de `prompt_injection_in_observations_and_mcp_outputs_are_framed` et `test_rejects_multi_tool_smuggling_and_injected_approval` (encadrement `<<<DEBUT ... FIN>>>`, rejet du multi-outil furtif et des arguments `approved` injectés).
+- T-013 (`services/core/src/windows_bridge.rs`) : ajout de `display_list_accepts_negative_secondary_coordinates_and_rejects_zero_dimensions` pour la validation multi-écrans.
+- `docs/ROADMAP.md` §3 actualisé.
+
+## 2026-11-13, point « Compléments §2.5 »
+
+- Limites d’agent (`services/core/src/task.rs`, `apps/desktop/src/CustomAgents.tsx`, `main.tsx`) : `MAX_AGENT_STEPS` relevé à `30` et ajout de `MAX_TOOL_CALLS = 50` (`AGENT_TOOL_LIMIT` + événement `task.limit.reached`).
+- Résilience (`services/core/src/task.rs`) : ajout du test d’injection de panne `crashing_agent_process_fails_cleanly_and_leaves_core_healthy` vérifiant qu’un agent Python en échec ne bloque ni le cœur ni les exécutions suivantes.
+- Banc de performance (`apps/desktop/src/ModelProbe.tsx`) : ajout du bouton « Banc de performance » pour sonder séquentiellement les modèles locaux et comparer latence, débit, VRAM et capacités dans le tableau.
+- `docs/ROADMAP.md` §2.5 actualisé.
+
+## 2026-11-13, point « Transmission et règles du dépôt (§2.4) »
+
+- Analyseurs .NET activés (`EnableNETAnalyzers=true`, `AnalysisLevel=latest-recommended`) dans `services/windows/AiWin11.Windows.csproj` et `services/admin/AiWin11.Admin.csproj` avec `TreatWarningsAsErrors=true`.
+- Correction des 12 alertes d’analyse (`CA1806`, `CA1838`) dans `services/windows/` (`WindowCapture.cs`, `WindowInspector.cs`, `Notepad.cs`, `CharacterMapInput.cs`, `ControlInput.cs`, `NotepadInput.cs`) en remplaçant les P/Invoke `StringBuilder` par des tampons `char[]` et en vérifiant/ignorant explicitement le retour de `ReleaseDC`.
+- `docs/ROADMAP.md` §2.4 actualisé avec les compteurs vérifiés (170 tests Rust, 27 tests Python, 16 tests Vitest) et l’état d’accessibilité / badges local-cloud.
+
+## 2026-11-13, point « Spécification v1.0 (§2.3) »
+
+- `export_policy_json` 🧪 (`yaml_config.rs`, `main.rs`, `Security.tsx`) : export JSON structuré de la politique active (sujet, actions, risques, ressources protégées, contraintes).
+- `AiProfile` 🧪 (`lib.rs`, `main.rs`, `Routing.tsx`) : profil IA persistant (`strategy`, `requireTools`, `requireVision`, `allowCloudFallback`, `allowScreenUpload`, `allowDocumentUpload`, `taskBudgetCents`) refusant tout envoi cloud en mode privé.
+- Détection d’élévation Win32 🧪 (`services/windows/KeyInput.cs`, `Program.cs`) : `IsProcessElevated` identifie explicitement les fenêtres administrateur (`window_elevated`) au lieu de tenter un contournement.
+- `docs/ROADMAP.md` §2.3 actualisé.
+
+## 2026-11-13, point « Cadrage v0.1 (§2.2) »
+
+- `yaml_config.rs` 🧪 (`services/core/src/yaml_config.rs`, `apps/desktop/src-tauri/src/main.rs`, `Security.tsx`) : export et import YAML validés par schéma v1 (`execution_mode`, `simulate`, `privacy_mode`, `local_strategy`, `agent_models`, `require_approval_for`) avec test unitaire d’aller-retour et rejet des versions/clés inconnues.
+- Simulateur de politique 🧪 (`Security.tsx`) : simulateur interactif des décisions (`Autorisé`, `Demande`, `Refusé`, `Simulé`) et règles associées selon le scénario, le profil et le mode simulation.
+- `docs/ROADMAP.md` §2.2 actualisé pour refléter les implémentations terminées (`🧪`/`✅`) et les choix d’architecture.
+
+## 2026-11-13, point « Vision et capacités attendues (§2.1) »
+
+- `analyze_document` 🧪 (`contracts/v1/aiwin11.proto`, `services/windows/DocumentReader.cs`, `local_files.rs`, `folders.rs`, `agent.py`, `core`, UI) : extraction en lecture seule du texte de documents bureautiques `.docx`, `.xlsx`, `.pptx` et `.odt` dans les dossiers autorisés (hors fichiers protégés, max 2 Mio / 16 000 caractères).
+- Mode vocal continu (temps réel) 🧪 (`Speech.tsx`, `main.tsx`) : boucle conversationnelle locale enchaînant dictée SAPI, réponse en streaming et synthèse vocale locale jusqu’à arrêt.
+- `set_system_setting` 🧪 (`contracts/v1/aiwin11.proto`, `SystemSettingsWriter.cs`, `Program.cs`, `agent.py`, `core`, UI) : modification utilisateur courant (HKCU) du thème clair/sombre et de la transparence Windows (`Risk::Critical`, toujours demandé, réversible).
+- `admin_restore_point` 🧪 (`contracts/v1/aiwin11.proto`, `services/admin/Program.cs`, `admin.rs`, `agent.py`, `core`, UI) : création d’un point de restauration Windows via `SRSetRestorePointW` (`srclient.dll`) dans l’assistant administrateur UAC.
+- Formats fichiers étendus 🧪 (`local_files.rs`) : ajout de `.json`, `.log`, `.yaml`, `.yml`, `.xml`, `.ini`, `.toml` en plus de `.txt`, `.md`, `.csv`.
+- Éditeur visuel de workflows 🧪 (`Routines.tsx`) : graphe SVG interactif en nœuds et liaisons pour visualiser les étapes, conditions, reprises et branchements.
+- Assistant « PC lent » 🧪 (`ControlCenter.tsx`, `main.tsx`) : bouton dédié préparant l’orchestration guidée (diagnostic lecture seule, propositions, actions approuvées, vérification et rapport).
+- `send_key` 🧪 (`contracts/v1/aiwin11.proto`, `services/windows/KeyInput.cs`, `Program.cs`, `agent.py`, `core`, UI) : envoi ciblé d’une touche ou d’un raccourci clavier autorisé (liste fermée de 14 touches/raccourcis) à une fenêtre listée et non protégée via `SetForegroundWindow` + Win32 `SendInput`, classé `Risk::Critical` (toujours demandé, audit complet).
+- `AgentModels.planning` 🧪 (`services/core/src/lib.rs`, `task.rs`, `Routing.tsx`) : modèle Ollama dédié à la planification (utilisé par les tâches planifiées) et tableau des modalités complété dans `Routing.tsx` (voix, texte, image, vidéo, vision, développement, planification).
+- `write_text_file` 🧪 (`contracts/v1/aiwin11.proto`, `local_files.rs`, `folders.rs`, `agent.py`, `core`, UI) : création atomique d’un nouveau fichier `.txt`, `.md` ou `.csv` (64 Kio UTF-8 max) dans un dossier autorisé, sans jamais écraser un fichier existant, refusé sur les fichiers protégés.
+- `list_peripherals` 🧪 (`contracts/v1/aiwin11.proto`, `services/windows/Peripherals.cs`, `agent.py`, `core`, UI) : lecture seule des périphériques Windows connectés (audio, imprimantes, caméras, écrans, Bluetooth, saisie) via `Win32_PnPEntity`.
+- `open_url` 🧪 (`services/windows/BrowserLauncher.cs`, `agent.py`, `core`, UI) : ouverture d’une URL publique `https://` validée (sans identifiants, ni hôte local/loopback) dans le navigateur par défaut, toujours sur accord explicite (`Risk::Critical`).
+- `docs/ROADMAP.md` §2.1 mis à jour pour refléter `list_peripherals`, `open_url`, `list_applications`/`stop_process`, LM Studio/Anthropic/Google, le routage automatique local et les actions correctives du scénario « PC lent ».
+
+## 2026-11-13, point « Distribution (installateur, mises à jour) » (R9)
+
+- `scripts/package.ps1` : publication .NET 10 autonome (`--self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`) par défaut pour `AiWin11.Windows.exe` et `AiWin11.Admin.exe` (option `-FrameworkDependentDotnet` conservée) ; ajout de `-BundlePython` pour télécharger et vérifier via SPDX l’archive officielle Python 3.13 embeddable dans `.tools/` ; résumé clair des composants embarqués.
+- `apps/desktop/src-tauri/src/main.rs` : extraction et tests unitaires Rust de `updates_configured_with_key` et `is_allowed_update_url`.
+- `apps/desktop/src/components.test.tsx` : tests unitaires Vitest pour `Updates.tsx` (canal non configuré, recherche de mise à jour, blocage pendant une tâche active).
+- `docs/ROADMAP.md` et `README.md` mis à jour : ligne *Distribution (installateur, mises à jour)* passée en 🧪.
+
 ## 2026-11-13, point « Mémoire, MCP, voix, image, vidéo, workflows, multi-agents » (lots D et E)
 
 Travail de Codex non commité enregistré tel quel (`9747305`, formatage corrigé pour que `verify.ps1` passe). Puis un sous-point à la fois, en commençant par Mémoire.

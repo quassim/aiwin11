@@ -33,6 +33,105 @@ function formatWorkflow(steps: WorkflowStep[]) {
   ].join("\n");
 }
 
+function WorkflowGraph({ steps }: { steps: WorkflowStep[] }) {
+  const nodeW = 168;
+  const nodeH = 54;
+  const gap = 34;
+  const pad = 16;
+  const width = Math.max(320, pad * 2 + steps.length * nodeW + Math.max(0, steps.length - 1) * gap);
+  const height = 112;
+  const centerX = (i: number) => pad + i * (nodeW + gap) + nodeW / 2;
+  const leftX = (i: number) => pad + i * (nodeW + gap);
+  const rightX = (i: number) => leftX(i) + nodeW;
+
+  return (
+    <div style={{ overflowX: "auto", marginBottom: "0.75rem" }}>
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Graphe visuel des nœuds du workflow"
+      >
+        <defs>
+          <marker id="wf-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="currentColor" />
+          </marker>
+        </defs>
+        {steps.map((step, i) => {
+          const targets = step.branches
+            ? step.branches.filter((t) => t > 0 && t <= steps.length).map((t) => t - 1)
+            : i + 1 < steps.length
+              ? [i + 1]
+              : [];
+          return targets.map((target, branchIdx) => {
+            const x1 = rightX(i);
+            const y1 = 42;
+            const x2 = leftX(target);
+            const y2 = 42;
+            const curve = branchIdx === 1 || target > i + 1 ? 30 : 0;
+            const d =
+              curve === 0
+                ? `M ${x1} ${y1} L ${x2} ${y2}`
+                : `M ${centerX(i)} ${y1 + nodeH / 2 - 14} Q ${(centerX(i) + centerX(target)) / 2} ${height - 8} ${centerX(target)} ${y2 + nodeH / 2 - 14}`;
+            return (
+              <path
+                key={`${i}-${target}-${branchIdx}`}
+                d={d}
+                fill="none"
+                stroke="currentColor"
+                strokeOpacity={branchIdx === 1 ? 0.55 : 0.85}
+                strokeDasharray={branchIdx === 1 ? "4 3" : undefined}
+                strokeWidth="1.5"
+                markerEnd="url(#wf-arrow)"
+              />
+            );
+          });
+        })}
+        {steps.map((step, i) => {
+          const x = leftX(i);
+          const y = 14;
+          const label = step.text.trim() || `Étape ${i + 1}`;
+          const short = label.length > 22 ? `${label.slice(0, 21)}…` : label;
+          const flags = [
+            step.onFailure ? "échec" : null,
+            step.retry ? "réessayer" : null,
+            step.condition?.trim() ? "condition" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <g
+              key={i}
+              style={{ cursor: "pointer" }}
+              onClick={() => document.getElementById(`workflow-step-${i}`)?.focus()}
+            >
+              <rect
+                x={x}
+                y={y}
+                width={nodeW}
+                height={nodeH}
+                rx={8}
+                fill="var(--surface, #f8fafc)"
+                stroke="currentColor"
+                strokeOpacity={step.onFailure ? 0.6 : 0.9}
+                strokeDasharray={step.onFailure ? "4 2" : undefined}
+                strokeWidth="1.5"
+              />
+              <text x={x + 10} y={y + 20} fontSize="12" fontWeight="600" fill="currentColor">
+                #{i + 1} · {short}
+              </text>
+              <text x={x + 10} y={y + 39} fontSize="10" fill="currentColor" opacity={0.75}>
+                {flags || (step.branches ? "branchement" : "séquentiel")}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 /**
  * Saved requests (encrypted). One click puts one back in the request field. A daily time makes
  * AiWin11 run it alone with the local model in the Observation profile (reads only).
@@ -206,6 +305,7 @@ export function Routines({ prompt, onPick }: { prompt: string; onPick: (text: st
             Les étapes s’exécutent avec Ollama. Un branchement direct peut mener à une étape suivante ou terminer le
             parcours. Un refus d’autorisation arrête le workflow.
           </p>
+          <WorkflowGraph steps={steps} />
           <ol className="workflow-nodes" aria-label="Parcours du workflow">
             {steps.map((step, index) => (
               <li key={index} className="workflow-node">

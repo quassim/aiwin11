@@ -60,7 +60,7 @@ internal static class CharacterMapInput
 
             string expected = digit.ToString(CultureInfo.InvariantCulture);
             sent = true;
-            var payload = new StringBuilder(expected);
+            char[] payload = (expected + "\0").ToCharArray();
             if (SendMessageTimeoutW(fieldWindow, SetText, 0, payload, AbortIfHung, 250, out nuint written) == 0
                 || written == 0)
             {
@@ -72,9 +72,9 @@ internal static class CharacterMapInput
                    && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < deadline
                    && GetForegroundWindow() == window)
             {
-                var actual = new StringBuilder(8);
-                if (SendMessageTimeoutW(fieldWindow, GetText, (nuint)actual.Capacity, actual, AbortIfHung, 100, out nuint copied) != 0
-                    && copied == 1 && actual.ToString() == expected)
+                char[] actual = new char[8];
+                if (SendMessageTimeoutW(fieldWindow, GetText, (nuint)actual.Length, actual, AbortIfHung, 100, out nuint copied) != 0
+                    && copied == 1 && new string(actual, 0, 1) == expected)
                 {
                     result.Status = Protocol.Result.Types.Status.Success;
                     return;
@@ -108,6 +108,6 @@ internal static class CharacterMapInput
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out int pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern nint SendMessageTimeoutW(
-        nint window, uint message, nuint capacity, StringBuilder text,
+        nint window, uint message, nuint capacity, [In, Out] char[] text,
         uint flags, uint timeout, out nuint result);
 }

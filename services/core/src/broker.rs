@@ -30,7 +30,7 @@ pub enum Peer {
 /// Agent capabilities the broker can grant for one command. The host requests a capability
 /// only when the policy engine allowed the action, or the user approved it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(u64)]
 pub enum Capability {
     /// Start Windows Notepad (fixed executable, no arguments).
     LaunchNotepad = 1 << 0,
@@ -89,17 +89,25 @@ pub enum Capability {
     ImageRead = 1 << 27,
     /// Submit one video job to the user's local ComfyUI with the saved workflow.
     VideoGenerate = 1 << 28,
+    /// Open one validated https:// URL in the user's default browser, after approval.
+    OpenUrl = 1 << 29,
+    /// Create one new text file in an authorized folder without overwriting existing files.
+    FileWrite = 1 << 30,
+    /// Send one allowlisted key or shortcut to a listed window, after approval.
+    SendKey = 1 << 31,
+    /// Update one standard-user Windows personalization setting, after approval.
+    SystemSettingWrite = 1 << 32,
 }
 
 /// The capabilities granted for one command. Empty by default: deny by default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
-    grants: u32,
+    grants: u64,
 }
 
 impl Policy {
     pub fn granting(capabilities: &[Capability]) -> Self {
-        Self { grants: capabilities.iter().fold(0, |grants, capability| grants | *capability as u32) }
+        Self { grants: capabilities.iter().fold(0, |grants, capability| grants | *capability as u64) }
     }
 
     /// Grants `capability` only if `condition` holds, e.g. the user approved.
@@ -112,7 +120,7 @@ impl Policy {
     }
 
     pub fn allows(self, capability: Capability) -> bool {
-        self.grants & capability as u32 != 0
+        self.grants & capability as u64 != 0
     }
 }
 
@@ -133,13 +141,13 @@ pub type BrokerTransport = fn(&std::path::Path, &str, u32, Policy, Peer, &Comman
 
 #[cfg(windows)]
 impl Policy {
-    pub fn capability_bits(self) -> u32 {
+    pub fn capability_bits(self) -> u64 {
         self.grants
     }
 
     /// Only the authenticated supervisor can submit these already approved grants.
-    pub fn from_capability_bits(bits: u32) -> Option<Self> {
-        (bits < (Capability::VideoGenerate as u32) * 2).then_some(Self { grants: bits })
+    pub fn from_capability_bits(bits: u64) -> Option<Self> {
+        (bits < (Capability::SystemSettingWrite as u64) * 2).then_some(Self { grants: bits })
     }
 }
 
@@ -221,7 +229,9 @@ impl Policy {
             {
                 Ok("invoke_control")
             }
-            Some(Operation::AdminService(_) | Operation::AdminCleanTemp(_)) if agent(Capability::AdminOperation) => {
+            Some(Operation::AdminService(_) | Operation::AdminCleanTemp(_) | Operation::AdminRestorePoint(_))
+                if agent(Capability::AdminOperation) =>
+            {
                 Ok("admin_operation")
             }
             Some(Operation::ListServices(listing))
@@ -239,6 +249,30 @@ impl Policy {
             {
                 Ok("arrange_window")
             }
+            Some(Operation::SendKey(send))
+                if agent(Capability::SendKey)
+                    && send.window != 0
+                    && send.process_id != 0
+                    && send.process_id != std::process::id()
+                    && (1..=14).contains(&send.key) =>
+            {
+                Ok("send_key")
+            }
+            Some(Operation::SetSystemSetting(setting))
+                if agent(Capability::SystemSettingWrite) && (1..=4).contains(&setting.setting) =>
+            {
+                Ok("set_system_setting")
+            }
+            Some(Operation::AnalyzeDocument(doc))
+                if agent(Capability::FileRead)
+                    && !doc.path.is_empty()
+                    && !doc.path.contains("..")
+                    && [".docx", ".xlsx", ".pptx", ".odt"]
+                        .iter()
+                        .any(|ext| doc.path.to_ascii_lowercase().ends_with(ext)) =>
+            {
+                Ok("analyze_document")
+            }
             Some(Operation::WriteClipboard(input))
                 if agent(Capability::ClipboardWrite)
                     && !input.text.is_empty()
@@ -253,6 +287,12 @@ impl Policy {
                 Ok("list_processes")
             }
             Some(Operation::ListApplications(_)) if agent(Capability::ProcessList) => Ok("list_applications"),
+            Some(Operation::ListPeripherals(_)) if agent(Capability::SystemStatus) => Ok("list_peripherals"),
+            Some(Operation::OpenUrl(open))
+                if agent(Capability::OpenUrl) && crate::task::is_allowed_https_url(&open.url) =>
+            {
+                Ok("open_url")
+            }
             Some(Operation::StopProcess(stop))
                 if agent(Capability::ProcessStop)
                     && stop.process_id > 4
@@ -291,6 +331,7 @@ impl Policy {
             Some(Operation::PreviewLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("preview_local_text"),
             Some(Operation::ListLocalText(_)) if desktop || agent(Capability::FileRead) => Ok("list_local_text"),
             Some(Operation::CopyLocalText(_)) if desktop || agent(Capability::FileCopy) => Ok("copy_local_text"),
+            Some(Operation::WriteLocalText(_)) if agent(Capability::FileWrite) => Ok("write_local_text"),
             Some(Operation::MoveLocalText(_)) if desktop || agent(Capability::FileMove) => Ok("move_local_text"),
             Some(Operation::TrashLocalText(_)) if desktop || agent(Capability::FileTrash) => Ok("trash_local_text"),
             Some(Operation::ListTrash(_)) if desktop => Ok("list_trash"),
@@ -365,11 +406,16 @@ impl Core {
                         | Operation::InspectProcess(_)
                         | Operation::StopProcess(_)
                         | Operation::ListApplications(_)
+                        | Operation::ListPeripherals(_)
+                        | Operation::OpenUrl(_)
                         | Operation::GetSystemStatus(_)
                         | Operation::ReadClipboard(_)
                         | Operation::WriteClipboard(_)
                         | Operation::ListWindows(_)
                         | Operation::ArrangeWindow(_)
+                        | Operation::SendKey(_)
+                        | Operation::SetSystemSetting(_)
+                        | Operation::AnalyzeDocument(_)
                         | Operation::ListServices(_)
                         | Operation::InvokeControl(_)
                         | Operation::RunDiagnostic(_)
@@ -388,6 +434,8 @@ impl Core {
             let (kind, code) = match reply.as_ref().map(|reply| reply.status()) {
                 Some(aiwin11_contracts::v1::result::Status::Success) => ("broker.windows.completed", "success"),
                 Some(aiwin11_contracts::v1::result::Status::Partial) => ("broker.windows.partial", "partial"),
+                Some(aiwin11_contracts::v1::result::Status::Timeout) => ("broker.windows.failed", "bridge_timeout"),
+                None => ("broker.windows.failed", "bridge_no_reply"),
                 _ => ("broker.windows.failed", "bridge_failed"),
             };
             self.audit(task.as_deref(), kind, code).map_err(|_| ExecutionError::OutcomeUnrecorded)?;

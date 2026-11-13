@@ -9,8 +9,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { Memory } = await import("./Memory");
+const { ModelConfig } = await import("./ModelConfig");
 const { Routines } = await import("./Routines");
 const { speak } = await import("./Speech");
+const { Updates } = await import("./Updates");
 
 afterEach(() => {
   cleanup();
@@ -70,5 +72,85 @@ describe("Speech", () => {
     });
     expect(speak("Bonjour")).toBe(false);
     expect(spoken).not.toHaveBeenCalled();
+  });
+});
+
+describe("Updates", () => {
+  it("shows unavailable message when updater key is not configured", async () => {
+    invoke.mockResolvedValueOnce(false);
+    render(<Updates running={false} />);
+    expect(await screen.findByText("Canal de mises à jour signées indisponible dans cette version.")).toBeTruthy();
+  });
+
+  it("checks for updates and blocks install while a task is running", async () => {
+    invoke.mockImplementation((command) => {
+      if (command === "updates_configured") return Promise.resolve(true);
+      if (command === "check_update") return Promise.resolve("0.2.0");
+      if (command === "install_update") {
+        const error = new Error("UPDATE_TASK_RUNNING");
+        error.toString = () => "UPDATE_TASK_RUNNING";
+        return Promise.reject(error);
+      }
+      return Promise.resolve(null);
+    });
+    const { rerender } = render(<Updates running={true} />);
+    const checkButton = await screen.findByRole("button", { name: "Rechercher sur GitHub" });
+    fireEvent.click(checkButton);
+    expect(await screen.findByText("Version 0.2.0 disponible.")).toBeTruthy();
+    const installButton = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Installer la version 0.2.0 et fermer AiWin11",
+    });
+    expect(installButton.disabled).toBe(true);
+
+    rerender(<Updates running={false} />);
+    expect(installButton.disabled).toBe(false);
+    fireEvent.click(installButton);
+    expect(await screen.findByText("Attends la fin de la tâche avant d’installer la mise à jour.")).toBeTruthy();
+  });
+});
+
+describe("ModelConfig", () => {
+  it("exports preferences and imports valid JSON configuration", async () => {
+    invoke.mockResolvedValueOnce(undefined);
+    const onImported = vi.fn();
+    render(
+      <ModelConfig
+        preferences={{
+          provider: "ollama",
+          localModel: "qwen3:8b",
+          cloudModel: "gpt-4o-mini",
+          visionModel: "gemma3:4b",
+        }}
+        disabled={false}
+        onImported={onImported}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Exporter dans le champ" }));
+    const textarea = screen.getByLabelText<HTMLTextAreaElement>("Configuration des modèles (JSON)");
+    expect(textarea.value).toContain('"provider": "ollama"');
+
+    fireEvent.change(textarea, {
+      target: {
+        value: JSON.stringify({
+          version: 1,
+          provider: "openai",
+          localModel: "qwen3:8b",
+          cloudModel: "deepseek-chat",
+          visionModel: "gemma3:4b",
+        }),
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Appliquer cette configuration" }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("set_model_preferences", {
+        preferences: {
+          provider: "openai",
+          localModel: "qwen3:8b",
+          cloudModel: "deepseek-chat",
+          visionModel: "gemma3:4b",
+        },
+      }),
+    );
+    expect(onImported).toHaveBeenCalled();
   });
 });

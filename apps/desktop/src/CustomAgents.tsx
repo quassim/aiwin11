@@ -48,7 +48,7 @@ export function CustomAgents({ onSaved }: { onSaved: (agents: CustomAgent[]) => 
       onSaved(cleaned);
     } catch {
       setStatus(
-        "Vérifie chaque agent : nom court en minuscules (lettres, chiffres, -), unique ; rôle de 600 caractères au plus ; 1 à 16 étapes.",
+        "Vérifie chaque agent : nom court en minuscules (lettres, chiffres, -), unique ; rôle de 600 caractères au plus ; 1 à 30 étapes.",
       );
     }
   }
@@ -125,7 +125,7 @@ export function CustomAgents({ onSaved }: { onSaved: (agents: CustomAgent[]) => 
               id={`custom-agent-steps-${index}`}
               type="number"
               min={1}
-              max={16}
+              max={30}
               value={agent.maxSteps}
               onChange={(event) => update(index, { maxSteps: Number(event.target.value) })}
             />

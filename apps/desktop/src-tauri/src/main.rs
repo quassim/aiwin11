@@ -278,9 +278,17 @@ fn finish_video(state: &AppState, task: Option<&str>, outcome: Result<String, &'
 const UPDATE_KEY: Option<&str> = option_env!("AIWIN11_UPDATE_PUBLIC_KEY");
 const UPDATE_FEED: &str = "https://github.com/quassim/aiwin11/releases/latest/download/latest.json";
 
+fn updates_configured_with_key(key: Option<&str>) -> bool {
+    key.is_some_and(|key| !key.trim().is_empty())
+}
+
+fn is_allowed_update_url(scheme: &str, host: Option<&str>, path: &str) -> bool {
+    scheme == "https" && host == Some("github.com") && path.starts_with("/quassim/aiwin11/releases/download/")
+}
+
 #[tauri::command]
 fn updates_configured() -> bool {
-    UPDATE_KEY.is_some_and(|key| !key.trim().is_empty())
+    updates_configured_with_key(UPDATE_KEY)
 }
 
 async fn find_update(app: &tauri::AppHandle, timeout: u64) -> Result<Option<Update>, &'static str> {
@@ -297,10 +305,7 @@ async fn find_update(app: &tauri::AppHandle, timeout: u64) -> Result<Option<Upda
         .await
         .map_err(|_| "UPDATE_UNAVAILABLE")?;
     if update.as_ref().is_some_and(|update| {
-        let url = &update.download_url;
-        url.scheme() != "https"
-            || url.host_str() != Some("github.com")
-            || !url.path().starts_with("/quassim/aiwin11/releases/download/")
+        !is_allowed_update_url(update.download_url.scheme(), update.download_url.host_str(), update.download_url.path())
     }) {
         return Err("UPDATE_UNAVAILABLE");
     }
@@ -777,6 +782,31 @@ fn set_local_strategy(state: State<'_, Arc<AppState>>, strategy: LocalStrategy) 
 }
 
 #[tauri::command]
+fn export_yaml_config(state: State<'_, Arc<AppState>>) -> String {
+    aiwin11_core::yaml_config::export_yaml(&lock_core(&state.core))
+}
+
+#[tauri::command]
+fn import_yaml_config(state: State<'_, Arc<AppState>>, yaml: String) -> Result<(), &'static str> {
+    aiwin11_core::yaml_config::import_yaml(&mut lock_core(&state.core), &yaml)
+}
+
+#[tauri::command]
+fn export_policy_json(state: State<'_, Arc<AppState>>) -> String {
+    aiwin11_core::yaml_config::export_policy_json(&lock_core(&state.core))
+}
+
+#[tauri::command]
+fn get_ai_profile(state: State<'_, Arc<AppState>>) -> aiwin11_core::AiProfile {
+    lock_core(&state.core).ai_profile()
+}
+
+#[tauri::command]
+fn set_ai_profile(state: State<'_, Arc<AppState>>, profile: aiwin11_core::AiProfile) -> Result<(), &'static str> {
+    lock_core(&state.core).set_ai_profile(profile)
+}
+
+#[tauri::command]
 fn get_cloud_fallback(state: State<'_, Arc<AppState>>) -> Result<bool, &'static str> {
     Ok(lock_core(&state.core).legacy_cloud_fallback())
 }
@@ -1243,6 +1273,10 @@ fn set_routine_schedule(
     id: String,
     schedule: Option<String>,
 ) -> Result<(), &'static str> {
+    if schedule.as_deref() == Some("folder") {
+        let stamp = folder_stamp(&state).ok_or("FILE_UNAVAILABLE")?;
+        return lock_core(&state.core).schedule_folder_routine(&id, &stamp);
+    }
     lock_core(&state.core).set_routine_schedule(&id, schedule.as_deref())
 }
 
@@ -1392,6 +1426,9 @@ async fn test_mcp_server(
     tauri::async_runtime::spawn_blocking(move || {
         let server = {
             let core = lock_core(&state.core);
+            if core.mcp_server_states().get(&name) == Some(&aiwin11_core::mcp::ServerState::Changed) {
+                return Err("MCP_SERVER_CHANGED");
+            }
             let _ = core.journal("mcp.server.tested", None);
             core.mcp_servers().into_iter().find(|server| server.name == name).ok_or("MCP_SERVER_UNKNOWN")?
         };
@@ -1703,6 +1740,11 @@ fn main() {
             discover_lm_studio_models,
             set_agent_models,
             set_local_strategy,
+            export_yaml_config,
+            import_yaml_config,
+            export_policy_json,
+            get_ai_profile,
+            set_ai_profile,
             get_memories,
             index_local_text,
             indexed_file_names,
@@ -1817,4 +1859,42 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AiWin11");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_allowed_update_url, updates_configured_with_key};
+
+    #[test]
+    fn updater_configuration_requires_non_empty_key() {
+        assert!(!updates_configured_with_key(None));
+        assert!(!updates_configured_with_key(Some("")));
+        assert!(!updates_configured_with_key(Some("   \n\t  ")));
+        assert!(updates_configured_with_key(Some("dW50cnVzdGVkIGNvbW1lbnQ=")));
+    }
+
+    #[test]
+    fn update_download_url_must_match_official_github_releases() {
+        assert!(is_allowed_update_url(
+            "https",
+            Some("github.com"),
+            "/quassim/aiwin11/releases/download/v0.2.0/AiWin11_0.2.0_x64-setup.exe"
+        ));
+        assert!(!is_allowed_update_url(
+            "http",
+            Some("github.com"),
+            "/quassim/aiwin11/releases/download/v0.2.0/AiWin11_0.2.0_x64-setup.exe"
+        ));
+        assert!(!is_allowed_update_url(
+            "https",
+            Some("evil.example.com"),
+            "/quassim/aiwin11/releases/download/v0.2.0/AiWin11_0.2.0_x64-setup.exe"
+        ));
+        assert!(!is_allowed_update_url(
+            "https",
+            Some("github.com"),
+            "/other/repo/releases/download/v0.2.0/AiWin11_0.2.0_x64-setup.exe"
+        ));
+        assert!(!is_allowed_update_url("https", None, "/quassim/aiwin11/releases/download/v0.2.0/x.exe"));
+    }
 }

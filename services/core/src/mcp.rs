@@ -679,3 +679,42 @@ mod tests {
         assert_eq!(call_tool(&server, "read", &json!({})), Err("MCP_TOOL_DISABLED"));
     }
 }
+#[test]
+#[ignore = "requires the Python runtime used by the local agent"]
+fn probes_and_calls_a_read_only_mcp_process_over_stdio() {
+    let python = std::env::var("AIWIN11_PYTHON").expect("set AIWIN11_PYTHON");
+    let fixture = concat!(
+            "import json, sys\n",
+            "for line in sys.stdin:\n",
+            "    req = json.loads(line)\n",
+            "    if 'id' not in req: continue\n",
+            "    method = req['method']\n",
+            "    if method == 'server/discover':\n",
+            "        result = {'resultType':'complete','supportedVersions':['2026-07-28'],'capabilities':{'tools':{}},'_meta':{'io.modelcontextprotocol/serverInfo':{'name':'AiWin11 fixture','version':'1'}}}\n",
+            "    elif method == 'tools/list':\n",
+            "        result = {'resultType':'complete','tools':[{'name':'read_fixture','inputSchema':{'type':'object'}}]}\n",
+            "    elif method == 'tools/call' and req['params']['name'] == 'read_fixture':\n",
+            "        result = {'resultType':'complete','content':[{'type':'text','text':'MCP fixture OK'}]}\n",
+            "    else: raise ValueError(method)\n",
+            "    print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}), flush=True)\n",
+        );
+    let directory = std::env::temp_dir().join(format!("aiwin11-mcp-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("fixture.py");
+    std::fs::write(&path, fixture).unwrap();
+    let server = McpServer {
+        name: "fixture".into(),
+        command: python,
+        args: vec!["-I".into(), "-B".into(), path.to_str().unwrap().into()],
+        enabled: true,
+        allowed_tools: Some(vec!["read_fixture".into()]),
+    };
+    let probed = probe(&server);
+    let called = call_tool(&server, "read_fixture", &json!({}));
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir(directory).unwrap();
+    let probed = probed.unwrap();
+    assert_eq!(probed.server_name, "AiWin11 fixture");
+    assert_eq!(probed.tools, ["read_fixture"]);
+    assert_eq!(called.as_deref(), Ok("MCP fixture OK"));
+}

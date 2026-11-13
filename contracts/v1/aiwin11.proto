@@ -53,8 +53,74 @@ message Command {
     StopProcess stop_process = 48;
     ListSpeechRecognizers list_speech_recognizers = 49;
     DescribeImage describe_image = 50;
+    ListPeripherals list_peripherals = 51;
+    OpenUrl open_url = 52;
+    WriteLocalText write_local_text = 53;
+    SendKey send_key = 54;
+    SetSystemSetting set_system_setting = 55;
+    AdminRestorePoint admin_restore_point = 56;
+    AnalyzeDocument analyze_document = 57;
   }
 }
+
+// Read-only snapshot of connected peripherals (audio, printers, cameras, monitors, USB/HID).
+message ListPeripherals {}
+
+message PeripheralInfo {
+  string name = 1;
+  string category = 2;
+  string status = 3;
+}
+
+message PeripheralList { repeated PeripheralInfo peripherals = 1; }
+
+// Opens one validated https:// URL in the user's default browser, after explicit approval.
+message OpenUrl { string url = 1; }
+
+// Creates one new text file in an authorized folder without overwriting existing files.
+message WriteLocalText {}
+
+// Sends one allowlisted key or shortcut to a listed, verified window, after approval.
+message SendKey {
+  enum Key {
+    KEY_UNSPECIFIED = 0;
+    KEY_ENTER = 1;
+    KEY_ESCAPE = 2;
+    KEY_TAB = 3;
+    KEY_SPACE = 4;
+    KEY_UP = 5;
+    KEY_DOWN = 6;
+    KEY_LEFT = 7;
+    KEY_RIGHT = 8;
+    KEY_CTRL_C = 9;
+    KEY_CTRL_V = 10;
+    KEY_CTRL_A = 11;
+    KEY_CTRL_Z = 12;
+    KEY_CTRL_S = 13;
+    KEY_CTRL_F = 14;
+  }
+  uint64 window = 1;
+  uint32 process_id = 2;
+  Key key = 3;
+}
+
+// Updates one standard-user Windows personalization setting (theme or transparency), after approval.
+message SetSystemSetting {
+  enum Setting {
+    SETTING_UNSPECIFIED = 0;
+    SETTING_THEME_LIGHT = 1;
+    SETTING_THEME_DARK = 2;
+    SETTING_TRANSPARENCY_ON = 3;
+    SETTING_TRANSPARENCY_OFF = 4;
+  }
+  Setting setting = 1;
+}
+
+// Creates one Windows System Restore Point through the elevated helper, after approval and UAC.
+message AdminRestorePoint { string label = 1; }
+
+// Extracts plain text from one authorized Office/ODF document (.docx, .xlsx, .pptx, .odt).
+message AnalyzeDocument { string path = 1; }
 
 // Captures exactly this window (checked against its process) for a local vision model.
 message CaptureWindow {
@@ -449,6 +515,8 @@ message Result {
   ApplicationList application_list = 19;
   bool control_keyboard_verified = 20;
   SpeechRecognizerList speech_recognizers = 21;
+  PeripheralList peripheral_list = 22;
+  string document_text = 23;
 }
 
 message Error {

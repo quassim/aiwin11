@@ -25,7 +25,7 @@ message BrokerRequest {
     DESKTOP_INSPECTOR = 2;
   }
   Peer peer = 1;
-  uint32 capability_bits = 2;
+  uint64 capability_bits = 2;
   bytes command = 3; // aiwin11.v1.Command
   bool execute_windows = 4;
 }

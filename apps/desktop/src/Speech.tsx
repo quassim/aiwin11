@@ -62,13 +62,17 @@ export function LocalVoiceSetting() {
 }
 
 /** Reads `text` aloud with a local Windows voice. Returns false when none is available. */
-export function speak(text: string): boolean {
+export function speak(text: string, onDone?: () => void): boolean {
   const voice = pickVoice(localVoices());
   if (!voice || !text.trim()) return false;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.voice = voice;
   utterance.lang = voice.lang;
+  if (onDone) {
+    utterance.onend = () => onDone();
+    utterance.onerror = () => onDone();
+  }
   window.speechSynthesis.speak(utterance);
   return true;
 }

@@ -33,6 +33,7 @@ export function ControlCenter({
   onModels,
   onSecurity,
   onActivity,
+  onDiagnoseSlowPc,
 }: {
   model: string;
   provider: string;
@@ -43,6 +44,7 @@ export function ControlCenter({
   onModels: () => void;
   onSecurity: () => void;
   onActivity: () => void;
+  onDiagnoseSlowPc?: () => void;
 }) {
   const [policy, setPolicy] = useState<Policy>();
   const [privacy, setPrivacy] = useState<boolean>();
@@ -190,6 +192,18 @@ export function ControlCenter({
       )}
       <Updates running={running} />
       <Backups disabled={running} />
+      {onDiagnoseSlowPc && (
+        <section aria-labelledby="slow-pc-title">
+          <h2 id="slow-pc-title">Assistant « PC lent »</h2>
+          <p>
+            Examine processeur, mémoire, disques, processus et services en lecture seule, propose les actions sûres puis
+            vérifie le résultat avant de consigner le rapport dans l’historique.
+          </p>
+          <button type="button" disabled={running} onClick={onDiagnoseSlowPc}>
+            Préparer le diagnostic « PC lent »
+          </button>
+        </section>
+      )}
     </section>
   );
 }

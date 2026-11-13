@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 //
 // Usage:  AiWin11.Admin.exe service <start|stop|restart|automatic|manual|disabled> <name>
 //         AiWin11.Admin.exe clean-temp
+//         AiWin11.Admin.exe restore-point <label>
 // Exit codes: 0 done, 2 invalid request, 3 refused (protected), 4 failed, 5 not elevated.
 
 const int Invalid = 2, Failed = 4, NotElevated = 5;
@@ -27,6 +28,7 @@ try
     {
         ["service", var action, var name] => Services.Run(action, name),
         ["clean-temp"] => Temp.Clean(),
+        ["restore-point", var label] => RestorePoints.Create(label),
         _ => Invalid,
     };
 }
@@ -146,4 +148,54 @@ static class Temp
         }
         return 0;
     }
+}
+
+static class RestorePoints
+{
+    const uint BeginSystemChange = 100;
+    const uint EndSystemChange = 101;
+    const uint ModifySettings = 12;
+
+    public static int Create(string rawLabel)
+    {
+        var label = rawLabel.Trim();
+        if (label.Length is < 1 or > 64 || label.Any(char.IsControl)) return 2;
+        var begin = new RestorePointInfo
+        {
+            EventType = BeginSystemChange,
+            RestorePointType = ModifySettings,
+            SequenceNumber = 0,
+            Description = label,
+        };
+        if (!SRSetRestorePointW(ref begin, out var status)) return 4;
+        var end = new RestorePointInfo
+        {
+            EventType = EndSystemChange,
+            RestorePointType = ModifySettings,
+            SequenceNumber = status.SequenceNumber,
+            Description = label,
+        };
+        _ = SRSetRestorePointW(ref end, out _);
+        return 0;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct RestorePointInfo
+    {
+        public uint EventType;
+        public uint RestorePointType;
+        public long SequenceNumber;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string Description;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct StateMgrStatus
+    {
+        public uint Status;
+        public long SequenceNumber;
+    }
+
+    [DllImport("srclient.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool SRSetRestorePointW(ref RestorePointInfo pRestorePtSpec, out StateMgrStatus pSMgrStatus);
 }

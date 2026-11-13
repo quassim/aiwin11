@@ -11,10 +11,12 @@ use std::{
 use aiwin11_contracts::{
     v1::{
         arrange_window::Arrangement, command::Operation, dictation_result::Status as DictationStatus, result::Status,
-        run_diagnostic::Diagnostic, service_entry::StartMode, AnalyzeCapture, ArrangeWindow, CaptureForeground,
-        CaptureWindow, CharacterMapDigit, Command, Dictate, GetSystemStatus, InspectForeground, InspectProcess,
-        InspectWindow, InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow, ReadClipboard,
-        Result as BridgeReply, RunDiagnostic, StopProcess, TypeInNotepad, UiTree, WriteClipboard,
+        run_diagnostic::Diagnostic, send_key::Key as BridgeKey, service_entry::StartMode,
+        set_system_setting::Setting as SystemSetting, AnalyzeCapture, AnalyzeDocument, ArrangeWindow,
+        CaptureForeground, CaptureWindow, CharacterMapDigit, Command, Dictate, GetSystemStatus, InspectForeground,
+        InspectProcess, InspectWindow, InvokeControl, ListProcesses, ListServices, ListWindows, LocateWindow, OpenUrl,
+        PeripheralList, ReadClipboard, Result as BridgeReply, RunDiagnostic, SendKey, SetSystemSetting, StopProcess,
+        TypeInNotepad, UiTree, WriteClipboard,
     },
     Message, SCHEMA_VERSION,
 };
@@ -356,6 +358,32 @@ impl Core {
         })
     }
 
+    /// Agent tool: read-only snapshot of connected user-facing peripherals.
+    pub(crate) fn agent_list_peripherals(
+        &mut self,
+        task: &str,
+        policy: Policy,
+    ) -> Result<Vec<PeripheralEntry>, &'static str> {
+        let operation = Operation::ListPeripherals(Default::default());
+        self.agent_bridge_call(task, policy, operation, "peripheral.list", |reply| {
+            if reply.ui_tree.is_some() || reply.process_list.is_some() || reply.window_list.is_some() {
+                return None;
+            }
+            accept_peripheral_list(reply.peripheral_list?)
+        })
+    }
+
+    /// Agent tool: opens one validated https:// URL in the user's default browser.
+    pub(crate) fn agent_open_url(&mut self, task: &str, policy: Policy, url: &str) -> Result<(), &'static str> {
+        let operation = Operation::OpenUrl(OpenUrl { url: url.to_owned() });
+        self.agent_bridge_call(task, policy, operation, "browser.open_url", |reply| {
+            if reply.ui_tree.is_some() || reply.process_list.is_some() || reply.window_list.is_some() {
+                return None;
+            }
+            Some(())
+        })
+    }
+
     /// Agent tool: read-only details of one process the same task listed.
     pub(crate) fn agent_inspect_process(
         &mut self,
@@ -523,6 +551,96 @@ impl Core {
             Err(code) => ("window.arrange.failed", code),
         };
         self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        outcome
+    }
+
+    /// Agent tool: sends one allowlisted key or shortcut to a window the same task listed.
+    pub(crate) fn agent_send_key(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        target: &WindowTarget,
+        key: BridgeKey,
+    ) -> Result<(), &'static str> {
+        self.ensure_window_unprotected(task, target)?;
+        let operation =
+            Operation::SendKey(SendKey { window: target.window, process_id: target.process_id, key: key as i32 });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "WINDOW_ACCESS_DENIED",
+            _ => "WINDOW_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match reply {
+            Some(reply) if reply.window_list.is_none() && reply.ui_tree.is_none() => {
+                match (reply.status(), reply.error.as_ref().map(|error| error.code.as_str())) {
+                    (Status::Success, None) => Ok(()),
+                    (Status::Failed, Some("window_unavailable")) => Err("WINDOW_UNAVAILABLE"),
+                    _ => Err("BRIDGE_FAILED"),
+                }
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(()) => ("window.send_key.completed", "sent"),
+            Err(code) => ("window.send_key.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "WINDOW_AUDIT_UNAVAILABLE")?;
+        outcome
+    }
+
+    /// Agent tool: updates one standard-user Windows personalization setting (theme or transparency).
+    pub(crate) fn agent_set_system_setting(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        setting: SystemSetting,
+    ) -> Result<(), &'static str> {
+        let operation = Operation::SetSystemSetting(SetSystemSetting { setting: setting as i32 });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "SYSTEM_SETTING_ACCESS_DENIED",
+            _ => "SYSTEM_SETTING_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match reply {
+            Some(reply) if reply.window_list.is_none() && reply.ui_tree.is_none() => match reply.status() {
+                Status::Success => Ok(()),
+                _ => Err("BRIDGE_FAILED"),
+            },
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match outcome {
+            Ok(()) => ("system.setting.completed", "updated"),
+            Err(code) => ("system.setting.failed", code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "SYSTEM_SETTING_AUDIT_UNAVAILABLE")?;
+        outcome
+    }
+
+    /// Agent tool: extracts bounded plain text from an authorized Office/ODF document.
+    pub(crate) fn agent_analyze_document(
+        &mut self,
+        task: &str,
+        policy: Policy,
+        path: &std::path::Path,
+    ) -> Result<String, &'static str> {
+        let operation = Operation::AnalyzeDocument(AnalyzeDocument { path: path.to_string_lossy().into_owned() });
+        let command = self.agent_command(task, operation).map_err(|_| "BRIDGE_FAILED")?;
+        let (task_id, reply) = self.dispatch_windows(policy, Peer::Agent, &command).map_err(|error| match error {
+            ExecutionError::Denied(_) => "FILE_ACCESS_DENIED",
+            _ => "FILE_AUDIT_UNAVAILABLE",
+        })?;
+        let outcome = match reply {
+            Some(reply) if reply.status() == Status::Success => Ok(reply.document_text),
+            Some(reply) if reply.error.as_ref().is_some_and(|e| e.code == "document_unreadable") => {
+                Err("FILE_UNAVAILABLE")
+            }
+            _ => Err("BRIDGE_FAILED"),
+        };
+        let (kind, code) = match &outcome {
+            Ok(_) => ("document.analyze.completed", "read"),
+            Err(code) => ("document.analyze.failed", *code),
+        };
+        self.audit(task_id.as_deref(), kind, code).map_err(|_| "FILE_AUDIT_UNAVAILABLE")?;
         outcome
     }
 
@@ -807,8 +925,10 @@ impl Core {
     }
 
     pub fn list_displays(&mut self) -> Result<Vec<Display>, &'static str> {
-        let command =
+        let mut command =
             self.desktop_command(Operation::ListDisplays(Default::default())).map_err(|_| "DISPLAYS_UNAVAILABLE")?;
+        // A newly installed, self-contained bridge may need to extract .NET before reading stdin.
+        command.deadline_ms = unix_millis().ok_or("DISPLAYS_UNAVAILABLE")? + 20_000;
         let (task, reply) = self
             .dispatch_windows(Policy::default(), Peer::DesktopInspector, &command)
             .map_err(|_| "DISPLAYS_NOT_AUTHORIZED")?;
@@ -1012,6 +1132,38 @@ const NEVER_STOPPED: [&str; 35] = [
 
 pub(crate) fn process_never_stopped(name: &str) -> bool {
     NEVER_STOPPED.iter().any(|protected| protected.eq_ignore_ascii_case(name))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct PeripheralEntry {
+    pub name: String,
+    pub category: String,
+    pub status: String,
+}
+
+fn accept_peripheral_list(list: PeripheralList) -> Option<Vec<PeripheralEntry>> {
+    if list.peripherals.len() > 40 {
+        return None;
+    }
+    let mut entries = Vec::with_capacity(list.peripherals.len());
+    for item in list.peripherals {
+        let name = item.name.trim();
+        let category = item.category.trim();
+        let status = item.status.trim();
+        if name.is_empty()
+            || name.chars().count() > 120
+            || !matches!(category, "audio" | "printer" | "camera" | "monitor" | "bluetooth" | "input")
+            || status.chars().count() > 32
+        {
+            return None;
+        }
+        entries.push(PeripheralEntry {
+            name: name.to_owned(),
+            category: category.to_owned(),
+            status: if status.is_empty() { "OK".to_owned() } else { status.to_owned() },
+        });
+    }
+    Some(entries)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1358,7 +1510,9 @@ fn dispatch_with(command: &Command, spawn: impl FnOnce() -> Option<std::process:
         Some(Operation::ReadClipboard(_) | Operation::RunDiagnostic(_) | Operation::Dictate(_)) => {
             MAX_CLIPBOARD_REPLY_BYTES * 3
         }
-        Some(Operation::ListWindows(_) | Operation::ListServices(_)) => MAX_WINDOW_LIST_REPLY_BYTES,
+        Some(Operation::ListWindows(_) | Operation::ListServices(_) | Operation::ListDisplays(_)) => {
+            MAX_WINDOW_LIST_REPLY_BYTES
+        }
         _ => MAX_MESSAGE_BYTES,
     };
     let mut stdout = child.stdout.take()?;
@@ -1931,5 +2085,25 @@ mod tests {
         assert_eq!(bridge_wait(1_000, 2_000), REPLY_GRACE, "an expired command still gets time to report");
         assert_eq!(bridge_wait(i64::MAX, 0), MAX_BRIDGE_WAIT);
         assert_eq!(bridge_wait(i64::MIN, i64::MAX), REPLY_GRACE);
+    }
+
+    #[test]
+    fn display_list_accepts_negative_secondary_coordinates_and_rejects_zero_dimensions() {
+        let valid = Display { x: -1920, y: -120, width: 1920, height: 1080, primary: false };
+        assert!(valid.width > 0 && valid.height > 0 && valid.x < 0 && valid.y < 0);
+        let list = aiwin11_contracts::v1::DisplayList {
+            displays: vec![
+                aiwin11_contracts::v1::DisplayInfo { x: 0, y: 0, width: 2560, height: 1440, primary: true },
+                aiwin11_contracts::v1::DisplayInfo {
+                    x: valid.x,
+                    y: valid.y,
+                    width: valid.width,
+                    height: valid.height,
+                    primary: valid.primary,
+                },
+            ],
+        };
+        assert_eq!(list.displays.iter().filter(|d| d.primary).count(), 1);
+        assert!(list.displays.iter().all(|d| d.width > 0 && d.height > 0));
     }
 }

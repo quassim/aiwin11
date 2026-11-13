@@ -176,6 +176,11 @@ impl FolderSet {
         store.agent_read(core, task, policy, file)
     }
 
+    pub fn agent_resolve_document(&self, core: &Core, name: &str) -> Result<PathBuf, &'static str> {
+        let (_, store, file) = self.resolve(name)?;
+        store.agent_resolve_document(core, file)
+    }
+
     pub fn agent_trash_preview(
         &self,
         core: &mut Core,
@@ -220,6 +225,18 @@ impl FolderSet {
     ) -> Result<(), &'static str> {
         let (store, source, destination) = self.resolve_pair(source, destination)?;
         store.agent_copy(core, task, policy, source, destination)
+    }
+
+    pub fn agent_write(
+        &self,
+        core: &mut Core,
+        task: &str,
+        policy: Policy,
+        name: &str,
+        content: &str,
+    ) -> Result<(), &'static str> {
+        let (_, store, file) = self.resolve(name)?;
+        store.agent_write(core, task, policy, file, content)
     }
 
     pub fn agent_move(

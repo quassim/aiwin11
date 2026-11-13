@@ -279,15 +279,16 @@ internal static class WindowInspector
 
     private static string Text(nint window)
     {
-        var buffer = new StringBuilder(MaxTitle + 2);
-        GetWindowTextW(window, buffer, buffer.Capacity);
-        return buffer.ToString();
+        char[] buffer = new char[MaxTitle + 2];
+        int length = GetWindowTextW(window, buffer, buffer.Length);
+        return length > 0 ? new string(buffer, 0, length) : "";
     }
 
     private static string ClassName(nint window)
     {
-        var buffer = new StringBuilder(64);
-        return GetClassNameW(window, buffer, buffer.Capacity) > 0 ? buffer.ToString() : "";
+        char[] buffer = new char[64];
+        int length = GetClassNameW(window, buffer, buffer.Length);
+        return length > 0 ? new string(buffer, 0, length) : "";
     }
 
     /// <summary>Single line, no control characters, trimmed and bounded.</summary>
@@ -335,9 +336,9 @@ internal static class WindowInspector
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out Rect rect);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int GetWindowTextW(nint window, StringBuilder text, int maxCount);
+    private static extern int GetWindowTextW(nint window, [Out] char[] text, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int GetClassNameW(nint window, StringBuilder className, int maxCount);
+    private static extern int GetClassNameW(nint window, [Out] char[] className, int maxCount);
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
 }

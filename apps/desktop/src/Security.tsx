@@ -61,12 +61,16 @@ const actionNames: Record<string, string> = {
   describeImage: "Décrire une image générée",
   stopProcess: "Arrêter un processus",
   listApplications: "Lister les applications disponibles",
+  listPeripherals: "Lister les périphériques connectés",
+  openUrl: "Ouvrir un lien https:// dans le navigateur",
   describeScreen: "Décrire l’écran principal",
   inspectProcess: "Détailler un processus",
   findControl: "Chercher un contrôle dans la fenêtre lue",
   launchApplication: "Ouvrir le Bloc-notes",
   listFiles: "Lister les fichiers",
   readFile: "Lire un fichier",
+  analyzeDocument: "Lire le texte d’un document bureautique (.docx, .xlsx, .pptx, .odt)",
+  writeFile: "Créer un fichier texte",
   searchFiles: "Chercher dans les fichiers",
   copyFile: "Copier un fichier",
   moveFile: "Renommer un fichier",
@@ -94,7 +98,10 @@ const actionNames: Record<string, string> = {
   setControlValue: "Remplir un champ d’une fenêtre lue (UI Automation)",
   adminService: "Démarrer, arrêter ou configurer un service (administrateur)",
   adminCleanTemp: "Vider les fichiers temporaires de Windows (administrateur)",
+  adminRestorePoint: "Créer un point de restauration Windows (administrateur)",
   arrangeWindow: "Réduire, restaurer, agrandir ou mettre au premier plan une fenêtre",
+  sendKey: "Envoyer une touche ou un raccourci autorisé à une fenêtre",
+  setSystemSetting: "Modifier un réglage d’apparence Windows (thème ou transparence)",
 };
 
 const effectNames: Record<Effect, string> = {
@@ -108,6 +115,11 @@ export function Security({ onFinished }: { onFinished: () => void }) {
   const [overview, setOverview] = useState<PolicyOverview>();
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [simScenario, setSimScenario] = useState("readFile");
+  const [simProfile, setSimProfile] = useState(0);
+  const [simSimulate, setSimSimulate] = useState(false);
+  const [yamlText, setYamlText] = useState("");
+  const [yamlStatus, setYamlStatus] = useState("");
 
   async function load() {
     try {
@@ -243,6 +255,121 @@ export function Security({ onFinished }: { onFinished: () => void }) {
             ))}
           </tbody>
         </table>
+      </div>
+      <h3>Simulateur de politique</h3>
+      <p>Vérifie la décision exacte du moteur pour un scénario donné avant toute exécution.</p>
+      <div className="task-form">
+        <label htmlFor="sim-scenario">Scénario</label>
+        <select id="sim-scenario" value={simScenario} onChange={(e) => setSimScenario(e.target.value)}>
+          <option value="listFiles">Lire un dossier autorisé</option>
+          <option value="analyzeDocument">Analyser un document (.docx/.xlsx/.pptx/.odt)</option>
+          <option value="writeFile">Créer un fichier texte</option>
+          <option value="launchApplication">Lancer un logiciel de la liste fermée</option>
+          <option value="setSystemSetting">Modifier un réglage Windows (thème/transparence)</option>
+          <option value="adminRestorePoint">Créer un point de restauration Windows</option>
+          <option value="openUrl">Ouvrir une URL publique https://</option>
+          <option value="forbidden">
+            Suppression massive / élévation libre / sécurité Windows / transfert non autorisé
+          </option>
+        </select>
+        <label htmlFor="sim-profile">Profil testé</label>
+        <select id="sim-profile" value={simProfile} onChange={(e) => setSimProfile(Number(e.target.value))}>
+          {profiles.map((profile, idx) => (
+            <option key={profile.id} value={idx}>
+              {profile.label}
+            </option>
+          ))}
+        </select>
+        <label className="approval">
+          <input type="checkbox" checked={simSimulate} onChange={(e) => setSimSimulate(e.target.checked)} />
+          <span>Simuler le mode simulation</span>
+        </label>
+        {(() => {
+          if (simScenario === "forbidden") {
+            return (
+              <p role="status">
+                Décision : <strong>Refusé</strong> (règle : <code>closed_tool_catalog</code> — aucun outil exposé pour
+                ces actions).
+              </p>
+            );
+          }
+          const row = table.find((r) => r.action === simScenario);
+          const manifest = manifests.find((m) => m.action === simScenario);
+          const baseEffect = row?.effects[simProfile] ?? "deny";
+          const effective: Effect =
+            simSimulate && baseEffect !== "deny" && manifest?.sideEffect && manifest.dryRun ? "simulate" : baseEffect;
+          const rule =
+            effective === "simulate"
+              ? "simulate_mode"
+              : manifest?.risk === "critical" && effective === "ask"
+                ? "always_ask"
+                : "matrix";
+          return (
+            <p role="status">
+              Décision : <strong className={`effect-${effective}`}>{effectNames[effective]}</strong> (règle :{" "}
+              <code>{rule}</code>).
+            </p>
+          );
+        })()}
+      </div>
+      <h3>Configuration YAML (schéma v1)</h3>
+      <p>Exporte ou importe le mode d’exécution, la confidentialité, le routage et les actions demandées.</p>
+      <div className="task-form">
+        <div className="section-header">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void invoke<string>("export_yaml_config").then(
+                (text) => {
+                  setYamlText(text);
+                  setYamlStatus("Configuration YAML générée.");
+                },
+                () => setYamlStatus("Export YAML indisponible."),
+              );
+            }}
+          >
+            Exporter en YAML
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void invoke<string>("export_policy_json").then(
+                (text) => {
+                  setYamlText(text);
+                  setYamlStatus("Politique JSON exportée.");
+                },
+                () => setYamlStatus("Export JSON indisponible."),
+              );
+            }}
+          >
+            Exporter la politique JSON
+          </button>
+          <button
+            type="button"
+            disabled={busy || !yamlText.trim()}
+            onClick={() => {
+              void invoke("import_yaml_config", { yaml: yamlText }).then(
+                () => {
+                  setYamlStatus("Configuration YAML validée et appliquée.");
+                  void load();
+                  onFinished();
+                },
+                (err) => setYamlStatus(`YAML invalide (${String(err)}).`),
+              );
+            }}
+          >
+            Valider et importer
+          </button>
+        </div>
+        <textarea
+          rows={6}
+          aria-label="Configuration YAML"
+          value={yamlText}
+          onChange={(e) => setYamlText(e.target.value)}
+        />
+        <p role="status">{yamlStatus}</p>
       </div>
     </section>
   );
