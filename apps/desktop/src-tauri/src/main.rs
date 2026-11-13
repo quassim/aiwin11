@@ -1302,6 +1302,7 @@ fn run_scheduler(state: Arc<AppState>) {
                 scheduled: true,
                 agent: aiwin11_core::policy::AgentProfile::General,
                 context: Vec::new(),
+                custom_agent: None,
             };
             let outcome = run_reserved_task(&state, &request, |_| {});
             let report = match outcome {
@@ -1313,6 +1314,43 @@ fn run_scheduler(state: Arc<AppState>) {
         }) == Some(true)
         {}
     }
+}
+
+/// Main window only: the user's agents (definitions, never any authorization).
+#[tauri::command]
+fn get_custom_agents(state: State<'_, Arc<AppState>>) -> Vec<aiwin11_core::agents::AgentDefinition> {
+    lock_core(&state.core).custom_agents()
+}
+
+#[tauri::command]
+fn set_custom_agents(
+    state: State<'_, Arc<AppState>>,
+    agents: Vec<aiwin11_core::agents::AgentDefinition>,
+) -> Result<(), &'static str> {
+    lock_core(&state.core).set_custom_agents(agents)
+}
+
+#[derive(Serialize)]
+struct AgentToolOptions {
+    base: aiwin11_core::policy::AgentProfile,
+    tools: Vec<&'static str>,
+}
+
+/// The tools each built-in agent may use, for the user agents' editor.
+#[tauri::command]
+fn agent_tool_options() -> Vec<AgentToolOptions> {
+    use aiwin11_core::policy::AgentProfile as P;
+    [P::Office, P::WindowsAdmin, P::Development, P::Research, P::Multimedia, P::ReadOnly]
+        .into_iter()
+        .map(|base| AgentToolOptions {
+            base,
+            tools: MANIFESTS
+                .iter()
+                .filter(|manifest| base.allows(manifest.action))
+                .map(|manifest| manifest.tool)
+                .collect(),
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -1679,6 +1717,9 @@ fn main() {
             read_generated_image,
             set_floating,
             get_mcp_servers,
+            get_custom_agents,
+            set_custom_agents,
+            agent_tool_options,
             set_mcp_servers,
             mcp_server_states,
             accept_mcp_update,

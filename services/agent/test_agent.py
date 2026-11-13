@@ -114,6 +114,15 @@ class AgentProtocolTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assert_rejected({"version": 2, "proposal": {"calls": [call("list_applications", {"all": True})]}})
 
+    def test_delegation_accepts_built_in_and_user_agents(self):
+        for agent in ("office", "perso:veille"):
+            arguments = {"agent": agent, "request": "Résume notes.txt"}
+            result = self.invoke({"version": 2, "proposal": {"calls": [call("delegate", arguments)]}})
+            self.assertEqual(result.returncode, 0, agent)
+        for agent in ("general", "perso:", "perso:Veille", "perso:a/b"):
+            arguments = {"agent": agent, "request": "x"}
+            self.assert_rejected({"version": 2, "proposal": {"calls": [call("delegate", arguments)]}})
+
     def test_images_take_a_known_format_and_a_generated_name(self):
         name = "image-" + "a" * 32 + ".png"
         for arguments in ({"prompt": "a cat"}, {"prompt": "a cat", "format": "portrait"}):

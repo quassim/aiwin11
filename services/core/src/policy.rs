@@ -164,6 +164,11 @@ impl AgentAction {
         Self::ALL.into_iter().find(|action| action.code() == code)
     }
 
+    /// One bit per action, by position in `ALL` (for user agents' tool lists).
+    pub fn bit(self) -> u64 {
+        1 << Self::ALL.iter().position(|action| *action == self).unwrap_or(63)
+    }
+
     pub fn code(self) -> &'static str {
         match self {
             Self::LaunchApplication => "launch_application",
@@ -241,6 +246,8 @@ pub struct ActionContext {
     pub temporary_grant: bool,
     /// The specialized agent running the task: it may only use its own tools.
     pub profile: AgentProfile,
+    /// A user-defined agent narrows its base further: mask of allowed actions (`AgentAction::bit`).
+    pub tools: Option<u64>,
 }
 
 /// Specialized agents (ROADMAP R8, "permissions par agent"): each one only sees and may only
@@ -432,6 +439,9 @@ pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionCo
     if !context.profile.allows(action) {
         return Decision { effect: E::Deny, rule: "agent_scope" };
     }
+    if context.tools.is_some_and(|mask| mask & action.bit() == 0) {
+        return Decision { effect: E::Deny, rule: "agent_tools" };
+    }
     if action.local_only() && !context.local_model {
         return Decision { effect: E::Deny, rule: "local_only" };
     }
@@ -459,7 +469,8 @@ pub fn evaluate(settings: PolicySettings, action: AgentAction, context: ActionCo
 
 /// The full table for the UI: effect of every action in every profile, for a local model.
 pub fn table(simulate: bool) -> Vec<(AgentAction, [Effect; 4])> {
-    let context = ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General };
+    let context =
+        ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General, tools: None };
     AgentAction::ALL
         .into_iter()
         .map(|action| {
@@ -475,11 +486,11 @@ mod tests {
     use super::*;
 
     const LOCAL: ActionContext =
-        ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General };
+        ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General, tools: None };
     const CLOUD: ActionContext =
-        ActionContext { local_model: false, temporary_grant: false, profile: AgentProfile::General };
+        ActionContext { local_model: false, temporary_grant: false, profile: AgentProfile::General, tools: None };
     const GRANTED: ActionContext =
-        ActionContext { local_model: true, temporary_grant: true, profile: AgentProfile::General };
+        ActionContext { local_model: true, temporary_grant: true, profile: AgentProfile::General, tools: None };
 
     #[test]
     fn specialized_agents_only_use_their_own_tools() {
@@ -487,6 +498,9 @@ mod tests {
         let decide = |profile, action| evaluate(PolicySettings::default(), action, with(profile));
         assert_eq!(decide(AgentProfile::Office, A::AdminService).rule, "agent_scope");
         assert_eq!(decide(AgentProfile::WindowsAdmin, A::TrashFile).rule, "agent_scope");
+        let narrowed = ActionContext { profile: AgentProfile::Office, tools: Some(A::ReadFile.bit()), ..LOCAL };
+        assert_eq!(evaluate(PolicySettings::default(), A::CopyFile, narrowed).rule, "agent_tools");
+        assert_ne!(evaluate(PolicySettings::default(), A::ReadFile, narrowed).effect, E::Deny);
         assert_ne!(decide(AgentProfile::WindowsAdmin, A::ListServices).effect, E::Deny);
         assert_ne!(decide(AgentProfile::Development, A::ReadFile).effect, E::Deny);
         assert_eq!(decide(AgentProfile::Development, A::PowerShellDiagnostic).rule, "agent_scope");
@@ -524,7 +538,8 @@ mod tests {
             assert_eq!(effect(autonomy, false, A::InspectWindow, GRANTED), E::Ask);
             assert_ne!(effect(autonomy, true, A::CopyFile, GRANTED), E::Allow);
         }
-        let cloud_granted = ActionContext { local_model: false, temporary_grant: true, profile: AgentProfile::General };
+        let cloud_granted =
+            ActionContext { local_model: false, temporary_grant: true, profile: AgentProfile::General, tools: None };
         assert_eq!(effect(P::Assisted, false, A::CopyFile, cloud_granted), E::Deny);
         assert_eq!(effect(P::Observation, false, A::CopyFile, GRANTED), E::Deny, "a denial stays a denial");
     }

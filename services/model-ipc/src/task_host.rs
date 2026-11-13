@@ -172,6 +172,7 @@ mod tests {
                 scheduled: false,
                 agent: AgentProfile::General,
                 context: Vec::new(),
+                custom_agent: None,
             };
             let start = TaskStart { run_id: run_id.clone(), request_json: serde_json::to_vec(&request).unwrap() };
             assert!(client.start(start.clone()).await.unwrap().into_inner().accepted);

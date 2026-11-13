@@ -596,7 +596,12 @@ mod tests {
             let decision = policy::evaluate(
                 PolicySettings::default(),
                 AgentAction::LaunchApplication,
-                ActionContext { local_model: true, temporary_grant: false, profile: AgentProfile::General },
+                ActionContext {
+                    local_model: true,
+                    temporary_grant: false,
+                    profile: AgentProfile::General,
+                    tools: None,
+                },
             );
             assert!(!decision.rule.is_empty());
             core.authorize_dispatch(Policy::granting(&[Capability::LaunchNotepad]), Peer::Agent, &command).unwrap();

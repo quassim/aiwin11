@@ -7,6 +7,7 @@ import { ProtectedFiles, ProtectedWindows } from "./ProtectedFiles";
 import { createRoot } from "react-dom/client";
 import { Inspector } from "./Inspector";
 import { LocalFiles } from "./LocalFiles";
+import { CustomAgents, baseLabels, type CustomAgent } from "./CustomAgents";
 import { Extensions } from "./Extensions";
 import { History } from "./History";
 import { Memory } from "./Memory";
@@ -663,6 +664,11 @@ function App() {
     void invoke<number>("session_context_size").then(setContextSize, () => setContextSize(0));
   const [floating, setFloating] = useState(false);
   const [agent, setAgent] = useState<"general" | keyof AgentModels>("general");
+  const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
+  const [customAgent, setCustomAgent] = useState("");
+  useEffect(() => {
+    void invoke<CustomAgent[]>("get_custom_agents").then(setCustomAgents, () => setCustomAgents([]));
+  }, []);
   const taskCloudFallback =
     localStrategy === "localFirst" ||
     (localStrategy === "manual" && cloudFallback) ||
@@ -1084,6 +1090,7 @@ function App() {
           // Vision stays local: only sent for Ollama tasks.
           visionModel: taskProvider === "ollama" && visionModel ? visionModel : null,
           agent,
+          customAgent: customAgent || null,
           // local_first: OpenAI only if Ollama is unreachable, with this request's approval.
           cloudFallbackModel:
             taskProvider === "ollama" && taskCloudFallback && cloudApproved && cloudModel.trim()
@@ -1336,10 +1343,12 @@ function App() {
               <label htmlFor="agent">Agent</label>
               <select
                 id="agent"
-                value={agent}
+                value={customAgent ? `perso:${customAgent}` : agent}
                 disabled={running}
                 onChange={(event) => {
-                  setAgent(event.target.value as typeof agent);
+                  const value = event.target.value;
+                  setCustomAgent(value.startsWith("perso:") ? value.slice("perso:".length) : "");
+                  setAgent(value.startsWith("perso:") ? "general" : (value as typeof agent));
                   resetApproval();
                 }}
               >
@@ -1350,6 +1359,11 @@ function App() {
                 <option value="research">Recherche : fichiers, mémoire et MCP</option>
                 <option value="multimedia">Multimédia : images et inspection de fenêtres</option>
                 <option value="readOnly">Lecture seule : aucune modification</option>
+                {customAgents.map((custom) => (
+                  <option key={custom.name} value={`perso:${custom.name}`}>
+                    {custom.name} ({baseLabels[custom.base] ?? custom.base})
+                  </option>
+                ))}
               </select>
               <textarea
                 id="prompt"
@@ -1505,6 +1519,14 @@ function App() {
             onStrategyChange={(strategy) => {
               setLocalStrategy(strategy);
               resetApproval();
+            }}
+          />
+        )}
+        {page === "Modèles" && (
+          <CustomAgents
+            onSaved={(saved) => {
+              setCustomAgents(saved);
+              if (!saved.some((custom) => custom.name === customAgent)) setCustomAgent("");
             }}
           />
         )}

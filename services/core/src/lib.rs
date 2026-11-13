@@ -1,5 +1,6 @@
 #[cfg(windows)]
 pub mod admin;
+pub mod agents;
 pub mod backup;
 pub mod broker;
 pub mod folders;

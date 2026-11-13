@@ -251,7 +251,7 @@ sécurité, de mise à jour et les services vitaux de Windows sont toujours refu
             "name": "delegate",
             "description": "Confie une sous-demande à un agent spécialisé : office (fichiers, Bloc-notes, \
 presse-papiers, mémoire), windows_admin (diagnostic, processus, services, fenêtres) ou read_only (lecture seule). \
-Il agit avec ses seuls outils et te rend sa réponse.",
+Il agit avec ses seuls outils, sans tes autorisations, et te rend sa réponse.",
             "parameters": {
                 "type": "object",
                 "properties": {

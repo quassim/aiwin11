@@ -81,6 +81,19 @@ def is_window_number(value: object) -> bool:
 MAX_NOTE_CHARS = 1000
 
 
+_BUILT_IN_AGENTS = ("office", "windows_admin", "development", "research", "multimedia", "read_only")
+
+
+def is_agent(value: object) -> bool:
+    """A built-in specialized agent, or a user agent `perso:<name>`."""
+    if not isinstance(value, str):
+        return False
+    if value in _BUILT_IN_AGENTS:
+        return True
+    name = value.removeprefix("perso:")
+    return value.startswith("perso:") and 0 < len(name) <= 24 and all(char in _ALIAS_CHARS for char in name)
+
+
 def is_image_name(value: object) -> bool:
     """Name of an image AiWin11 generated: image-<32 hex>.png."""
     if not isinstance(value, str) or not value.startswith("image-") or not value.endswith(".png"):
@@ -178,7 +191,7 @@ TOOLS: dict[str, dict[str, Rule]] = {
     "describe_image": {"name": is_image_name},
     "generate_video": {"prompt": is_note},
     "delegate": {
-        "agent": ("office", "windows_admin", "development", "research", "multimedia", "read_only"),
+        "agent": is_agent,
         "request": is_note,
     },
     "mcp_call": {"server": is_mcp_server, "tool": is_mcp_tool, "arguments": is_mcp_arguments},
